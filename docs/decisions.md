@@ -53,8 +53,9 @@
 | O13 | 발표자 = PM. 제안서 검수 토 22:00 → 일 최종·연습 → 월 발표 | | 09/10 | M2·M3 |
 | O14 | 한재완 AI 파트 겸임. 기술 미팅 요약은 Slack, 위클리 녹취는 Confluence | AI 인력 부족 | 09/10 | M7·M11 |
 | O15 | **코드 저장소 `team-uxight/uxight` 는 public.** 팀이 코드를 만들 때 필요한 md 만 올린다 (`scripts/sync-public.sh` allowlist). 회의록·비용·카톡·양식·MCP 설정은 PM 작업공간에만. 팀 공유가 필요하면 확인 후 **Confluence** 로 | 졸업작품 포트폴리오 공개 가치 vs 개인정보·내부 정보 노출 | 09/12 | `CLAUDE.md` 공개 저장소 규칙 |
-| O16 | 저장소 설정: squash 머지만 · 머지 후 브랜치 삭제 · wiki 끔 · **GitHub Issues 끔 (트래커는 Jira)** | 경로 하나 | 09/12 | GACA-34 |
+| O16 | 저장소 설정: squash 머지만 · 머지 후 브랜치 삭제 · wiki 끔 · ~~Issues 끔~~ → O18 로 다시 켬 | 경로 하나 | 09/12 | GACA-34 |
 | O17 | GitHub Teams `fe`(이수훈·이유진) `be`(한재완·PM) `ai`(박소영·한재완·PM), 저장소 push 권한. CODEOWNERS 는 팀 단위 | | 09/12 | GACA-33 |
+| O18 | **Jira 유지** (GitHub-only 검토 후). Jira = 계획·추적 단일 진실. **GitHub Issues 는 코드 인용이 필요한 리뷰·결함 논의에만**, Jira 버그/하위작업에 링크로 짝을 만든다. GitHub Issues 다시 켬 | PM 이 회사에서 쓰던 도구라 운영 비용이 낮음. 팀 학습 부담은 인정하되 PM 이 감당 | 09/12 | `jira.md` 역할 분담 |
 
 ## 아직 안 정한 것
 
