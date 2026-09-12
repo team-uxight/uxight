@@ -16,7 +16,7 @@
 | D8 | **앱 테스트는 Phase 2. 10/25(S3 말) 게이트**, 진척 ≥ 50% 일 때만 착수. 진단까지만 | 앱 탐색 기술은 확립됨(AppAgent 등)이나 볼륨 +25~35%. 컴파일된 앱은 자동 적용 불가. 제안서는 성적 미반영, 최종 60% → 적게 약속 | 09/06 | §3 Phase 2, GACA-63 |
 | D9 | Driver 추상화 (observe/act/로그). WebDriver=Playwright 지금, AppDriver=Appium 나중 | D8 의 전제. Friction 진단은 행동 기반이라 드라이버 무관 | 09/06 | §5 |
 | D10 | 실사용자 실험은 **축소 포함**: 5~10명, 성공률·소요시간·SUS. AI 예측 방향과 비교 | 결과 30% 점수의 근거. 20명·NASA-TLX 는 Out | 09/06 | §3 |
-| D11 | UX Friction Taxonomy 7종 고정. "LLM 에게 그냥 물어보지 않는다" — 행동 근거 → 분류 → 심각도 → 개선안 | 카톡 outline. 프로젝트 품질을 좌우하는 구조 | 09/01 | `KakaoTalk_Chat_*.txt` |
+| D11 | UX Friction Taxonomy 7종 고정. "LLM 에게 그냥 물어보지 않는다" — 행동 근거 → 분류 → 심각도 → 개선안 | 카톡 outline. 프로젝트 품질을 좌우하는 구조 | 09/01 | `docs/refs/2026-09-01-uxpilot-outline-kakao.md` |
 | D12 | Persona 3종: Novice / Expert / Mobile-viewport | 개인화 개선안은 Out | 09/06 | §3 |
 | D5' | **(재검토 중)** 09/10 위클리에서 PM 이 팀에 "전부 웹으로 간다, 앱은 테스트가 힘들다" 고 안내. D5(앱=호출기)와 다르고 학과 요건 a 와 충돌 | 09/14 교수님 확인 결과로 D5 유지/폐기 결정 | 09/10 | `meetings/2026-09-10-weekly.md` §2 |
 
