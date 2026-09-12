@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 830" width="1600" height="830" font-family='"IBM Plex Sans KR","Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic",sans-serif'><defs><marker id="ah" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#1B2330"/></marker></defs><rect width="1600" height="830" fill="#FFFFFF"/>
+<text x="60" y="48" font-size="24" font-weight="700" fill="#1B2330">서비스 시나리오 — "장학금 신청 방법 찾기"</text>
+<rect x="60" y="90" width="1480" height="216" rx="10" fill="#EEF3F8"/>
+<text x="78" y="116" font-size="13" font-weight="600" fill="#2E7D5B">관리자 — 웹 (b)</text>
+<rect x="60" y="320" width="1480" height="216" rx="10" fill="#EEF3F8"/>
+<text x="78" y="346" font-size="13" font-weight="600" fill="#1F5F8B">서버 · AI 학습모듈 (c)</text>
+<rect x="60" y="550" width="1480" height="216" rx="10" fill="#EEF3F8"/>
+<text x="78" y="576" font-size="13" font-weight="600" fill="#2E7D5B">사용자 — 모바일 앱 (a)</text>
+<rect x="120" y="136" width="240" height="80" rx="8" fill="#FFFFFF" stroke="#2E7D5B" stroke-width="2"/>
+<text x="240.0" y="162" font-size="14" font-weight="700" fill="#1B2330" text-anchor="middle">① URL · Task · Persona 입력</text>
+<text x="240.0" y="184" font-size="12.5" fill="#6B7686" text-anchor="middle">장학금 시나리오 · Persona 3종</text>
+<rect x="120" y="366" width="240" height="80" rx="8" fill="#FFFFFF" stroke="#1F5F8B" stroke-width="2"/>
+<text x="240.0" y="392" font-size="14" font-weight="700" fill="#1B2330" text-anchor="middle">② 가상 사용자 생성</text>
+<text x="240.0" y="414" font-size="12.5" fill="#6B7686" text-anchor="middle">Persona 별 프롬프트</text>
+<rect x="400" y="366" width="240" height="80" rx="8" fill="#FFFFFF" stroke="#1F5F8B" stroke-width="2"/>
+<text x="520.0" y="392" font-size="14" font-weight="700" fill="#1B2330" text-anchor="middle">③ 브라우저 탐색</text>
+<text x="520.0" y="414" font-size="12.5" fill="#6B7686" text-anchor="middle">click / type / back …</text>
+<rect x="680" y="366" width="240" height="80" rx="8" fill="#FFFFFF" stroke="#1F5F8B" stroke-width="2"/>
+<text x="800.0" y="392" font-size="14" font-weight="700" fill="#1B2330" text-anchor="middle">④ 행동 로그 수집</text>
+<text x="800.0" y="414" font-size="12.5" fill="#6B7686" text-anchor="middle">경로 · 왕복 · 반복 · 성공</text>
+<rect x="960" y="366" width="240" height="80" rx="8" fill="#FFFFFF" stroke="#1F5F8B" stroke-width="2"/>
+<text x="1080.0" y="392" font-size="14" font-weight="700" fill="#1B2330" text-anchor="middle">⑤ Friction 진단</text>
+<text x="1080.0" y="414" font-size="12.5" fill="#6B7686" text-anchor="middle">Taxonomy · 근거 · 심각도</text>
+<rect x="1240" y="366" width="240" height="80" rx="8" fill="#FFFFFF" stroke="#1F5F8B" stroke-width="2"/>
+<text x="1360.0" y="392" font-size="14" font-weight="700" fill="#1B2330" text-anchor="middle">⑥ 개선안 3안</text>
+<text x="1360.0" y="414" font-size="12.5" fill="#6B7686" text-anchor="middle">영향 / 수정 비용</text>
+<rect x="1240" y="596" width="240" height="80" rx="8" fill="#FFFFFF" stroke="#2E7D5B" stroke-width="2"/>
+<text x="1360.0" y="622" font-size="14" font-weight="700" fill="#1B2330" text-anchor="middle">⑦ 승인 / 무시</text>
+<text x="1360.0" y="644" font-size="12.5" fill="#6B7686" text-anchor="middle">앱 알림 → 상세 → 선택</text>
+<rect x="960" y="456" width="240" height="80" rx="8" fill="#FFFFFF" stroke="#1F5F8B" stroke-width="2"/>
+<text x="1080.0" y="482" font-size="14" font-weight="700" fill="#1B2330" text-anchor="middle">⑧ DOM 패치 → 재실험</text>
+<text x="1080.0" y="504" font-size="12.5" fill="#6B7686" text-anchor="middle">같은 Persona 재투입 (③~⑤ 반복)</text>
+<rect x="680" y="136" width="240" height="80" rx="8" fill="#FFFFFF" stroke="#2E7D5B" stroke-width="2"/>
+<text x="800.0" y="162" font-size="14" font-weight="700" fill="#1B2330" text-anchor="middle">⑨ Before / After 비교</text>
+<text x="800.0" y="184" font-size="12.5" fill="#6B7686" text-anchor="middle">성공률 · 행동 수 · 백트래킹</text>
+<rect x="960" y="136" width="240" height="80" rx="8" fill="#FFFFFF" stroke="#2E7D5B" stroke-width="2"/>
+<text x="1080.0" y="162" font-size="14" font-weight="700" fill="#1B2330" text-anchor="middle">⑩ 실사용자 검증 입력</text>
+<text x="1080.0" y="184" font-size="12.5" fill="#6B7686" text-anchor="middle">5~10명 · AI 예측과 비교</text>
+<line x1="240" y1="216" x2="240" y2="366" stroke="#1B2330" stroke-width="2" marker-end="url(#ah)"/>
+<line x1="360" y1="406" x2="400" y2="406" stroke="#1B2330" stroke-width="2" marker-end="url(#ah)"/>
+<line x1="640" y1="406" x2="680" y2="406" stroke="#1B2330" stroke-width="2" marker-end="url(#ah)"/>
+<line x1="920" y1="406" x2="960" y2="406" stroke="#1B2330" stroke-width="2" marker-end="url(#ah)"/>
+<line x1="1200" y1="406" x2="1240" y2="406" stroke="#1B2330" stroke-width="2" marker-end="url(#ah)"/>
+<line x1="1360" y1="446" x2="1360" y2="596" stroke="#1B2330" stroke-width="2" marker-end="url(#ah)"/>
+<line x1="1240" y1="636" x2="1200" y2="496" stroke="#B8432F" stroke-width="2" marker-end="url(#ah)"/>
+<text x="1220.0" y="558.0" font-size="12" fill="#B8432F" text-anchor="middle">승인</text>
+<line x1="1080" y1="456" x2="1080" y2="446" stroke="#1B2330" stroke-width="2" marker-end="url(#ah)" stroke-dasharray="6,4"/>
+<line x1="960" y1="476" x2="800" y2="216" stroke="#1B2330" stroke-width="2" marker-end="url(#ah)" stroke-dasharray="6,4"/>
+<text x="880.0" y="338.0" font-size="12" fill="#1B2330" text-anchor="middle">결과</text>
+<line x1="920" y1="176" x2="960" y2="176" stroke="#1B2330" stroke-width="2" marker-end="url(#ah)"/>
+<text x="60" y="806" font-size="12" fill="#6B7686">번호 순서대로 진행. ⑦ 은 사람이 결정하는 유일한 단계. 점선 = 재실험 루프와 결과 반영.</text>
+</svg>

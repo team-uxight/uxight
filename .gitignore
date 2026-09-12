@@ -1,0 +1,23 @@
+# secrets
+.env
+.env.*
+!.env.example
+# node
+node_modules/
+dist/
+.vite/
+# python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+# data / logs (run 로그는 커밋하지 않는다)
+services/api/data/
+services/api/logs/
+*.sqlite
+*.db
+# os / editor
+.DS_Store
+.idea/
+.vscode/
