@@ -1,0 +1,67 @@
+# 로컬 개발 환경 — `cp .env.example .env && make up`
+# 서비스 4개: mysql · api(Spring) · agent(Python) · web(Vite dev). 배포 토폴로지는 S2 (GACA-43).
+name: uxight
+
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?.env 에 설정}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-uxight}
+      MYSQL_USER: ${MYSQL_USER:-uxight}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?.env 에 설정}
+    ports: ["3306:3306"]
+    volumes: [mysql-data:/var/lib/mysql]
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-p$$MYSQL_ROOT_PASSWORD"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: ./services/api
+    environment:
+      DB_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE:-uxight}
+      DB_USER: ${MYSQL_USER:-uxight}
+      DB_PASSWORD: ${MYSQL_PASSWORD}
+      AGENT_BASE_URL: http://agent:8000
+      WEB_ORIGIN: http://localhost:5173
+    ports: ["8080:8080"]
+    depends_on:
+      mysql: { condition: service_healthy }
+
+  agent:
+    build: ./services/agent   # 첫 빌드는 Chromium 때문에 느리다
+    environment:
+      LLM_BASE_URL: ${LLM_BASE_URL}
+      LLM_API_KEY: ${LLM_API_KEY}
+      LLM_MODEL: ${LLM_MODEL}
+      DB_URL: mysql+pymysql://${MYSQL_USER:-uxight}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE:-uxight}
+    ports: ["8000:8000"]
+    depends_on:
+      mysql: { condition: service_healthy }
+    # --- Agent 격리 (agent-safety §2.2 #6) ---
+    # 쓸 수 있는 곳은 실행 로그(data/) 와 tmpfs 뿐. 컨테이너 자체는 읽기 전용.
+    read_only: true
+    tmpfs: [/tmp, /dev/shm:size=1g]      # Chromium 은 /dev/shm 이 필요하다
+    volumes: [./services/agent/data:/app/data]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    # egress 허용 목록(대상 도메인 + LLM 엔드포인트만)은 배포 시 네트워크 정책으로 (S2, GACA-43).
+    # 로컬 compose 에서는 열어 둔다.
+
+  web:
+    image: node:22
+    working_dir: /app
+    command: sh -c "npm ci && npm run dev -- --host"
+    environment:
+      VITE_API_BASE_URL: http://localhost:8080
+    ports: ["5173:5173"]
+    volumes:
+      - ./apps/web:/app
+      - web-node-modules:/app/node_modules
+    depends_on: [api]
+
+volumes:
+  mysql-data:
+  web-node-modules:
