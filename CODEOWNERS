@@ -2,8 +2,8 @@
 # 안준석 @Junja0419 · 이수훈 @leesuhun · 한재완 @H4NJA2W4N · 박소영 @Kaia-nyoung · 이유진 @youjin730
 *                         @Junja0419
 /apps/web/                @team-uxight/fe
-/apps/mobile/             @team-uxight/fe
 /services/api/            @team-uxight/be
-/services/api/agent/      @team-uxight/ai
+/services/agent/          @team-uxight/ai
 /docs/                    @Junja0419
 /.github/                 @Junja0419
+/docker-compose.yml       @Junja0419

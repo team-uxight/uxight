@@ -1,0 +1,16 @@
+spring:
+  application.name: uxight-api
+  datasource:
+    url: ${DB_URL:jdbc:mysql://localhost:3306/uxight}
+    username: ${DB_USER:uxight}
+    password: ${DB_PASSWORD:}
+  jpa:
+    hibernate.ddl-auto: update   # 골격 단계만. 스키마 확정 후 Flyway 로 (소유권: api)
+    open-in-view: false
+
+uxight:
+  agent-base-url: ${AGENT_BASE_URL:http://localhost:8000}
+  web-origin: ${WEB_ORIGIN:http://localhost:5173}
+
+management:
+  endpoints.web.exposure.include: health

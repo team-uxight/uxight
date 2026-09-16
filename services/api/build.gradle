@@ -1,0 +1,30 @@
+plugins {
+  id 'java'
+  id 'org.springframework.boot' version '4.1.1'
+}
+
+group = 'com.uxight'
+version = '0.0.1-SNAPSHOT'
+description = 'UXight API — CRUD · 인증 · 조회 (실행은 services/agent)'
+
+java {
+  toolchain { languageVersion = JavaLanguageVersion.of(21) }
+}
+
+repositories { mavenCentral() }
+
+dependencies {
+  implementation platform(org.springframework.boot.gradle.plugin.SpringBootPlugin.BOM_COORDINATES)
+  implementation 'org.springframework.boot:spring-boot-starter-webmvc'
+  implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+  implementation 'org.springframework.boot:spring-boot-starter-validation'
+  implementation 'org.springframework.boot:spring-boot-starter-actuator'
+  runtimeOnly 'com.mysql:mysql-connector-j'
+
+  testImplementation 'org.springframework.boot:spring-boot-starter-test'
+  testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
+  testRuntimeOnly 'com.h2database:h2'          // 테스트 전용. 실제 DB 는 MySQL
+  testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('test') { useJUnitPlatform() }

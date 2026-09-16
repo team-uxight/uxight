@@ -19,15 +19,46 @@ LLM 가상 사용자로 웹 사용성 테스트를 대신 돌리고, 행동 로�
 
 기획·회의록·비용 등 나머지 문서는 Confluence(`gachoncaps`)에 있다. 이 저장소의 `docs/` 는 PM 작업공간에서 동기화된다 — **여기서 직접 고치지 말고 Slack 으로 PM 에게.**
 
-## 구조 (예정)
+## 구조
 
 ```
-apps/web        관리자 웹 — React + TypeScript (Vite)
-apps/mobile     모바일 앱 — Expo (앱 필수 여부 확인 후)
-services/api    API + 오케스트레이터 + Agent (BE 언어 확정 후)
-  └ agent/      Persona Agent · Friction 진단 · 개선안 · DOM 패처
-docs/           위 문서
+apps/web          관리자 웹 — React + TypeScript (Vite)            → @team-uxight/fe
+services/api      API — Java 21 · Spring Boot · MySQL (CRUD · 인증 · 조회)  → @team-uxight/be
+services/agent    Agent — Python 3.12 · FastAPI · Playwright (실행 전부)     → @team-uxight/ai
+docs/             위 문서
+docker-compose.yml  로컬 4 서비스 (mysql · api · agent · web)
 ```
+
+경계: `api` 는 실행하지 않는다. `POST /api/runs` → runs 행 생성 → `agent` 에 `POST /runs` 한 번(fire-and-forget).
+이후 상태·로그는 `agent` 가 MySQL 에 쓰고 `api` 가 읽는다. 09/27 walking skeleton 게이트(GACA-69)가 이 경로를 검증한다.
+
+## 처음 한 번
+
+```sh
+# 런타임 — 버전은 .tool-versions / .nvmrc / .java-version / .python-version
+nvm install 22 && nvm use            # 또는 fnm
+sdk install java 21-tem              # 없어도 됨: gradle toolchain 이 JDK 21 을 받는다
+curl -LsSf https://astral.sh/uv/install.sh | sh
+uv tool install pre-commit && pre-commit install   # 커밋 전 검사 (secrets · ruff)
+```
+
+## 로컬 실행
+
+```sh
+cp .env.example .env                 # 값 채우기 (docs/secrets.md)
+make up                              # docker compose up -d --build — 첫 빌드는 느리다
+make logs
+```
+
+| 서비스 | 주소 |
+| --- | --- |
+| web | http://localhost:5173 |
+| api | http://localhost:8080/api/health |
+| agent | http://localhost:8000/health |
+| mysql | localhost:3306 (`uxight`) |
+
+서비스 하나만 돌릴 땐 각 디렉터리의 README (`npm run dev` · `./gradlew bootRun` · `uv run uvicorn …`).
+`make check` 가 CI 와 같은 검사를 돌린다.
 
 ## 브랜치
 
