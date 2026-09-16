@@ -12,6 +12,8 @@ LLM 가상 사용자로 웹 사용성 테스트를 대신 돌리고, 행동 로�
 | [`docs/product-direction.md`](docs/product-direction.md) | **범위가 궁금할 때.** In / Out / Phase 2, 유저 플로우, 성공 기준 |
 | [`docs/decisions.md`](docs/decisions.md) | "왜 이렇게 정했지?" — 결정 한 줄씩, 근거·날짜 |
 | [`docs/tech-stack.md`](docs/tech-stack.md) | 스택과 그 근거 |
+| [`docs/architecture.md`](docs/architecture.md) | **코드 짜기 전에.** 컴포넌트 경계 · Spring↔Python 계약 · 스키마 초안 · Agent 권한 구조 · 09/27 walking skeleton |
+| [`docs/agent-safety.md`](docs/agent-safety.md) | Agent 계정 · 격리 · 행동 제한 요구사항 (교수님 Q1·Q2) |
 | [`docs/git-workflow.md`](docs/git-workflow.md) | **첫 PR 전에.** 브랜치 · 커밋 · PR 규칙 |
 | [`docs/secrets.md`](docs/secrets.md) | 키를 어디에 두나 |
 | [`docs/jira.md`](docs/jira.md) | Jira 기한(soft) · Hard due 의미 |
