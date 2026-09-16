@@ -160,3 +160,7 @@ MCP 로 안 되는 조작은 `./scripts/jira.sh <METHOD> <PATH> [BODY]` 로 REST
 ./scripts/jira.sh GET  /rest/api/3/project/GACA
 ./scripts/jira.sh POST /rest/api/3/issue '{"fields":{...}}'
 ```
+
+## Confluence 에서 티켓 언급
+
+Confluence 페이지에 Jira 티켓을 적을 때는 키가 아니라 **URL 링크**로 넣는다 — `https://proj-uxight.atlassian.net/browse/GACA-NN` (storage format 이면 `<a href=… data-card-appearance="inline">`). Confluence 가 스마트 링크로 임베드해 상태·담당자가 자동으로 보인다. **한 칸에 여러 개면 링크마다 줄바꿈(shift+enter, storage 는 `<br />`)** — 붙여 쓰면 읽을 수 없다. 로컬 md 는 키만 써도 된다.

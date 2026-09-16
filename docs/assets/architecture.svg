@@ -1,40 +1,40 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 820" width="1600" height="820" font-family='"IBM Plex Sans KR","Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic",sans-serif'><defs><marker id="ah" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#1B2330"/></marker></defs><rect width="1600" height="820" fill="#FFFFFF"/>
 <text x="60" y="48" font-size="24" font-weight="700" fill="#1B2330">시스템 구성도</text>
-<text x="60" y="72" font-size="13" fill="#6B7686">클라이언트 → API 서버 → Agent Runner(브라우저 · LLM). Driver 추상화로 웹 지금 / 앱 확장.</text>
+<text x="60" y="72" font-size="13" fill="#6B7686">웹 클라이언트(운영자 · 리서처) → API 서버 → Agent Runner(브라우저 · LLM).</text>
 <rect x="60" y="100" width="1480" height="170" rx="10" fill="#EEF3F8"/>
 <text x="80" y="124" font-size="16" font-weight="600" fill="#1F5F8B">클라이언트</text>
 <rect x="60" y="300" width="1480" height="170" rx="10" fill="#EEF3F8"/>
 <text x="80" y="324" font-size="16" font-weight="600" fill="#1F5F8B">서버</text>
 <rect x="60" y="500" width="1480" height="220" rx="10" fill="#EEF3F8"/>
-<text x="80" y="524" font-size="16" font-weight="600" fill="#1F5F8B">AI 학습모듈 (c) · Agent Runner</text>
+<text x="80" y="524" font-size="16" font-weight="600" fill="#1F5F8B">AI 모듈 (c) · Agent Runner</text>
 <rect x="140" y="140" width="380" height="100" rx="8" fill="#FFFFFF" stroke="#2E7D5B" stroke-width="2"/>
-<text x="330.0" y="166" font-size="18" font-weight="700" fill="#1B2330" text-anchor="middle">관리자 웹 (b)</text>
+<text x="330.0" y="166" font-size="18" font-weight="700" fill="#1B2330" text-anchor="middle">리서처 화면 (b)</text>
 <text x="330.0" y="190" font-size="15" fill="#6B7686" text-anchor="middle">프로젝트 · Task · Persona 설정</text>
-<text x="330.0" y="210" font-size="15" fill="#6B7686" text-anchor="middle">진단 결과 · Before/After 대시보드</text>
+<text x="330.0" y="210" font-size="15" fill="#6B7686" text-anchor="middle">실행 모니터 · 진단 · 승인 · Before/After</text>
 <rect x="1080" y="140" width="380" height="100" rx="8" fill="#FFFFFF" stroke="#2E7D5B" stroke-width="2"/>
-<text x="1270.0" y="166" font-size="18" font-weight="700" fill="#1B2330" text-anchor="middle">모바일 앱 (a) — Expo</text>
-<text x="1270.0" y="190" font-size="15" fill="#6B7686" text-anchor="middle">개선안 알림 · 상세 · 승인/무시</text>
-<text x="1270.0" y="210" font-size="15" fill="#6B7686" text-anchor="middle">푸시 알림</text>
+<text x="1270.0" y="166" font-size="18" font-weight="700" fill="#1B2330" text-anchor="middle">운영자 화면 (b) · Admin</text>
+<text x="1270.0" y="190" font-size="15" fill="#6B7686" text-anchor="middle">계정 · 권한 · 프로젝트 관리</text>
+<text x="1270.0" y="210" font-size="15" fill="#6B7686" text-anchor="middle">모델 · 예산 · 사용량 · 감사 로그</text>
 <rect x="640" y="150" width="320" height="80" rx="8" fill="#FFFFFF" stroke="#7A8594" stroke-width="2"/>
-<text x="800.0" y="176" font-size="18" font-weight="700" fill="#6B7686" text-anchor="middle">UX 리서처</text>
-<text x="800.0" y="200" font-size="15" fill="#6B7686" text-anchor="middle">웹으로 설정·분석 / 앱으로 승인</text>
+<text x="800.0" y="176" font-size="18" font-weight="700" fill="#6B7686" text-anchor="middle">관리자 웹 (b) — React + TS</text>
+<text x="800.0" y="200" font-size="15" fill="#6B7686" text-anchor="middle">역할에 따라 두 화면</text>
 <rect x="140" y="340" width="380" height="100" rx="8" fill="#FFFFFF" stroke="#4A6FA5" stroke-width="2"/>
-<text x="330.0" y="366" font-size="18" font-weight="700" fill="#1B2330" text-anchor="middle">API 서버</text>
+<text x="330.0" y="366" font-size="18" font-weight="700" fill="#1B2330" text-anchor="middle">API 서버 (Spring)</text>
 <text x="330.0" y="390" font-size="15" fill="#6B7686" text-anchor="middle">프로젝트 · 실행 · 진단 · 개선안 API</text>
-<text x="330.0" y="410" font-size="15" fill="#6B7686" text-anchor="middle">인증 · 알림 발송</text>
+<text x="330.0" y="410" font-size="15" fill="#6B7686" text-anchor="middle">인증 · 권한(운영자/리서처)</text>
 <rect x="610" y="340" width="380" height="100" rx="8" fill="#FFFFFF" stroke="#4A6FA5" stroke-width="2"/>
-<text x="800.0" y="366" font-size="18" font-weight="700" fill="#1B2330" text-anchor="middle">오케스트레이터</text>
-<text x="800.0" y="390" font-size="15" fill="#6B7686" text-anchor="middle">Persona 병렬 실행 · 작업 큐</text>
-<text x="800.0" y="410" font-size="15" fill="#6B7686" text-anchor="middle">재실험 트리거 (승인 시)</text>
+<text x="800.0" y="366" font-size="18" font-weight="700" fill="#1B2330" text-anchor="middle">Watcher (오케스트레이터)</text>
+<text x="800.0" y="390" font-size="15" fill="#6B7686" text-anchor="middle">Persona N개 병렬 · 동시 상한 · 멈춤 감지</text>
+<text x="800.0" y="410" font-size="15" fill="#6B7686" text-anchor="middle">개선 루프: 부분 재실행 · 조기 종료</text>
 <rect x="1080" y="340" width="380" height="100" rx="8" fill="#FFFFFF" stroke="#4A6FA5" stroke-width="2"/>
-<text x="1270.0" y="366" font-size="18" font-weight="700" fill="#1B2330" text-anchor="middle">DB · 로그 저장소</text>
+<text x="1270.0" y="366" font-size="18" font-weight="700" fill="#1B2330" text-anchor="middle">MySQL · 로그 저장소</text>
 <text x="1270.0" y="390" font-size="15" fill="#6B7686" text-anchor="middle">프로젝트 · 실행 · 행동 로그(JSON)</text>
 <text x="1270.0" y="410" font-size="15" fill="#6B7686" text-anchor="middle">진단 · 개선안 · 지표</text>
 <rect x="140" y="540" width="300" height="150" rx="8" fill="#FFFFFF" stroke="#B8432F" stroke-width="2"/>
 <text x="290.0" y="566" font-size="18" font-weight="700" fill="#1B2330" text-anchor="middle">Driver 추상화</text>
 <text x="290.0" y="590" font-size="15" fill="#6B7686" text-anchor="middle">observe() · act() · 로그</text>
-<text x="290.0" y="610" font-size="15" fill="#6B7686" text-anchor="middle">WebDriver — Playwright (지금)</text>
-<text x="290.0" y="630" font-size="15" fill="#6B7686" text-anchor="middle">AppDriver — Appium (Phase 2)</text>
+<text x="290.0" y="610" font-size="15" fill="#6B7686" text-anchor="middle">WebDriver — Playwright</text>
+<text x="290.0" y="630" font-size="15" fill="#6B7686" text-anchor="middle">임의 URL 대응</text>
 <rect x="470" y="540" width="300" height="150" rx="8" fill="#FFFFFF" stroke="#1F5F8B" stroke-width="2"/>
 <text x="620.0" y="566" font-size="18" font-weight="700" fill="#1B2330" text-anchor="middle">Persona Agent</text>
 <text x="620.0" y="590" font-size="15" fill="#6B7686" text-anchor="middle">Persona 생성 (Novice/Expert/Mobile)</text>
@@ -51,15 +51,15 @@
 <rect x="140" y="740" width="300" height="60" rx="8" fill="#FFFFFF" stroke="#7A8594" stroke-width="2"/>
 <text x="290.0" y="766" font-size="18" font-weight="700" fill="#6B7686" text-anchor="middle">대상 웹사이트 (URL 입력)</text>
 <rect x="800" y="740" width="300" height="60" rx="8" fill="#FFFFFF" stroke="#7A8594" stroke-width="2"/>
-<text x="950.0" y="766" font-size="18" font-weight="700" fill="#6B7686" text-anchor="middle">LLM (OpenRouter)</text>
+<text x="950.0" y="766" font-size="18" font-weight="700" fill="#6B7686" text-anchor="middle">LLM (역할별 모델)</text>
 <line x1="330" y1="240" x2="330" y2="340" stroke="#1B2330" stroke-width="2" marker-end="url(#ah)"/>
-<line x1="1270" y1="240" x2="1270" y2="340" stroke="#1B2330" stroke-width="2" marker-end="url(#ah)"/>
+<line x1="1270" y1="240" x2="530" y2="338" stroke="#1B2330" stroke-width="2" marker-end="url(#ah)"/>
 <line x1="520" y1="390" x2="610" y2="390" stroke="#1B2330" stroke-width="2" marker-end="url(#ah)"/>
 <line x1="990" y1="390" x2="1080" y2="390" stroke="#1B2330" stroke-width="2" marker-end="url(#ah)"/>
 <line x1="800" y1="440" x2="620" y2="540" stroke="#1B2330" stroke-width="2" marker-end="url(#ah)"/>
 <text x="710.0" y="482.0" font-size="14" fill="#1B2330" text-anchor="middle">실행</text>
-<line x1="1295" y1="540" x2="1295" y2="440" stroke="#1B2330" stroke-width="2" marker-end="url(#ah)" stroke-dasharray="6,4"/>
-<text x="1295.0" y="482.0" font-size="14" fill="#1B2330" text-anchor="middle">결과 저장</text>
+<line x1="1340" y1="540" x2="1340" y2="440" stroke="#1B2330" stroke-width="2" marker-end="url(#ah)" stroke-dasharray="6,4"/>
+<text x="1352" y="500" font-size="14" fill="#1B2330">결과 저장</text>
 <line x1="440" y1="615" x2="470" y2="615" stroke="#1B2330" stroke-width="2" marker-end="url(#ah)"/>
 <line x1="770" y1="615" x2="800" y2="615" stroke="#1B2330" stroke-width="2" marker-end="url(#ah)"/>
 <line x1="1100" y1="615" x2="1130" y2="615" stroke="#1B2330" stroke-width="2" marker-end="url(#ah)"/>
