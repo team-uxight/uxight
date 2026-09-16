@@ -14,6 +14,7 @@ jobs:
       web: ${{ steps.f.outputs.web }}
       api: ${{ steps.f.outputs.api }}
       agent: ${{ steps.f.outputs.agent }}
+      infra: ${{ steps.f.outputs.infra }}
     steps:
       - uses: actions/checkout@v4
       - id: f
@@ -26,6 +27,11 @@ jobs:
               - 'services/api/**'
             agent:
               - 'services/agent/**'
+            infra:
+              - 'docker-compose.yml'
+              - 'Makefile'
+              - '.env.example'
+              - '.github/workflows/**'
 
   web:
     needs: changes
@@ -69,3 +75,25 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run pytest
+
+  infra:
+    needs: changes
+    if: needs.changes.outputs.infra == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # compose 는 필수 변수(:?)가 비면 파싱에서 죽는다 — 검증용 더미 값을 준다.
+      - run: docker compose config -q
+        env:
+          MYSQL_ROOT_PASSWORD: ci-throwaway
+          MYSQL_PASSWORD: ci-throwaway
+
+  # 시크릿 검사는 바뀐 경로와 무관하게 항상 돈다 (pre-commit 의 gitleaks 와 같은 검사).
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

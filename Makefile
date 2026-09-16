@@ -1,6 +1,6 @@
 .PHONY: up down logs check fmt web-check api-check agent-check
 
-up:            ## 로컬 전체 기동 (mysql · api · agent · web)
+up:            ## 로컬 기동 (mysql · api · agent). FE 는 호스트에서 npm run dev
 	docker compose up -d --build
 
 down:          ## 중지 (볼륨 유지). 초기화는 docker compose down -v

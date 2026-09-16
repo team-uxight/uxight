@@ -23,10 +23,10 @@ LLM 가상 사용자로 웹 사용성 테스트를 대신 돌리고, 행동 로�
 
 ```
 apps/web          관리자 웹 — React + TypeScript (Vite)            → @team-uxight/fe
-services/api      API — Java 21 · Spring Boot · MySQL (CRUD · 인증 · 조회)  → @team-uxight/be
+services/api      API — Java 21 · Spring Boot 3.5 (Gradle 8.14) · MySQL (CRUD · 인증 · 조회) → @team-uxight/be
 services/agent    Agent — Python 3.12 · FastAPI · Playwright (실행 전부)     → @team-uxight/ai
 docs/             위 문서
-docker-compose.yml  로컬 4 서비스 (mysql · api · agent · web)
+docker-compose.yml  로컬 3 서비스 (mysql · api · agent) + web 프로필
 ```
 
 경계: `api` 는 실행하지 않는다. `POST /api/runs` → runs 행 생성 → `agent` 에 `POST /runs` 한 번(fire-and-forget).
@@ -35,7 +35,7 @@ docker-compose.yml  로컬 4 서비스 (mysql · api · agent · web)
 ## 처음 한 번
 
 ```sh
-# 런타임 — 버전은 .tool-versions / .nvmrc / .java-version / .python-version
+# 런타임 — 버전은 .tool-versions (mise/asdf) · .nvmrc (CI setup-node) · services/agent/.python-version (uv)
 nvm install 22 && nvm use            # 또는 fnm
 sdk install java 21-tem              # 없어도 됨: gradle toolchain 이 JDK 21 을 받는다
 curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -44,18 +44,25 @@ uv tool install pre-commit && pre-commit install   # 커밋 전 검사 (secrets 
 
 ## 로컬 실행
 
+백엔드 3종은 compose 로, **FE 는 호스트에서** 돌린다 — 컨테이너 web 은 up 마다 `npm ci` 를 해서 느리다.
+
 ```sh
 cp .env.example .env                 # 값 채우기 (docs/secrets.md)
-make up                              # docker compose up -d --build — 첫 빌드는 느리다
+make up                              # mysql · api · agent — 첫 빌드는 느리다
 make logs
+
+cd apps/web && npm install && npm run dev    # FE 는 호스트에서
 ```
 
-| 서비스 | 주소 |
-| --- | --- |
-| web | http://localhost:5173 |
-| api | http://localhost:8080/api/health |
-| agent | http://localhost:8000/health |
-| mysql | localhost:3306 (`uxight`) |
+| 서비스 | 주소 | 어디서 |
+| --- | --- | --- |
+| web | http://localhost:5173 | 호스트 (`npm run dev`) |
+| api | http://localhost:8080/api/health | compose |
+| agent | http://localhost:8000/health | compose |
+| mysql | 127.0.0.1:3306 (`uxight`) | compose |
+
+포트는 전부 `127.0.0.1` 에만 바인딩된다 — 같은 네트워크의 다른 기기에서 보이지 않는다.
+web 까지 컨테이너로 돌려야 하면 `docker compose --profile web up -d`.
 
 서비스 하나만 돌릴 땐 각 디렉터리의 README (`npm run dev` · `./gradlew bootRun` · `uv run uvicorn …`).
 `make check` 가 CI 와 같은 검사를 돌린다.
