@@ -1,0 +1,13 @@
+# 빌드 컨텍스트에서 제외 — build/ 와 .gradle/ 만 50MB 넘는다
+.gradle/
+build/
+out/
+bin/
+.idea/
+*.iml
+.env
+.env.*
+!.env.example
+README.md
+Dockerfile
+.dockerignore

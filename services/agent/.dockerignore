@@ -1,0 +1,15 @@
+# 빌드 컨텍스트에서 제외 — .venv 만 200MB 넘는다
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+data/
+logs/
+tests/
+.env
+.env.*
+!.env.example
+README.md
+Dockerfile
+.dockerignore

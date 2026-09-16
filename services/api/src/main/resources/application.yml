@@ -11,6 +11,3 @@ spring:
 uxight:
   agent-base-url: ${AGENT_BASE_URL:http://localhost:8000}
   web-origin: ${WEB_ORIGIN:http://localhost:5173}
-
-management:
-  endpoints.web.exposure.include: health
