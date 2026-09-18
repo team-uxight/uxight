@@ -301,7 +301,7 @@ run 당 디렉터리, Persona 당 `steps.jsonl` 한 줄 = step 하나. DB 에는
 
 | 테이블 | 소유 | 핵심 컬럼 |
 | --- | --- | --- |
-| `users` | Spring | id · email · password_hash · role(`admin`/`researcher`) · created_at |
+| `users` | Spring | id · email · password_hash(null 이면 Google 전용) · **auth_provider(`local`/`google`) · google_sub** · name · role(`admin`/`researcher`) · is_active · created_at — 가입은 리서처로 시작, 운영자 승격은 A1 (D15'') |
 | `projects` | Spring | id · owner_id · name · target_url · allowed_domains(json) · created_at |
 | `tasks` | Spring | id · project_id · goal · success_criteria(json) · is_one_shot(bool, D19 제외 플래그) |
 | `personas` | Spring | id · project_id · name · profile(json — 숙련도 · 기기 · 배경, GACA-66) · viewport |
@@ -328,7 +328,8 @@ run 당 디렉터리, Persona 당 `steps.jsonl` 한 줄 = step 하나. DB 에는
 
 | 역할 | Method · Path | 용도 |
 | --- | --- | --- |
-| 공통 | `POST /api/auth/login` | JWT 발급 |
+| 공통 | `POST /api/auth/register` · `POST /api/auth/login` | 이메일 가입(인증 메일 없음) · JWT 발급 |
+| 공통 | `GET /api/auth/google` → `GET /api/auth/google/callback` | Google OAuth 2.0 (Authorization Code). 처음이면 가입 · 이후 로그인. `GOOGLE_CLIENT_ID` · `GOOGLE_CLIENT_SECRET` 은 env (`secrets.md`) |
 | 리서처 | `GET/POST /api/projects` · `GET/PATCH /api/projects/{id}` | 프로젝트 · 대상 URL · 허용 도메인. 목록 응답에 **마지막 run 상태 · 마지막 run 일시 · 마지막 run 의 Friction 수** 요약 필드를 싣는다 (화면 R1) |
 | 리서처 | `POST /api/projects/{id}/tasks` · `POST /api/projects/{id}/personas` | Task · Persona 정의 |
 | 리서처 | `POST /api/runs` | 실행 요청 → `runs(queued)` → Python 호출 |
@@ -442,7 +443,7 @@ uxight/
 | 서비스 | 포트 | 빌드 | 비고 |
 | --- | --- | --- | --- |
 | web | 5173 | node:22 dev 서버, 소스 바인드 | `VITE_API_BASE_URL` |
-| api | 8080 | Dockerfile (gradle → temurin 21 jre) | `DB_URL` `DB_USER` `DB_PASSWORD` `AGENT_BASE_URL` `INTERNAL_TOKEN` `JWT_SECRET` `CREDENTIAL_KEY` · **볼륨 `./services/agent/data/runs:/data/runs:ro`** — step 로그·스크린샷 API(§8)가 읽는 곳 |
+| api | 8080 | Dockerfile (gradle → temurin 21 jre) | `DB_URL` `DB_USER` `DB_PASSWORD` `AGENT_BASE_URL` `INTERNAL_TOKEN` `JWT_SECRET` `CREDENTIAL_KEY` `GOOGLE_CLIENT_ID` `GOOGLE_CLIENT_SECRET` · **볼륨 `./services/agent/data/runs:/data/runs:ro`** — step 로그·스크린샷 API(§8)가 읽는 곳 |
 | agent | 8000 | Dockerfile (python 3.12 + uv + playwright chromium) — 첫 빌드 느림 | **역할별** `LLM_STEP_BASE_URL`/`LLM_STEP_MODEL` · `LLM_DIAG_BASE_URL`/`LLM_DIAG_MODEL` (프록시는 배포 단위로 모델이 핀된다, tech-stack §6 T19) · `LLM_API_KEY`(공용) · `DB_URL` `INTERNAL_TOKEN` · `read_only` · `cap_drop` · **`shm_size: 1gb`** (없으면 `read_only` + 기본 64MB `/dev/shm` 에서 Chromium 이 탭 단위로 죽는다. 대안은 `--disable-dev-shm-usage` 지만 느려진다) · 볼륨 `…/data/runs` 읽기·쓰기 |
 | mysql | 3306 | mysql:8.4, healthcheck, named volume | `MYSQL_ROOT_PASSWORD` `MYSQL_DATABASE` |
 
@@ -499,3 +500,4 @@ compose 를 올린 상태에서 아래 7단계가 **한 번에** 되면 Java 유
 | v0.3 | 2026-09-19 | 다이어그램 mermaid 전환 — §1 개요(ASCII 대체) · §3 run 시퀀스 · §4 파이프라인 · §9 권한 층 추가. 내용 변경 없음. §5 루프는 코드, §10 은 디렉터리 트리라 그대로 |
 | v0.3a | 2026-09-19 | 프록시 운영 문서 반영(T19) — §10 역할별 base URL env · §11 드라이런에 관측 프롬프트 통과 확인 · §12 미결 2건 |
 | v0.3b | 2026-09-19 | PM 리뷰 완료 · 승인. 상태 줄 갱신 |
+| v0.3c | 2026-09-19 | D15'' 반영 — `users` 에 auth_provider · google_sub, `POST /api/auth/register` · Google OAuth 경로, api env 2개 |
