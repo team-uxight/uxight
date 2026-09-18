@@ -7,4 +7,4 @@
 - 자격증명 · 개인정보는 프롬프트 · 로그 · 스크린샷에 넣지 않는다. `type` 의 자격증명 필드 값은 마스킹 (§6).
 - `runs.status` 는 이 서비스만 UPDATE 한다. 새 `runs` 행은 만들지 않는다 — 루프 회차도 `next_loop_requested=1` 만 세운다 (§3.4).
 - 검사: `uv run ruff check . && uv run pytest` (= `make agent-check`). 로컬: `uv run uvicorn uxight_agent.main:app --reload` → `http://localhost:8000/health`.
-- LLM 설정은 `LLM_BASE_URL` · `LLM_API_KEY` · `LLM_MODEL` (env). 모델명 · 비용은 `docs/tech-stack.md` §6 · §10.
+- LLM 설정은 **역할별** `LLM_STEP_BASE_URL`/`LLM_STEP_MODEL` · `LLM_DIAG_BASE_URL`/`LLM_DIAG_MODEL` + 공용 `LLM_API_KEY` (env). 프록시는 배포 단위로 모델이 핀되고 모델명은 `provider/model` 형식 — base URL · 모델명을 코드에 박지 않는다. Persona step 호출은 non-streaming · 짧게. 관측에 원시 HTML · 셀렉터를 그대로 넣지 않는다 (코드성 프롬프트는 프록시에서 막힐 수 있다, `docs/tech-stack.md` §6 T19).

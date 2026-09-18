@@ -158,6 +158,20 @@ Flutter 는 경험자가 없어 기각. T1 의 "Flutter 확정" 은 이 문서�
 
 OpenRouter 는 예비로만 남긴다 — 회사 프록시 하나로 역할별 모델 A/B(T4)까지 가능해 보인다. 캡스톤 키 발급 후 `scripts/probe-llm-api.py` 로 모델 목록 · rate limit 재확인이 S1 첫 주 PM 항목.
 
+### 프록시 사용 규칙 — 운영 문서 확인 (09/19, T19)
+
+프록시 운영 문서를 확인해 위 표를 보강한다. **설계에 직접 걸리는 것 5개**:
+
+| 사실 | 우리 설계에 미치는 것 |
+| --- | --- |
+| **모델은 이름이 아니라 base URL(배포 단위)에 핀된다.** `/models` 는 그 배포의 모델만 돌려주고, 모델명은 `provider/model` 접두사 형식 | 역할별 모델(T12) = **역할별 base URL**. env 를 `LLM_BASE_URL` 하나가 아니라 `LLM_STEP_BASE_URL` · `LLM_DIAG_BASE_URL` … 로 나눈다 (architecture §10). 09/14 탐침에서 모델이 하나만 보인 이유가 이것 — "모델 목록" 은 키가 아니라 **배포를 몇 개 받느냐**의 문제 |
+| 지원: 표준 Chat Completions 파라미터 · 스트리밍 · `response_format`/pydantic · 사용자 정의 function tool. **미지원: 제공사 내장 도구(web_search 류) · Anthropic Messages API** | 우리 루프에 필요한 건 전부 있다. tool calling 은 정책상 안 쓴다(D18) |
+| **긴 스트리밍은 수 분 뒤 끊길 수 있다** (연결 수명) | Persona step 호출은 짧고 non-streaming — 해당 없음. 진단·개선안 생성도 **한 호출 2분 이내**로 `max_tokens` 를 잡고 쪼갠다 |
+| **코드·명령어처럼 보이는 프롬프트가 LLM 도달 전에 차단될 수 있다** — 이때 응답이 JSON 이 아니라 HTML 로 온다 | **우리 관측은 DOM 조각 · 셀렉터라 정확히 이 패턴이다.** ①SoM 모드(T18)는 번호 목록이라 코드성이 낮다 — 기본값으로 둔 이유가 하나 더 붙는다 ②DOM 모드는 태그 · 속성을 벗겨 텍스트 + 역할로 요약해 보낸다 ③클라이언트는 non-JSON 응답을 `blocked("proxy_html")` 로 분류하고 관측을 더 줄여 1회 재시도 ④**09/24 드라이런에 "실제 관측 프롬프트가 통과하는가" 를 넣는다** (architecture §11) |
+| 예산은 프록시가 실시간으로 막아주지 않는다고 전제한다 | L2 일일 예산 · run 당 토큰 상한은 **우리 Watcher 가 집행**한다 (architecture §9). 프록시 상한에 기대지 않는다 |
+
+임베딩은 별도 base URL 이지만 우리는 쓰지 않는다. 정확한 파라미터 표 · 예제는 프록시 운영 문서(PM 보관, `docs/refs/mlapi/`)를 본다.
+
 ## 7. 아키텍처 문서에 담을 것 (BE 결정 후)
 
 컴포넌트 경계 · 데이터 흐름(실행 → 로그 → 진단 → 승인 → 재실험) · Driver 인터페이스 · LLM 클라이언트 · 로그 스키마(드라이버 중립) · DB 스키마 초안 · API 표면 초안 · monorepo 디렉터리 · 로컬 실행(compose) · 배포 토폴로지 · A/B 선택 시 서비스 경계.

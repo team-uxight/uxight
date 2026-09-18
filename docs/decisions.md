@@ -56,6 +56,7 @@
 | T16 | **회사 프록시 탐침(09/14):** OpenAI-호환, **pydantic parse · json_object · tool calling 모두 동작**(gemini-3.8-flash). 구조화 출력은 `response_format` + pydantic + 재시도로 통일. tool calling 은 되지만 **정책상 미사용**(D18). 미확인: rate limit · 캡스톤 키의 모델 목록 | 처음엔 "tool calling 미지원" 으로 알았으나 탐침 결과 수정. LangChain 제거(T15)는 "필요 없음" 근거로 유지 | 09/14 | `tech-stack.md` §6, `scripts/probe-llm-api.py` |
 | T17 | **BE↔AI 통합 게이트를 09/27(S1 말)로 당김.** walking skeleton(웹→Spring→Python Persona 1명→MySQL→웹) binary 판정. 되면 Java 유지, 안 되면 FastAPI 전환. 10월 초는 부하·동시성 확인으로 용도 변경 (T13 수정) | PM 제안(§4) 을 PM 이 09/14 채택 — "빠르게 PoC, 특히 통합". 코드가 며칠치일 때 되돌려야 pivot 이 실재한다 | 09/14 | `meetings/2026-09-14-weekly.md` C, GACA-69 |
 | T18 | **관측 모드 기본 후보 = SoM(Set-of-Marks) 스크린샷 하이브리드** — 번호 박스를 씌운 뷰포트 스크린샷 + 짧은 요소 목록, 모델은 번호를 고른다. DOM-only 는 fallback, `observe()` 인터페이스로 둘 다 지원 | 탐침: vision step 2.6~3.7s · ~1.1K 토큰 — 정리된 DOM 보다 싸고 지연 같음. "사람은 화면을 본다" 갭을 관측 단계에서 줄이는 유일한 길. S3 A/B 에 관측 축 추가 | 09/14 | `tech-stack.md` §10, `scripts/probe-llm-vision.py` |
+| T19 | **프록시 사용 규칙:** ①역할별 모델 = 역할별 base URL(배포 단위 핀, env 로 분리) ②Persona step 호출은 non-streaming · 짧게, 생성 호출은 2분 이내로 쪼갬 ③관측은 코드성(원시 HTML · 셀렉터)을 줄여 보낸다 — SoM 기본(T18) · DOM 은 텍스트+역할 요약 · non-JSON 응답은 `blocked(proxy_html)` 처리 ④예산 집행은 프록시가 아니라 우리 Watcher(L2) | 프록시 운영 문서 확인(09/19): 배포 단위 모델 핀 · 긴 스트림 끊김 · 코드성 프롬프트 차단 · 실시간 캡 부재 | 09/19 | `tech-stack.md` §6 · `llm-cost.md` §9.1 · `docs/refs/mlapi/` |
 
 ## 운영
 
@@ -94,7 +95,7 @@
 | 항목 | 언제 | 누가 |
 | --- | --- | --- |
 | ~~BE 언어 Spring vs FastAPI~~ → **T9 확정(Java/Spring)**, 되돌림 여부는 **09/27 walking skeleton(T17)** 결과로 | 09/27 | 한재완·박소영 |
-| 회사 프록시 — **캡스톤 키 모델 목록 · rate limit** (T16 잔여) | S1 첫 주 | PM |
+| 회사 프록시 — **캡스톤 키 + 배포 3개(모델) · rate limit · 단가표** (T16 · T19 잔여) | 키 발급 즉시 | PM |
 | ~~아키텍처 설계 문서~~ → `architecture.md` v0.3 (GACA-82), 리드 확인 09/20 | 09/20 | PM |
 | **Persona 속성 부여 방식·데이터 형식** (low/mid/high vs 척도 vs 서술형) — 성능 좌우 | S1 | 박소영·전원 |
 | **Task 성공 판정 기준** (어디까지 도달해야 성공인가) | S1 | 박소영·PM |

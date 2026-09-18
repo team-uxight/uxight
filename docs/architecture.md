@@ -443,7 +443,7 @@ uxight/
 | --- | --- | --- | --- |
 | web | 5173 | node:22 dev 서버, 소스 바인드 | `VITE_API_BASE_URL` |
 | api | 8080 | Dockerfile (gradle → temurin 21 jre) | `DB_URL` `DB_USER` `DB_PASSWORD` `AGENT_BASE_URL` `INTERNAL_TOKEN` `JWT_SECRET` `CREDENTIAL_KEY` · **볼륨 `./services/agent/data/runs:/data/runs:ro`** — step 로그·스크린샷 API(§8)가 읽는 곳 |
-| agent | 8000 | Dockerfile (python 3.12 + uv + playwright chromium) — 첫 빌드 느림 | `LLM_BASE_URL` `LLM_API_KEY` `LLM_MODEL` `DB_URL` `INTERNAL_TOKEN` · `read_only` · `cap_drop` · **`shm_size: 1gb`** (없으면 `read_only` + 기본 64MB `/dev/shm` 에서 Chromium 이 탭 단위로 죽는다. 대안은 `--disable-dev-shm-usage` 지만 느려진다) · 볼륨 `…/data/runs` 읽기·쓰기 |
+| agent | 8000 | Dockerfile (python 3.12 + uv + playwright chromium) — 첫 빌드 느림 | **역할별** `LLM_STEP_BASE_URL`/`LLM_STEP_MODEL` · `LLM_DIAG_BASE_URL`/`LLM_DIAG_MODEL` (프록시는 배포 단위로 모델이 핀된다, tech-stack §6 T19) · `LLM_API_KEY`(공용) · `DB_URL` `INTERNAL_TOKEN` · `read_only` · `cap_drop` · **`shm_size: 1gb`** (없으면 `read_only` + 기본 64MB `/dev/shm` 에서 Chromium 이 탭 단위로 죽는다. 대안은 `--disable-dev-shm-usage` 지만 느려진다) · 볼륨 `…/data/runs` 읽기·쓰기 |
 | mysql | 3306 | mysql:8.4, healthcheck, named volume | `MYSQL_ROOT_PASSWORD` `MYSQL_DATABASE` |
 
 로컬: `cp .env.example .env` → `make up` → web `http://localhost:5173`. 값은 `.env` 에만, 이름은 `.env.example` 에만 (`secrets.md`).
@@ -464,7 +464,7 @@ compose 를 올린 상태에서 아래 7단계가 **한 번에** 되면 Java 유
 | 6 | **3분 이상 도는 run 을 중간에 `POST /api/runs/{id}/cancel`** | 10초 안에 `cancelled` · 브라우저 context 폐기 · 부분 step 로그 보존. **두 언어가 상태를 동시에 만지는 유일한 순간이라 여기서 깨진다** |
 | 7 | **Flyway 마이그레이션 1회 왕복** — 컬럼 하나 추가 → `make up` → Python(SQLAlchemy) 이 그 컬럼을 읽고 쓰기 | 스키마 소유가 실제로 한쪽인가. 15주 내내 반복할 동작이라 한 번은 해 본다 |
 
-**드라이런 09/24 (한재완 · PM).** 09/27 본 판정 사흘 전에 같은 7단계를 돌려 본다 — LLM 키 · compose · 네트워크처럼 코드와 무관한 것이 막는지를 먼저 걸러내기 위함이다.
+**드라이런 09/24 (한재완 · PM).** 09/27 본 판정 사흘 전에 같은 7단계를 돌려 본다 — LLM 키 · compose · 네트워크처럼 코드와 무관한 것이 막는지를 먼저 걸러내기 위함이다. 드라이런에만 있는 확인 하나: **3단계의 실제 관측 프롬프트(DOM 요약 · SoM 목록)가 프록시를 통과하는가** — 코드성 프롬프트가 차단되어 HTML 응답이 올 수 있다 (tech-stack §6 T19). 막히면 관측 요약 규칙을 먼저 손본다.
 **못 돌리면 실패로 본다.** 캡스톤 LLM 키 미발급 · 서버 미준비 · 담당자 부재로 09/27 에 7단계를 끝까지 못 돌렸다면 그것은 "판정 보류" 가 아니라 **실패**이고 FastAPI 전환을 집행한다. "돌려보지 못했으니 일단 Java 유지" 를 기본값으로 두면 게이트가 아무것도 판정하지 않는다.
 
 전환 시(안 되면): **버리는 것** = `services/api` 의 Spring 코드 (며칠치). **남기는 것** = 웹 · Python 전부 · MySQL 스키마(Flyway 는 Alembic 으로 옮김) · 계약(§3 의 `POST /runs` 는 함수 호출이 됨) · 권한 구조(§9 그대로). 전환 후 Spring 책임(인증 · CRUD)은 FastAPI 라우터로 — 이때 tech-stack §4 B 안이 된다.
@@ -487,6 +487,8 @@ compose 를 올린 상태에서 아래 7단계가 **한 번에** 되면 Java 유
 | **walking skeleton 드라이런** | 09/24 에 §11 7단계를 리허설한다. 못 돌리면 실패 처리 규칙까지 합의 (M14) | 한재완 · PM | 09/24 |
 | Python 내부 인증 | 공유 토큰 헤더. 대안 = compose 네트워크만 믿기 | 한재완 | 09/20 |
 | Improvement · Patcher 배치 | Python. 패치 4종의 DOM 주입은 Driver 안 | 박소영 | S2 |
+| **프록시 배포(모델) 확보** | 캡스톤 키 발급 시 배포 3개(탐색 저가 · 진단 상위 · A/B) 요청. 배포마다 base URL 이 다르다 | PM | 키 발급 즉시 |
+| 관측 프롬프트의 프록시 통과 | 09/24 드라이런에서 실측. 막히면 DOM 요약 규칙 · SoM 기본값으로 대응 | 박소영 · PM | 09/24 |
 
 ## 13. 변경 이력
 
@@ -495,3 +497,4 @@ compose 를 올린 상태에서 아래 7단계가 **한 번에** 되면 Java 유
 | v0.1 | 2026-09-16 | 초안 — 09/17 #pm 공유용. 경계(§2) · 계약(§3) · 권한 구조(§9) · walking skeleton 판정(§11) |
 | v0.2 | 2026-09-16 | 아키텍처 리뷰 반영. **C1** 멱등 판정을 UPDATE 영향 행 수로(§3.1) · **C2** `status` 는 Python 전용 · Spring 은 `dispatch_state`, POST 타임아웃 플립 케이스 추가(§3.3) · **C3** 루프 run 도 Spring 이 INSERT, Python 은 `next_loop_requested`(§3.4 · §4) · **C4** step 로그·스크린샷 API + api 에 `data/runs` `:ro` 마운트(§8 · §10) · **C5** egress 에 api 포함, 방향 원칙을 "상태 보고 없음" 으로 축소(§1 · §9.1). **M1** `heartbeat_at` · `stale` · **M2** cancel 10초 계약 · **M3** 세마포어 프로세스 전역 · **M4** 일일 예산은 DB 누적 · **M5** 성공 판정 주체 = 규칙(§5 · §12) · **M6** 관측 정제 L0.5 신설 · SoM 한계 명시(§9 · §12) · **M7** 도메인당 레이트 상한 · **M8** `audit_log` 소유 §7 기준 통일 · **M9** 자격증명 필드만 마스킹 · **M10** 블러는 모델 전송 전 · **M11** `queued` 가 큐의 단일 진실 · **M12** `run_personas` 누적 토큰·비용 · **M13** `GET /api/projects/{id}/runs` + R1 요약 필드 · **M14** 게이트 6·7단계 · 09/24 드라이런 · 못 돌리면 실패(§11 · §12) · **M15** `shm_size: 1gb` · **M16** 도메인 egress 는 S2 프록시, 그전엔 L1. minor — 폴링 3초 통일 · `elements_hash` 이름 통일 및 반복 감지 사용 · 테이블명 `test_accounts` · `patch_versions` · `human_results` 추가 · persona 스냅샷 · parse 실패 처리 · `policies.scope` 해석 · ERD 를 S1(09/26) 로 · 관측 모드는 확정이고 fallback 조건만 미결 · JWT access 1h + refresh |
 | v0.3 | 2026-09-19 | 다이어그램 mermaid 전환 — §1 개요(ASCII 대체) · §3 run 시퀀스 · §4 파이프라인 · §9 권한 층 추가. 내용 변경 없음. §5 루프는 코드, §10 은 디렉터리 트리라 그대로 |
+| v0.3a | 2026-09-19 | 프록시 운영 문서 반영(T19) — §10 역할별 base URL env · §11 드라이런에 관측 프롬프트 통과 확인 · §12 미결 2건 |
