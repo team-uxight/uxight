@@ -1,4 +1,4 @@
-# 아키텍처 — 전체 구조 + Agent 권한 구조 (v0.2, 2026-09-16)
+# 아키텍처 — 전체 구조 + Agent 권한 구조 (v0.3, 2026-09-19)
 
 **상태: 09/17 #pm 공유용 초안 (PM).** 리드가 이 문서를 기준으로 S1 티켓을 잡는다 — BE 76·77·69, AI 72, FE 73~75.
 표시가 **[초안 — 리드가 채운다]** 인 절은 PM 이 뼈대만 잡은 것이고, 확정은 해당 리드가 한다. 뒤집으면 `decisions.md` 에 줄을 추가한다.
@@ -15,29 +15,44 @@
 
 ## 1. 한 장 그림
 
+<!-- diagram: arch-overview -->
+```mermaid
+%%{init: {"flowchart": {"htmlLabels": true, "curve": "basis"}}}%%
+flowchart TB
+    subgraph web["apps/web · React + TS · :5173"]
+        W["리서처 화면 · 운영자 화면"]
+    end
+    subgraph api["services/api · Spring Boot 3 · Java 21 · :8080"]
+        A["인증(JWT · 역할) · CRUD · 조회<br/>정책값 · 감사 로그 API"]
+    end
+    subgraph agent["services/agent · Python 3.12 · FastAPI 1 endpoint · :8000"]
+        WT["Watcher<br/>스케줄러 · 세마포어 · 한도 · cancel"]
+        PA["Persona Agent ×N<br/>Driver(Playwright, 1 browser · N context)"]
+        FD["Friction Detector → Diagnosis<br/>[Improvement → Patcher]"]
+        WT --> PA --> FD
+    end
+    DB[("MySQL 8 · :3306<br/>단일 진실(상태)")]
+    FS[/"data/runs/&lt;id&gt;/<br/>step 로그 · 스크린샷"/]
+    LLM["LLM 프록시<br/>역할별 모델 (T12)"]
+    TGT["대상 사이트<br/>D17 · D19 정책"]
+
+    W <-->|"HTTPS · JSON"| A
+    A -->|"HTTP 1개<br/>POST /runs (fire-and-forget)"| WT
+    A <-->|"JDBC · 읽기 + 자기 테이블 쓰기"| DB
+    WT -->|"SQL · 상태 컬럼 쓰기"| DB
+    PA -->|"file"| FS
+    A -.->|":ro 마운트 (step 로그 · 스크린샷 API)"| FS
+    PA -->|"HTTPS · OpenAI-compatible, chat only"| LLM
+    PA -->|"HTTPS · 허용 도메인만"| TGT
+    WT -.->|"자격증명 조회 1회 (S3, §9.1)"| A
+
+    classDef store fill:#f4f4f4,stroke:#888,color:#222
+    classDef ext fill:#fff8e6,stroke:#c90,color:#222
+    class DB,FS store
+    class LLM,TGT ext
 ```
-┌──────────────────────────────┐        ┌────────────────────────────────────────────────────────────┐
-│  apps/web  (React + TS)      │  HTTPS │  services/api  (Spring Boot 3, Java 21)                     │
-│  리서처 화면 · 운영자 화면       │ ─JSON─▶│  인증(JWT · 역할) · CRUD · 조회 · 정책값 · 감사 로그 API           │
-│  :5173                       │◀─────  │  :8080                                                     │
-└──────────────────────────────┘        └───────┬───────────────────────────────┬────────────────────┘
-                                                │ HTTP 1개                       │ JDBC (읽기 + 자기 테이블 쓰기)
-                                                │ POST /runs (fire-and-forget)   ▼
-                                                ▼                        ┌──────────────────┐
-┌──────────────────────────────────────────────────────────────┐        │  MySQL 8  :3306   │
-│  services/agent  (Python 3.12 · FastAPI 1 endpoint · :8000)   │──SQL──▶│  단일 진실(상태)    │
-│                                                              │        └──────────────────┘
-│  Watcher(스케줄러 · 세마포어 · 한도 · cancel)                       │        ┌──────────────────┐
-│    └ Persona Agent ×N ─ Driver(Playwright, 1 browser N ctx)  │──file─▶│  data/runs/<id>/  │
-│    └ Friction Detector → Diagnosis → [Improvement → Patcher]  │        │  step 로그 · 스크린샷 │
-└──────┬───────────────────────────────────────┬───────────────┘        └──────────────────┘
-       │ HTTPS (OpenAI-compatible, chat only)    │ HTTPS (허용 도메인만)
-       ▼                                        ▼
-┌──────────────────┐                   ┌──────────────────┐
-│  LLM 프록시         │                   │  대상 사이트         │
-│  (역할별 모델, T12)  │                   │  (D17 · D19 정책)   │
-└──────────────────┘                   └──────────────────┘
-```
+
+> 렌더: `docs/assets/diagrams/arch-overview.svg` · `.png` (`scripts/render-mermaid.py`)
 
 읽는 법: **웹은 Spring 만 본다. Spring 은 Python 에게 "시작해" 한 번만 말한다. 그 뒤 상태는 전부 MySQL 에 있고 Spring 은 읽기만 한다.**
 Python → Spring 방향은 **자격증명 조회 1회(S3, §9.1)뿐**이고 run 상태를 보고하는 방향은 없다.
@@ -73,6 +88,50 @@ Python 이 나가는 곳은 LLM 프록시 · 허용된 대상 도메인 · MySQL
 | **수락 판정** | Python 이 `UPDATE runs SET status='accepted', accepted_at=NOW() WHERE id=? AND status='queued'` 를 돌려 **영향 행 수로 판정한다 — 1 이면 수락(202), 0 이면 중복이거나 이미 진행 중(200)**. "status 가 queued 이상이면 무시" 같은 판정은 첫 호출까지 삼키므로 쓰지 않는다 |
 | 이후 | Python 이 `runs.status` 를 `accepted → running → done\|failed\|cancelled` 로 갱신. Spring 은 **호출하지 않고 읽는다** |
 | 인증 | 내부 공유 토큰 헤더 `X-Internal-Token` (env). 외부 노출 없음 — compose 네트워크 안에서만 |
+
+한 run 의 왕복을 시퀀스로 보면 (3.1 수락 판정 · 3.2 폴링 · 3.3 kill switch 포함):
+
+<!-- diagram: arch-run-sequence -->
+```mermaid
+sequenceDiagram
+    autonumber
+    actor R as 리서처(웹)
+    participant S as Spring (api)
+    participant DB as MySQL
+    participant P as Python (agent · Watcher)
+    participant B as Persona Agent · Driver
+
+    R->>S: POST /api/runs (URL · Task · Persona · 옵션)
+    S->>DB: INSERT runs (status=queued, 설정 컬럼, policy 스냅샷)
+    S->>P: POST /runs {run_id, task, personas, policy, credential_ref}
+    P->>DB: UPDATE runs SET status='accepted' WHERE id=? AND status='queued'
+    alt 영향 행 1 (첫 호출)
+        P-->>S: 202 Accepted
+    else 영향 행 0 (중복 · 재시도)
+        P-->>S: 200 (같은 본문, 멱등)
+    end
+    S->>DB: dispatch_state = sent (unreachable · timeout 이면 그 값만, status 는 안 건드림)
+    P->>DB: status=running · heartbeat_at
+    loop Persona ×N (세마포어) · step ≤ max_steps
+        P->>B: 관측 → 정제 → LLM → 가드 → 실행
+        B-->>P: step 로그 (steps.jsonl · 스크린샷) · run_personas 진행률 · 누적 tokens/cost
+        P->>DB: heartbeat_at · run_personas
+    end
+    P->>DB: findings · run_metrics · status=done
+    loop 폴링 3초 (S1~S2)
+        R->>S: GET /api/runs/{id}
+        S->>DB: runs + run_personas 읽기
+        S-->>R: 진행률 · status · stale(하트비트 60초 초과 시)
+    end
+    opt kill switch
+        R->>S: POST /api/runs/{id}/cancel
+        S->>DB: cancel_requested=1
+        P->>DB: (step 경계에서 확인) context 폐기 → status=cancelled ≤ 10초
+    end
+    Note over S,P: Python → Spring 호출은 자격증명 조회 1회(S3)뿐. run 상태 보고 방향은 없다.
+```
+
+> 렌더: `docs/assets/diagrams/arch-run-sequence.svg` · `.png` (`scripts/render-mermaid.py`)
 
 `policy` 는 Spring 의 정책 테이블(운영자 화면 값, D15)을 **run 시작 시점에 스냅샷**해서 넘긴다. run 도중 정책이 바뀌어도 그 run 은 시작값을 따른다 (재현성).
 **스냅샷하지 않는 값 둘:**
@@ -126,6 +185,35 @@ Python 이 나가는 곳은 LLM 프록시 · 허용된 대상 도메인 · MySQL
 ## 4. 데이터 흐름
 
 파이프라인 1~4 가 메인, 5~6 은 리서처 옵션 (D13). Taxonomy 는 4종 우선 (D11').
+
+<!-- diagram: arch-pipeline -->
+```mermaid
+flowchart BT
+    subgraph main["메인 파이프라인 1~4 (D13)"]
+        direction LR
+        S0["0 설정<br/>리서처(웹) → Spring<br/><i>projects · tasks · runs(queued)</i>"]
+        S1["1 시작<br/>Spring → Python POST /runs<br/><i>runs.status=running</i>"]
+        S2["2 시뮬레이션<br/>Watcher → Persona ×N → Driver<br/>관측 → 정제 → 행동 JSON → 가드 → 실행<br/><i>steps.jsonl · 스크린샷 · run_personas</i>"]
+        S3["3 Friction 검출<br/>Detector: 규칙 + LLM 보조 분류<br/><i>findings</i>"]
+        S4["4 진단<br/>Diagnosis: 요약 · 우선순위<br/><i>findings.summary · run_metrics · runs=done</i>"]
+        S0 --> S1 --> S2 --> S3 --> S4
+    end
+    subgraph opt["리서처 옵션 5~6 (mode=improve · loop)"]
+        direction LR
+        S5["5 개선안<br/>Improvement: 3안 + 근거 + 예상 영향<br/><i>improvements</i>"]
+        S6["6 승인 → 패치 → 재실험<br/>Spring approvals → 새 run INSERT<br/>Patcher 주입 → 2~4 반복<br/><i>runs(parent_run_id) · patch_versions</i>"]
+        S5 --> S6
+    end
+    main -.->|"4 진단 → 5 (mode=improve · loop)"| opt
+    opt -.->|"6 → 2~4 반복 · 해당 Persona 만 재투입 · 수렴 시 조기 종료"| main
+
+    classDef main fill:#e8eef8,stroke:#1f3b73,color:#111
+    classDef opt fill:#fafafa,stroke:#999,stroke-dasharray: 4 3,color:#333
+    class S0,S1,S2,S3,S4 main
+    class S5,S6 opt
+```
+
+> 렌더: `docs/assets/diagrams/arch-pipeline.svg` · `.png` (`scripts/render-mermaid.py`)
 
 | # | 단계 | 누가 | 입력 → 출력 | 어디에 쓰나 |
 | --- | --- | --- | --- | --- |
@@ -263,7 +351,44 @@ Python 내부: `POST /runs` (§3.1) · `GET /health`. 외부 노출 없음.
 
 ## 9. Agent 권한 구조
 
-가장 강한 격리는 샌드박스가 아니라 **LLM 에게 실행 능력을 주지 않는 것**이다 (agent-safety §2.1). 그 위에 층을 쌓는다 — 안쪽 층이 뚫려도 바깥 층이 막는다.
+가장 강한 격리는 샌드박스가 아니라 **LLM 에게 실행 능력을 주지 않는 것**이다 (agent-safety §2.1). 그 위에 층을 쌓는다 — 안쪽 층이 뚫려도 바깥 층이 막는다. 행동 하나가 지나가는 경로로 보면:
+
+<!-- diagram: arch-permission-layers -->
+```mermaid
+flowchart TB
+    OBS["페이지 관측<br/>DOM · SoM 스크린샷"]
+    L05["L0.5 관측 정제 <b>(Python)</b><br/>숨김 요소 제거 · 지시문 패턴 마킹<br/>페이지 텍스트 = 데이터로 고정"]
+    L0["L0 LLM<br/>chat completion 만 · tool calling 없음<br/>출력 = Action JSON 5종"]
+    L1{"L1 Runner 가드 <b>(Python)</b><br/>스키마 밖? 허용 도메인 밖?<br/>파괴적 행동? 레이트 초과?"}
+    L2["L2 한도<br/>step · 시간 · 토큰 · 동시 · 일일 예산<br/>값 = Spring policies / 집행 = Watcher"]
+    L3["L3 브라우저<br/>Persona 당 context 1개 · run 후 폐기<br/>다운로드 금지"]
+    L5["L5 Kill switch<br/>운영자 cancel-all · 리서처 cancel<br/>step 경계 → 10초 내 폐기"]
+    L6[("L6 감사 로그<br/>step 파일(차단 포함) · audit_log")]
+    TGT["대상 사이트"]
+    BLK["차단 → Blocked step 로그<br/>+ audit_log · Watcher 보고"]
+
+    OBS --> L05 --> L0 --> L1
+    L1 -->|"통과"| L3 --> TGT
+    L1 -->|"차단"| BLK
+    L2 -. "상한 초과 시 종료" .-> L3
+    L5 -. "사람이 멈춘다" .-> L3
+    L3 --> L6
+    BLK --> L6
+    subgraph container["L4 컨테이너 — read_only · cap_drop ALL · 쓰기는 data/ 만 · egress = LLM 프록시 · 대상 도메인 · MySQL · api"]
+        L05
+        L0
+        L1
+        L3
+        BLK
+    end
+
+    classDef gate fill:#fff3e0,stroke:#e65100,color:#111
+    classDef log fill:#f4f4f4,stroke:#888,color:#222
+    class L1 gate
+    class L6 log
+```
+
+> 렌더: `docs/assets/diagrams/arch-permission-layers.svg` · `.png` (`scripts/render-mermaid.py`)
 
 | 층 | 무엇을 막나 | 구현 | 어디서 검증 | 담당 · 티켓 |
 | --- | --- | --- | --- | --- |
@@ -369,3 +494,4 @@ compose 를 올린 상태에서 아래 7단계가 **한 번에** 되면 Java 유
 | --- | --- | --- |
 | v0.1 | 2026-09-16 | 초안 — 09/17 #pm 공유용. 경계(§2) · 계약(§3) · 권한 구조(§9) · walking skeleton 판정(§11) |
 | v0.2 | 2026-09-16 | 아키텍처 리뷰 반영. **C1** 멱등 판정을 UPDATE 영향 행 수로(§3.1) · **C2** `status` 는 Python 전용 · Spring 은 `dispatch_state`, POST 타임아웃 플립 케이스 추가(§3.3) · **C3** 루프 run 도 Spring 이 INSERT, Python 은 `next_loop_requested`(§3.4 · §4) · **C4** step 로그·스크린샷 API + api 에 `data/runs` `:ro` 마운트(§8 · §10) · **C5** egress 에 api 포함, 방향 원칙을 "상태 보고 없음" 으로 축소(§1 · §9.1). **M1** `heartbeat_at` · `stale` · **M2** cancel 10초 계약 · **M3** 세마포어 프로세스 전역 · **M4** 일일 예산은 DB 누적 · **M5** 성공 판정 주체 = 규칙(§5 · §12) · **M6** 관측 정제 L0.5 신설 · SoM 한계 명시(§9 · §12) · **M7** 도메인당 레이트 상한 · **M8** `audit_log` 소유 §7 기준 통일 · **M9** 자격증명 필드만 마스킹 · **M10** 블러는 모델 전송 전 · **M11** `queued` 가 큐의 단일 진실 · **M12** `run_personas` 누적 토큰·비용 · **M13** `GET /api/projects/{id}/runs` + R1 요약 필드 · **M14** 게이트 6·7단계 · 09/24 드라이런 · 못 돌리면 실패(§11 · §12) · **M15** `shm_size: 1gb` · **M16** 도메인 egress 는 S2 프록시, 그전엔 L1. minor — 폴링 3초 통일 · `elements_hash` 이름 통일 및 반복 감지 사용 · 테이블명 `test_accounts` · `patch_versions` · `human_results` 추가 · persona 스냅샷 · parse 실패 처리 · `policies.scope` 해석 · ERD 를 S1(09/26) 로 · 관측 모드는 확정이고 fallback 조건만 미결 · JWT access 1h + refresh |
+| v0.3 | 2026-09-19 | 다이어그램 mermaid 전환 — §1 개요(ASCII 대체) · §3 run 시퀀스 · §4 파이프라인 · §9 권한 층 추가. 내용 변경 없음. §5 루프는 코드, §10 은 디렉터리 트리라 그대로 |

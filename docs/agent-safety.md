@@ -39,7 +39,7 @@
 
 ### 1.3 제안서 예시(쿠팡)에 대한 정직한 위치
 
-"쿠팡 와우 멤버십 해지" 는 **설명용 시나리오**다. 실제 실험은 ①우리 테스트 사이트 ②공개 플로우(로그인 없는 탐색 · 검색 · 정보 찾기)로 돌린다.
+"쿠팡 와우 멤버십 해지" 는 **설명용 시나리오**다. 실제 실험은 ①공개 플로우(로그인 없는 탐색 · 검색 · 정보 찾기) ②학교 홈페이지 스냅샷 사본에 결함을 심은 것 ③해지 플로우를 한 번 기록해 만든 **로컬 mock** 으로 돌린다 (D20). 실서비스 계정에는 붙이지 않는다.
 교수님이 다시 물으면 이렇게 답한다: *"실서비스 계정에 봇을 붙이지 않습니다. 결함을 알고 있는 자체 테스트 사이트와 로그인 없는 공개 플로우가 실험 대상이고, 로그인이 필요하면 테스트 계정 풀을 씁니다."*
 
 ## 2. Q2 — Agent 격리와 행동 제한
@@ -48,11 +48,22 @@
 
 가장 강한 격리는 샌드박스가 아니라 **LLM 에게 실행 능력을 주지 않는 것**이다.
 
+<!-- diagram: safety-action-path -->
+```mermaid
+flowchart LR
+    LLM["LLM (Persona Agent)<br/>코드 · 셸 · 파일 · 네트워크 없음"]
+    J["{ &quot;action&quot;: &quot;click&quot;, &quot;target&quot;: &quot;#btn-cancel&quot; }<br/>스키마로 고정된 JSON 만 (5종)"]
+    V{"pydantic 검증<br/>허용 목록 대조<br/>파괴적 행동 판정"}
+    RUN["Runner (Playwright)<br/>검증을 통과한 액션만 실행"]
+    BLK["거부 · 재시도<br/>차단 로그"]
+    LLM --> J --> V
+    V -->|"통과"| RUN
+    V -->|"실패"| BLK
+    classDef gate fill:#fff3e0,stroke:#e65100,color:#111
+    class V gate
 ```
-LLM (Persona Agent)  →  { "action": "click", "target": "#btn-cancel" }   ← 스키마로 고정된 JSON 만
-        ↓ pydantic 검증 · 허용 목록 대조 · 파괴적 행동 판정
-Runner (Playwright)  →  검증을 통과한 액션만 실행
-```
+
+> 렌더: `docs/assets/diagrams/safety-action-path.svg` · `.png` (`scripts/render-mermaid.py`)
 
 LLM 은 코드를 실행하지 않고, 셸도 파일도 네트워크도 없다. 회사 프록시는 tool calling 을 지원하지만(T16) **쓰지 않는다** — 모델에 도구를 주지 않으니 뚫을 도구도 없다.
 
