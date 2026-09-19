@@ -1,0 +1,8 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:uxight;MODE=MySQL;DB_CLOSE_DELAY=-1
+    username: sa
+    password: ""
+  jpa.hibernate.ddl-auto: create-drop
+uxight:
+  agent-base-url: http://127.0.0.1:1   # 테스트에서는 agent 없음 → 호출 실패해도 202

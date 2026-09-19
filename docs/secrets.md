@@ -9,11 +9,11 @@
 
 | 비밀 | 로컬 | CI · 배포 |
 | --- | --- | --- |
-| LLM API 키 (회사 API / OpenRouter) | `services/api/.env` → `LLM_API_KEY` | GitHub Secrets `LLM_API_KEY` |
+| LLM API 키 (회사 API / OpenRouter) | `services/agent/.env` → `LLM_API_KEY` (LLM 은 agent 만 부른다) | GitHub Secrets `LLM_API_KEY` |
 | LLM base URL · 모델 ID | `.env` (비밀 아님, 환경별 값) | workflow env |
 | Jira API 토큰 (PM 도구) | macOS Keychain (`scripts/mcp-atlassian-capstone.sh`) | 안 씀 |
 | 배포 서버 SSH 키 | PM 로컬만 | GitHub Secrets `DEPLOY_SSH_KEY` |
-| Expo 자격 (앱 있으면) | `apps/mobile/.env` | Secrets |
+| MySQL 계정 | 루트 `.env` (compose) · `services/api/.env` | Secrets `DB_PASSWORD` |
 
 ## 받는 법
 LLM 키는 PM 이 1인 1키로 발급 (OpenRouter 는 키별 spend limit). Slack DM 으로만 전달, 채널에 붙이지 않는다.

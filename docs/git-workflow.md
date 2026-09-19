@@ -40,6 +40,7 @@ git push -u origin feat/GACA-51-approval-screen
 - CI 통과 전 머지 불가
 - 머지는 **Squash** — develop 이력이 PR 단위로 남는다
 - 리뷰는 24시간 안에. 막히면 Slack 파트 채널에 멘션
+- 리뷰 중 **이 PR 에서 안 고칠 결함**을 찾으면 GitHub Issue 를 만들고 Jira 에 버그로 짝을 만든다 (`docs/jira.md` 역할 분담)
 
 ## 4. 충돌
 

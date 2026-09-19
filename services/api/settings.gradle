@@ -1,0 +1,5 @@
+plugins {
+  // JDK 21 이 로컬에 없으면 자동으로 받는다 (Gradle toolchain)
+  id 'org.gradle.toolchains.foojay-resolver-convention' version '1.0.0'
+}
+rootProject.name = 'api'

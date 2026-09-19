@@ -1,0 +1,27 @@
+[project]
+name = "uxight-agent"
+version = "0.0.1"
+description = "UXight Agent — Persona Agent 실행 · 행동 로그 · Friction 진단 (실행은 전부 여기)"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "pydantic>=2.7",
+  "openai>=1.40",
+  "playwright>=1.45",
+  "sqlalchemy>=2.0",
+  "pymysql>=1.1",
+]
+
+[dependency-groups]
+dev = ["pytest>=8", "httpx>=0.27", "ruff>=0.6"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["uxight_agent"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -12,9 +12,13 @@ __pycache__/
 .venv/
 .pytest_cache/
 .ruff_cache/
+# java
+.gradle/
+build/
 # data / logs (run 로그는 커밋하지 않는다)
-services/api/data/
-services/api/logs/
+services/agent/data/*
+!services/agent/data/.gitkeep
+services/agent/logs/
 *.sqlite
 *.db
 # os / editor
