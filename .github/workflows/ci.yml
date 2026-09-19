@@ -97,5 +97,5 @@ jobs:
       # gitleaks-action 은 조직 저장소에서 라이선스 키를 요구한다 → CLI(도커 이미지)로 직접 실행. pre-commit 과 같은 검사.
       - name: gitleaks (CLI)
         run: >-
-          docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8
+          docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.30.1
           git /repo --redact --no-banner --exit-code 1
