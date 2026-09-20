@@ -31,6 +31,8 @@
 | D18 | **Agent 격리 원칙:** LLM 은 실행 능력이 없다 — 행동 스키마 5종(click·type·scroll·back·done) JSON 만 내고 Runner 가 검증 후 실행. 도메인 허용 목록 · 파괴적 행동 최종 클릭 차단 · 프롬프트 인젝션 방어(DOM 은 비신뢰 입력) · step/시간/비용 상한 · 컨테이너+egress 허용 목록 · kill switch · 감사 로그. 자격증명은 LLM 프롬프트에 넣지 않고 스크립트가 로그인 | 09/14 발표 Q2. "Watcher 가 관리" 의 실체를 8개 통제로 고정. 추가 공수 약 55h | 09/14 | `agent-safety.md` §2·§3 |
 | D19 | **계정 문제 우회 (D17 구체화):** ①로그인 없는 대상 — **우선 학교 홈페이지**로 성능 테스트 ②해지·탈퇴 등 **1회성 Task 는 제외** ③자체 테스트 사이트는 **"유리하게 판 짰다" 비판을 넘을 worst-case 설계가 전제** (미결). 실무 대상은 Figma 프로토타입 · 기업이 로그인을 걷어낸 테스트 페이지 | 09/14 위클리. 큰 서비스는 봇 차단 · 동시 로그인 제한(박소영). "불편한 웹이 별로 없다" 는 우려 공유 | 09/14 | `meetings/2026-09-14-weekly.md` §1 |
 | D20 | **실험 대상 확정 (PM 승인 09/19, 09/20 AI 대면에서 팀 확인):** ①**학교 홈페이지 스냅샷 사본에 결함 주입** (`experiment-targets.md` B.2, B.10-1 의 ①안) ②**쿠팡 멤버십 해지 플로우를 기록해 mock 프로토타입**으로 만들어 로그인·상태 변경이 필요한 Task 의 실험 대상으로 쓴다 (B.11). 자체 제작 사이트(②안)는 폐기 | ①은 "우리가 사이트를 짜지 않았다" 가 성립하고 21h 싸다. ②는 제안서 설명 시나리오와 실험을 잇고, 실서비스 계정·상태 오염(agent-safety §1.1) 없이 해지 플로우를 다룬다 | 09/19 | PM 승인 · `experiment-targets.md` |
+| D21 | **Task 성공 판정 = Agent 자기 판정 메인 + URL 규칙 보조** (M5 뒤집음). `agent_done × rule_success` 4조합을 전부 기록, 어긋남은 Friction 신호 + 사람 검토. 실행 전 Agent 가 Task 를 확인 · 되묻는 스텝을 둔다. API 통신 기준 판정은 실측 후 후보 | 09/20 대면 — URL 이 안 바뀌는 화면 전환 · 페이지 안 액션을 규칙이 못 잡는다 (한재완 · 박소영) | 09/20 | `meetings/2026-09-20-ai-be.md` · architecture §5 |
+| D22 | **Persona 형식 = 단계형 속성(low/mid/high) + 행동 지침 문장.** 필드: age_group · web_skill · device · domain_knowledge · patience · exploration_tendency · behavior_instruction[]. 모바일 유지. **사전 세팅 10개**(Nemotron Personas Korea 에서 AI 로 대표 추출 · PM 이 코드 제공) → 최종 50개. 미니 테스트 후 필드 확정 | 가장 단순한 형식 + 지침이 낫다(박소영). 3종은 적고 50개는 선택지 과다 | 09/20 | 위 · GACA-66 |
 | D15' | **계정 정책(D15 하위):** 가입 화면 없음 — 운영자가 리서처 계정을 만들고 초기 비밀번호를 전달, 첫 운영자 계정은 배포 시 seed. 리서처는 운영자 영역 진입 불가(메뉴 숨김 + 라우트 가드) | 사용자 1~2명 내부 도구. 가입·초대 메일 흐름은 공수만 든다 | 09/16 | `screens-sketch.md` §1 |
 | D15'' | **가입 경로 추가 (D15' 갱신):** 이메일 회원가입 + **Google 간편 로그인(OAuth)**. 가입 계정은 리서처로 시작, 운영자 승격은 운영자 화면에서. 운영자가 직접 계정을 만드는 경로도 유지. 이메일 인증 메일은 안 보낸다 | PM 결정 09/19 — 시연 · 실사용자 검증(D10) 때 계정을 일일이 만들어 줄 수 없다 | 09/19 | `screens-sketch.md` §1 · `architecture.md` §7 · §8 |
 
@@ -59,6 +61,7 @@
 | T18 | **관측 모드 기본 후보 = SoM(Set-of-Marks) 스크린샷 하이브리드** — 번호 박스를 씌운 뷰포트 스크린샷 + 짧은 요소 목록, 모델은 번호를 고른다. DOM-only 는 fallback, `observe()` 인터페이스로 둘 다 지원 | 탐침: vision step 2.6~3.7s · ~1.1K 토큰 — 정리된 DOM 보다 싸고 지연 같음. "사람은 화면을 본다" 갭을 관측 단계에서 줄이는 유일한 길. S3 A/B 에 관측 축 추가 | 09/14 | `tech-stack.md` §10, `scripts/probe-llm-vision.py` |
 | T19 | **프록시 사용 규칙:** ①역할별 모델 = 역할별 base URL(배포 단위 핀, env 로 분리) ②Persona step 호출은 non-streaming · 짧게, 생성 호출은 2분 이내로 쪼갬 ③관측은 코드성(원시 HTML · 셀렉터)을 줄여 보낸다 — SoM 기본(T18) · DOM 은 텍스트+역할 요약 · non-JSON 응답은 `blocked(proxy_html)` 처리 ④예산 집행은 프록시가 아니라 우리 Watcher(L2) | 프록시 운영 문서 확인(09/19): 배포 단위 모델 핀 · 긴 스트림 끊김 · 코드성 프롬프트 차단 · 실시간 캡 부재 | 09/19 | `tech-stack.md` §6 · `llm-cost.md` §9.1 · `docs/refs/mlapi/` |
 | T20 | **LLM 제공자 이식성:** `LLMClient` 한 인터페이스 뒤에 제공자(회사 프록시 기본 / OpenRouter / OpenAI)를 env 로 교체. 행동 JSON 출력 채널은 `response_format`(기본) 또는 **우리 코드가 받기만 하는 `emit_action` function tool 하나**(대안) — 둘 다 같은 pydantic · 같은 가드. 제공사 서버 실행 도구는 계속 금지 | 프록시가 개발 중 막힐 때(코드성 프롬프트 차단 · 배포 미확보 · vision 부재) pivot 을 "작업" 이 아니라 "결정" 으로 만들기 위해. 09/24 드라이런을 2제공자로 돌린다 | 09/19 | PM · `agent-safety.md` §2.4 |
+| T21 | **ERD 단순화** — `rerun_links` 삭제(`runs.parent_run_id` 로 충분) · `improvements.rank → option_no` · `personas.viewport` 는 profile.device 로. architecture §12 BE 5건(Flyway 단일 · runs 컬럼 분할 · 공유 토큰 · JWT · 인증) 확정 | 09/20 대면, 한재완 ERD v11 검토 | 09/20 | architecture v0.4 |
 
 ## 운영
 
@@ -92,6 +95,8 @@
 | O26 | **Jira 시작일 · 기한 · 완료 후 갱신을 의무로** — 구현진도표(교수님 강조)를 Jira 에서 뽑는다. 설계서 양식은 낡았고 분량은 교수님 확인 후 | 문서는 기록 기반으로 AI 로 생성 | 09/14 | §3 |
 | O27 | **설계서 내용 freeze soft due 09/28 → 09/30(수)** (GACA-27). hard 10/05 · hwp 형식 10/02(GACA-28) 는 그대로 | 09/27(일) 에 walking skeleton · S1 마감 · Figma 산출물이 겹침. 주말을 파트 초안에 쓴다. 마진 = freeze→hard 5일 | 09/19 | PM 승인 · `design-doc-outline.md` §1 |
 | O28 | **Jira 티켓 작성 규칙:** 대상 독자 = 프로젝트 경험이 적은 팀원. PM 만 아는 표기(D/T/O 번호 · 덱 n번 · 회의 날짜)는 쓰지 않고 `docs/glossary.md` 의 공용 용어로. 형식 = 왜 1줄 · 할 일 ≤3 · 완료 기준 · 참고 링크, 그 이상 쓰지 않는다 | 티켓이 많아지면 PM 혼자 쓰고 배정할 수 없다 — 리드가 같은 형식으로 하위 티켓을 만들 수 있어야 한다 | 09/19 | `jira.md` 티켓 작성 규칙 |
+| O29 | **설계서 양식은 예시로만 쓴다** — 우리 목차(`design-doc-outline.md` §2)로 작성하고, 양식에서는 산출물 종류(시퀀스 · 테이블명세 · 오류코드 · 명칭표준)와 표지 · 개정이력 형식만 가져온다. 교수님께 양식 질문 안 함 | 학과가 준 hwp 는 AI 학습 모델 전제의 예시(10장 · 270p). 우리 문제에 맞게 재구성하는 게 맞다 | 09/20 | PM |
+| O30 | **전역 규칙 Occam's Razor** — 가정 · 구성 요소 · 예외가 가장 적은 해를 고른다. 문서 · 설계 · 티켓 · 제안 전부. 예외 = Agent 안전 통제 · 학사 요건 | 문서 · 티켓이 늘면서 "있으면 좋은" 것이 붙기 시작 | 09/20 | PM · `CLAUDE.md` · `AGENTS.md` |
 
 ## 아직 안 정한 것
 
@@ -100,8 +105,8 @@
 | ~~BE 언어 Spring vs FastAPI~~ → **T9 확정(Java/Spring)**, 되돌림 여부는 **09/27 walking skeleton(T17)** 결과로 | 09/27 | 한재완·박소영 |
 | 회사 프록시 — **캡스톤 키 + 배포 3개(모델) · rate limit · 단가표** (T16 · T19 잔여) | 키 발급 즉시 | PM |
 | ~~아키텍처 설계 문서~~ → `architecture.md` v0.3 (GACA-82), 리드 확인 09/20 | 09/20 | PM |
-| **Persona 속성 부여 방식·데이터 형식** (low/mid/high vs 척도 vs 서술형) — 성능 좌우 | S1 | 박소영·전원 |
-| **Task 성공 판정 기준** (어디까지 도달해야 성공인가) | S1 | 박소영·PM |
+| ~~Persona 속성 형식~~ → **D22** (단계형 + 지침). 필드 확정은 미니 테스트 후 09/24 | 09/24 | 박소영 |
+| ~~Task 성공 판정 기준~~ → **D21** (Agent 메인 · 규칙 보조). API 기준 판정은 실측 후 | S2 | 박소영·한재완 |
 | **Friction threshold · 심각도 산정 기준** | S1 | 박소영 |
 | 역할별 LLM 모델 확정 (T12 의 실제 모델명) | S1~S3 | PM·AI Lead |
 | LLM 비용 팀 내부 상한 | S1 | PM·AI Lead |

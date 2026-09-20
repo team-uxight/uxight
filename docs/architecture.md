@@ -1,6 +1,6 @@
-# 아키텍처 — 전체 구조 + Agent 권한 구조 (v0.3, 2026-09-19)
+# 아키텍처 — 전체 구조 + Agent 권한 구조 (v0.4, 2026-09-20)
 
-**상태: PM 승인 (09/19) · 리드 확인 09/20 AI 대면 · 이후 §12 미결은 리드가 닫는다.** 리드가 이 문서를 기준으로 S1 티켓을 잡는다 — BE 76·77·69, AI 72, FE 73~75.
+**상태: PM 승인 (09/19) · 리드 확인 09/20 AI·BE 대면 완료 — BE 미결 5건 확정, 큰 틀 고정. 남은 §12 는 리드가 닫는다.** 리드가 이 문서를 기준으로 S1 티켓을 잡는다 — BE 76·77·69, AI 72, FE 73~75.
 표시가 **[초안 — 리드가 채운다]** 인 절은 PM 이 뼈대만 잡은 것이고, 확정은 해당 리드가 한다. 뒤집으면 `decisions.md` 에 줄을 추가한다.
 
 이 문서가 답하는 질문 세 개:
@@ -173,7 +173,7 @@ sequenceDiagram
 | --- | --- | --- | --- |
 | users · projects · tasks · personas · policies · test_accounts · approvals · human_results | Spring | Spring (Python 은 policies · test_accounts · personas 를 run 시작 시 **읽기만**) | 사람 입력 · 정책 |
 | runs | **INSERT 는 Spring 만** (`status='queued'` 초기값 · `dispatch_state`) · **UPDATE 는 상태 컬럼을 Python, 설정 컬럼을 Spring** | 둘 다 | 소유 경계가 행 안에 있다 — 컬럼 단위로 나눈다. `status` 를 UPDATE 하는 쪽은 Python 하나뿐이다 (§3.3) |
-| run_personas · findings · improvements · rerun_links · run_metrics · patch_versions | Python | Spring | 실행 산출물 |
+| run_personas · findings · improvements · run_metrics · patch_versions | Python | Spring | 실행 산출물 |
 | audit_log | **Spring(운영 행위) · Python(차단 액션)** — 행 단위로 나눠 쓴다, 행을 고치는 쪽은 없다 | 둘 다 | append-only. §7 과 같은 규칙이다 |
 
 **루프 run 도 INSERT 는 Spring 이 한다 (C3).** Python 은 새 run 행을 만들지 않고 `runs.next_loop_requested = 1` 만 세운다. Spring 이 그 플래그를 보고 새 `run_id` 로 행을 INSERT 한 뒤 `POST /runs` 를 부른다 — INSERT 주체가 하나라야 `parent_run_id` · 설정 컬럼 · 멱등 판정이 한 자리에서 성립한다 (§4 6단계).
@@ -223,7 +223,7 @@ flowchart BT
 | 3 | Friction 검출 | Detector | step 로그 → (규칙: 왕복 · 반복 · 실패 · 경로 길이) + LLM 보조 분류 → Taxonomy · 근거 step · 심각도 | `findings` |
 | 4 | 진단 | Diagnosis | findings 묶음 → 문제 요약 · 우선순위 | `findings.summary` · `run_metrics` (성공률 · 행동 수 · 백트래킹) · `runs.status=done` |
 | 5 | 개선안 (선택) | Improvement | 진단 → 3안 + 근거 + 예상 영향 (패치 4종 안에서) | `improvements` |
-| 6 | 승인 → 패치 → 재실험 (선택) | 리서처 승인(Spring `approvals`) → Spring 이 새 run INSERT → Patcher 주입 → 2~4 반복 | 해당 Friction 에 걸린 Persona 만 재투입 · 수렴 시 조기 종료 (tech-stack §9.3) | `runs(parent_run_id)` · `rerun_links` · `patch_versions` · Before/After = `run_metrics` 두 행 |
+| 6 | 승인 → 패치 → 재실험 (선택) | 리서처 승인(Spring `approvals`) → Spring 이 새 run INSERT → Patcher 주입 → 2~4 반복 | 해당 Friction 에 걸린 Persona 만 재투입 · 수렴 시 조기 종료 (tech-stack §9.3) | `runs(parent_run_id · improvement_id)` · `patch_versions` · Before/After = `run_metrics` 두 행 (`rerun_links` 는 09/20 삭제 — parent_run_id 로 충분, T21) |
 
 승인(6) 은 **Spring 이 쓰고 Python 이 큐를 본다**: 승인 행이 생기면 Spring 이 새 `run_id` 로 행을 INSERT 하고 `POST /runs` 를 다시 부른다 (`parent_run_id` · `improvement_id` 포함).
 **`mode="loop"` 에서 다음 회차도 같다** — Python 은 회차가 끝나면 `runs.next_loop_requested = 1` 만 세우고, 새 run 을 만드는 쪽은 언제나 Spring 이다 (§3.4). Python 이 Spring 을 부르는 방향은 **자격증명 조회(S3, §9.1) 하나뿐이고 run 상태를 보고하는 방향은 없다.**
@@ -270,7 +270,7 @@ for step in range(policy.max_steps):
     if act.kind == "done" or watcher.should_stop(run): break
 ```
 
-**Task 성공 판정은 규칙이 한다 (M5).** `tasks.success_criteria` 의 URL 패턴 일치 여부가 유일한 판정이고, `Action.success` 는 Persona 가 스스로 끝났다고 여긴 순간을 남기는 **로그 필드**다. 둘이 어긋나는 것 자체가 Friction 신호이므로 지우지 않고 둘 다 남긴다. 판정 기준의 확정은 §12 에 올려 둔다 (GACA-67).
+**Task 성공 판정 — 09/20 결정 (D21, M5 를 뒤집음).** `Action.success`(Agent 의 "끝났다" 판단)가 **메인**이고, `tasks.success_criteria`(도달 URL 패턴)는 **보조 판정**이다. URL 이 안 바뀌는 화면 전환과 페이지 안 액션을 규칙이 못 잡기 때문. 결과는 `agent_done × rule_success` 4조합(정상 성공 / Agent 착각 / 도달했는데 인지 못함 / 미완료)을 전부 `run_personas` 에 남기고 어긋남은 Friction 신호 + 사람 검토 대상이다. 종료 = `max_steps` · `timeout_sec`. **실행 전 확인 스텝:** Agent 가 대상 URL 과 Task 를 먼저 보고 모호하면 리서처에게 되묻고, 확인된 Task 를 `success_rule` 로 가공한다 (§4 0단계, 화면 R2). API 요청/응답 기준 판정은 후보 — 토큰 · 성능 실측 후 (GACA-67).
 
 관측 모드는 run 옵션이다 — S3 A/B (T4) 에서 `som` 과 `dom` 을 같은 인터페이스로 비교한다.
 
@@ -304,17 +304,16 @@ run 당 디렉터리, Persona 당 `steps.jsonl` 한 줄 = step 하나. DB 에는
 | `users` | Spring | id · email · password_hash(null 이면 Google 전용) · **auth_provider(`local`/`google`) · google_sub** · name · role(`admin`/`researcher`) · is_active · created_at — 가입은 리서처로 시작, 운영자 승격은 A1 (D15'') |
 | `projects` | Spring | id · owner_id · name · target_url · allowed_domains(json) · created_at |
 | `tasks` | Spring | id · project_id · goal · success_criteria(json) · is_one_shot(bool, D19 제외 플래그) |
-| `personas` | Spring | id · project_id · name · profile(json — 숙련도 · 기기 · 배경, GACA-66) · viewport |
+| `personas` | Spring | id · project_id · name · profile(json — `age_group · web_skill · device · domain_knowledge · patience · exploration_tendency · behavior_instruction[]`, D22. device 가 viewport 를 대신한다) |
 | `test_accounts` | Spring | id · project_id · label · secret_enc(암호화) · assigned_run_id(null) — 계정 풀, S3. 화면 쪽 이름(screens-sketch A2)과 같은 이름을 쓴다 |
 | `policies` | Spring | id · scope(global/project) · max_steps · max_seconds · max_tokens · concurrency · run_concurrency · rate_limit_per_domain · daily_token_budget · model_map(json) |
 | `runs` | **Spring(설정) / Python(상태)** | id · project_id · task_id · mode · loop_max · parent_run_id · improvement_id · policy_snapshot(json) · persona_snapshot(json) · **dispatch_state**(Spring) · **status · progress · accepted_at · started_at · finished_at · error · heartbeat_at · next_loop_requested · tokens · cost_usd**(Python) · cancel_requested(Spring) |
-| `run_personas` | Python | run_id · persona_id · status(`success`/`fail`/`timeout`/`cancelled`) · steps · backtracks · **tokens · cost_usd**(step 마다 갱신 — 실시간 화면의 누적 비용이 여기서 나온다) · log_path |
+| `run_personas` | Python | run_id · persona_id · status(`success`/`fail`/`timeout`/`cancelled`) · **agent_done · rule_success**(D21 4조합) · steps · backtracks · **tokens · cost_usd**(step 마다 갱신 — 실시간 화면의 누적 비용이 여기서 나온다) · log_path |
 | `run_metrics` | Python | run_id · success_rate · avg_steps · avg_backtracks · avg_seconds · tokens · cost_usd (run 종료 시 확정 집계) |
 | `patch_versions` | Python | id · run_id · improvement_id · patch_kind(4종) · patch(json) · applied(bool) · fail_reason — Before/After · 실험 이력의 "패치 버전" |
 | `findings` | Python | id · run_id · taxonomy(4종+3) · severity · evidence(json — persona_id · step 범위 · url) · summary |
-| `improvements` | Python | id · finding_id · rank(1~3) · patch_kind(4종) · patch(json) · rationale · expected_effect |
+| `improvements` | Python | id · finding_id · option_no(1~3, `rank` 는 MySQL 예약어) · patch_kind(4종) · patch(json) · rationale · expected_effect |
 | `approvals` | Spring | id · improvement_id · user_id · decision(`approve`/`reject`) · decided_at |
-| `rerun_links` | Python | before_run_id · after_run_id · improvement_id |
 | `human_results` | Spring | id · run_id · participant_label · succeeded(bool) · seconds · sus_score · note — D10 실사용자 결과(화면 R8, S5) |
 | `audit_log` | Spring(운영 행위) / Python(차단 액션) | id · actor(user_id 또는 `agent:<run_id>`) · action · target · detail(json) · ts |
 
@@ -465,7 +464,7 @@ compose 를 올린 상태에서 아래 7단계가 **한 번에** 되면 Java 유
 | 6 | **3분 이상 도는 run 을 중간에 `POST /api/runs/{id}/cancel`** | 10초 안에 `cancelled` · 브라우저 context 폐기 · 부분 step 로그 보존. **두 언어가 상태를 동시에 만지는 유일한 순간이라 여기서 깨진다** |
 | 7 | **Flyway 마이그레이션 1회 왕복** — 컬럼 하나 추가 → `make up` → Python(SQLAlchemy) 이 그 컬럼을 읽고 쓰기 | 스키마 소유가 실제로 한쪽인가. 15주 내내 반복할 동작이라 한 번은 해 본다 |
 
-**드라이런 09/24 (한재완 · PM).** 09/27 본 판정 사흘 전에 같은 7단계를 돌려 본다 — LLM 키 · compose · 네트워크처럼 코드와 무관한 것이 막는지를 먼저 걸러내기 위함이다. 드라이런에만 있는 확인 하나: **3단계의 실제 관측 프롬프트(DOM 요약 · SoM 목록)가 프록시를 통과하는가** — 코드성 프롬프트가 차단되어 HTML 응답이 올 수 있다 (tech-stack §6 T19). 막히면 관측 요약 규칙을 먼저 손본다.
+**드라이런 09/25(금) (한재완 · PM, 09/20 에 목→금 조정).** 09/27 본 판정 사흘 전에 같은 7단계를 돌려 본다 — LLM 키 · compose · 네트워크처럼 코드와 무관한 것이 막는지를 먼저 걸러내기 위함이다. 드라이런에만 있는 확인 하나: **3단계의 실제 관측 프롬프트(DOM 요약 · SoM 목록)가 프록시를 통과하는가** — 코드성 프롬프트가 차단되어 HTML 응답이 올 수 있다 (tech-stack §6 T19). 막히면 관측 요약 규칙을 먼저 손본다.
 **못 돌리면 실패로 본다.** 캡스톤 LLM 키 미발급 · 서버 미준비 · 담당자 부재로 09/27 에 7단계를 끝까지 못 돌렸다면 그것은 "판정 보류" 가 아니라 **실패**이고 FastAPI 전환을 집행한다. "돌려보지 못했으니 일단 Java 유지" 를 기본값으로 두면 게이트가 아무것도 판정하지 않는다.
 
 전환 시(안 되면): **버리는 것** = `services/api` 의 Spring 코드 (며칠치). **남기는 것** = 웹 · Python 전부 · MySQL 스키마(Flyway 는 Alembic 으로 옮김) · 계약(§3 의 `POST /runs` 는 함수 호출이 됨) · 권한 구조(§9 그대로). 전환 후 Spring 책임(인증 · CRUD)은 FastAPI 라우터로 — 이때 tech-stack §4 B 안이 된다.
@@ -474,11 +473,11 @@ compose 를 올린 상태에서 아래 7단계가 **한 번에** 되면 Java 유
 
 | 항목 | PM 제안 | 누가 | 언제 |
 | --- | --- | --- | --- |
-| 스키마 소유 · 마이그레이션 | Flyway(Spring) 단일 소유, Python 은 DDL 없음 | 한재완 | 09/20 대면 |
-| `runs` 컬럼 분할 (설정/상태/디스패치) | 컬럼 단위 소유 — `status` 는 Python 전용, Spring 은 `dispatch_state`. 대안 = `run_states` 테이블 분리 | 한재완 · 박소영 | 09/20 |
-| 인증 | JWT + role claim | 한재완 | 09/20 |
+| ~~스키마 소유 · 마이그레이션~~ | **확정 09/20** — Flyway(Spring) 단일 소유, Python 은 DDL 없음 | 한재완 | ✔ |
+| ~~`runs` 컬럼 분할~~ | **확정 09/20** — 컬럼 단위 소유, `status` 는 Python 전용 · Spring 은 `dispatch_state` | 한재완 · 박소영 | ✔ |
+| ~~인증~~ | **확정 09/20** — JWT access 1h(더 길어도 됨) + refresh + role claim + Google OAuth | 한재완 | ✔ |
 | SSE 전환 시점 | 폴링 주기는 3초로 확정(screens-sketch 와 같은 값). 남은 것은 SSE 를 언제 넣나 — S3 | 이수훈 · 한재완 | S2 |
-| **Task 성공 판정 주체** | 규칙(`success_criteria` URL 패턴)이 판정하고 `Action.success` 는 로그 필드. 둘이 어긋나면 Friction 신호 (M5) | 박소영 · PM | 09/20 (GACA-67) |
+| ~~Task 성공 판정 주체~~ | **확정 09/20 (D21)** — Agent 판정 메인 · URL 규칙 보조 · 4조합 기록 · 실행 전 확인 스텝. API 기준 판정은 실측 후 | 박소영 · PM | ✔ |
 | **SoM 모드 인젝션 방어** | 화면에 보이는 주입 문구는 정제로 못 지운다. 가드의 도메인·파괴적 차단이 유일한 방어선임을 받아들이고 갈지, SoM 에서만 추가 방어를 넣을지 (M6) | 박소영 | 09/20 |
 | 자격증명 복호화 위치 | Spring 내부 엔드포인트 1회 제공 | 한재완 | S3 전 |
 | 로그 · 스크린샷 보존 | run 종료 후 30일, 실험 태그 붙은 run 은 영구 | 박소영 | S3 |
@@ -486,7 +485,7 @@ compose 를 올린 상태에서 아래 7단계가 **한 번에** 되면 Java 유
 | 관측 모드 fallback 조건 | 기본값은 `som` 으로 이미 확정(T18), walking skeleton 만 `dom`. 남은 것은 **어떤 신호가 보이면 `dom` 으로 내리나** | 박소영 | 09/20 |
 | 계정 풀 · 테스트 계정 | `test_accounts` 테이블은 S3. S1~S2 는 로그인 없는 대상만 (D19) | 박소영 · 한재완 | S3 |
 | **walking skeleton 드라이런** | 09/24 에 §11 7단계를 리허설한다. 못 돌리면 실패 처리 규칙까지 합의 (M14) | 한재완 · PM | 09/24 |
-| Python 내부 인증 | 공유 토큰 헤더. 대안 = compose 네트워크만 믿기 | 한재완 | 09/20 |
+| ~~Python 내부 인증~~ | **확정 09/20** — 공유 토큰 헤더 | 한재완 | ✔ |
 | Improvement · Patcher 배치 | Python. 패치 4종의 DOM 주입은 Driver 안 | 박소영 | S2 |
 | **프록시 배포(모델) 확보** | 캡스톤 키 발급 시 배포 3개(탐색 저가 · 진단 상위 · A/B) 요청. 배포마다 base URL 이 다르다 | PM | 키 발급 즉시 |
 | 관측 프롬프트의 프록시 통과 | 09/24 드라이런에서 실측. 막히면 DOM 요약 규칙 · SoM 기본값으로 대응 | 박소영 · PM | 09/24 |
@@ -501,3 +500,4 @@ compose 를 올린 상태에서 아래 7단계가 **한 번에** 되면 Java 유
 | v0.3a | 2026-09-19 | 프록시 운영 문서 반영(T19) — §10 역할별 base URL env · §11 드라이런에 관측 프롬프트 통과 확인 · §12 미결 2건 |
 | v0.3b | 2026-09-19 | PM 리뷰 완료 · 승인. 상태 줄 갱신 |
 | v0.3c | 2026-09-19 | D15'' 반영 — `users` 에 auth_provider · google_sub, `POST /api/auth/register` · Google OAuth 경로, api env 2개 |
+| v0.4 | 2026-09-20 | AI·BE 대면 반영 — §5 성공 판정을 Agent 메인 · 규칙 보조로(D21, 확인 스텝) · `rerun_links` 삭제 · `personas.profile` 형식(D22) · `improvements.option_no` · `run_personas.agent_done/rule_success` · 드라이런 09/25 · §12 BE 5건 확정 |
