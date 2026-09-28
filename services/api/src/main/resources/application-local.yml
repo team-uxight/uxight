@@ -1,0 +1,3 @@
+# local 프로필 — 로컬 전용 seed 데이터(db/seed)까지 적용한다
+spring:
+  flyway.locations: classpath:db/migration,classpath:db/seed

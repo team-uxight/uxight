@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>프로젝트 생성</title>
+</head>
+<body>
+<h1>프로젝트 생성</h1>
+<form th:action="@{/projects}" th:object="${projectForm}" method="post">
+    <div th:if="${#fields.hasGlobalErrors()}">
+        <p th:each="err : ${#fields.globalErrors()}" th:text="${err}"></p>
+    </div>
+    <div>
+        <label for="title">제목</label>
+        <input type="text" id="title" th:field="*{title}">
+        <p th:if="${#fields.hasErrors('title')}" th:errors="*{title}"></p>
+    </div>
+    <div>
+        <label for="targetUrl">대상 URL</label>
+        <input type="text" id="targetUrl" th:field="*{targetUrl}">
+        <p th:if="${#fields.hasErrors('targetUrl')}" th:errors="*{targetUrl}"></p>
+    </div>
+    <div>
+        <label for="description">설명</label>
+        <textarea id="description" th:field="*{description}"></textarea>
+        <p th:if="${#fields.hasErrors('description')}" th:errors="*{description}"></p>
+    </div>
+    <div>
+        <label for="allowedDomains">허용 도메인 목록</label>
+        <input type="text" id="allowedDomains" th:field="*{allowedDomains}">
+        <p th:if="${#fields.hasErrors('allowedDomains')}" th:errors="*{allowedDomains}"></p>
+    </div>
+    <button type="submit">생성</button>
+</form>
+</body>
+</html>

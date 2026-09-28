@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="refresh" content="3">
+    <title>모니터링</title>
+    <style>
+        .run-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+        }
+        .run-box {
+            border: 1px solid #000;
+            padding: 12px;
+        }
+    </style>
+</head>
+<body>
+<header>
+    <nav>
+        <a th:href="@{/dashboard}">Dashboard</a>
+    </nav>
+</header>
+<h1>모니터링</h1>
+<div class="run-grid">
+    <div class="run-box" th:each="run : ${runs}">
+        <p th:text="${run.projectTitle}"></p>
+        <p th:text="${run.taskGoal}"></p>
+        <p th:text="|진행률 ${run.completedPersonas}/${run.totalPersonas} Persona|"></p>
+        <progress th:value="${run.completedPersonas}" th:max="${run.totalPersonas}"></progress>
+        <p th:text="${run.elapsedDisplay}"></p>
+        <form th:action="@{/monitoring/{runId}/cancel(runId=${run.runId})}" method="post">
+            <button type="submit">취소</button>
+        </form>
+    </div>
+</div>
+</body>
+</html>

@@ -1,13 +1,21 @@
 spring:
   application.name: uxight-api
+  profiles.active: local   # local 프로필 = seed 적용 (application-local.yml). env SPRING_PROFILES_ACTIVE 로 덮어쓴다
   datasource:
     url: ${DB_URL:jdbc:mysql://localhost:3306/uxight}
     username: ${DB_USER:uxight}
     password: ${DB_PASSWORD:}
   jpa:
-    hibernate.ddl-auto: update   # 골격 단계만. 스키마 확정 후 Flyway 로 (소유권: api)
+    hibernate.ddl-auto: none   # 스키마는 Flyway 만 (소유권: api)
     open-in-view: false
+  flyway.locations: classpath:db/migration
 
 uxight:
   agent-base-url: ${AGENT_BASE_URL:http://localhost:8000}
   web-origin: ${WEB_ORIGIN:http://localhost:5173}
+
+# Walking Skeleton 검증용. INSERT 는 PreparedStatementCreator 라 별도 log 가 필요하지만,
+# UPDATE/SELECT 는 이 두 줄만으로 JdbcTemplate 이 SQL 과 파라미터를 자동으로 찍어준다.
+logging.level:
+  org.springframework.jdbc.core.JdbcTemplate: DEBUG
+  org.springframework.jdbc.core.StatementCreatorUtils: TRACE

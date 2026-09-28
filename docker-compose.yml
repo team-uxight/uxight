@@ -39,6 +39,7 @@ services:
       LLM_API_KEY: ${LLM_API_KEY}
       LLM_MODEL: ${LLM_MODEL}
       DB_URL: mysql+pymysql://${MYSQL_USER:-uxight}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE:-uxight}
+      LOG_DIR: data/runs                 # step 로그 → /app/data/runs (아래 data/ 볼륨)
     ports: ["127.0.0.1:8000:8000"]
     depends_on:
       mysql: { condition: service_healthy }

@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>대시보드</title>
+    <style>
+        .project-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+        }
+        .project-box {
+            position: relative;
+            border: 1px solid #000;
+            padding: 12px;
+        }
+        .project-box .go-detail {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            text-decoration: none;
+        }
+    </style>
+</head>
+<body>
+<header>
+    <nav>
+        <a th:href="@{/dashboard}">Dashboard</a>
+        <a th:href="@{/monitoring}">Monitor</a>
+        <a th:href="@{/history}">History</a>
+    </nav>
+</header>
+<main>
+    <p th:text="|안녕하세요, ${loginUser.name}님|"></p>
+    <a th:href="@{/projects/new}">프로젝트 생성</a>
+    <div class="project-grid">
+        <div class="project-box" th:each="project : ${projects}">
+            <a class="go-detail" th:href="@{/projects/{projectId}(projectId=${project.projectId})}">→</a>
+            <p><strong>제목:</strong> <span th:text="${project.title}"></span></p>
+            <p><strong>대상 URL:</strong> <span th:text="${project.targetUrl}"></span></p>
+            <p><strong>설명:</strong> <span th:text="${project.description}"></span></p>
+        </div>
+    </div>
+</main>
+</body>
+</html>

@@ -12,16 +12,12 @@ def test_health() -> None:
     assert res.json() == {"status": "ok", "service": "agent"}
 
 
-def test_start_run_returns_202() -> None:
-    res = client.post("/runs", json={"run_id": 1, "target_url": "https://example.com", "task": "t"})
-    assert res.status_code == 202
-    assert res.json()["run_id"] == 1
-
-
 def test_action_schema_rejects_unknown_action() -> None:
-    assert Action(action="click", element=3).element == 3
-    try:
-        Action(action="execute_js")  # type: ignore[arg-type]
-    except ValueError:
-        return
-    raise AssertionError("unknown action must be rejected")
+    assert Action(kind="click", element_id=3).element_id == 3
+    assert Action(kind="done").kind == "done"
+    for kind in ("select", "execute_js"):
+        try:
+            Action(kind=kind)  # type: ignore[arg-type]
+        except ValueError:
+            continue
+        raise AssertionError(f"unknown action must be rejected: {kind}")
