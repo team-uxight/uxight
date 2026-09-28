@@ -29,7 +29,9 @@ services:
       DB_PASSWORD: ${MYSQL_PASSWORD}
       AGENT_BASE_URL: http://agent:8000
       WEB_ORIGIN: http://localhost:5173
+      TZ: Asia/Seoul                     # JVM 기본 시간대 — LocalDateTime.now() 를 MySQL(+09:00) 과 같은 시계로
     ports: ["127.0.0.1:8080:8080"]
+    volumes: ["./services/agent/data/runs:/data/runs:ro"]   # agent 가 쓰는 step 로그를 읽기 전용으로 (architecture §10)
     depends_on:
       mysql: { condition: service_healthy }
 
