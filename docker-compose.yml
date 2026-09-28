@@ -40,7 +40,9 @@ services:
       LLM_API_KEY: ${LLM_API_KEY}
       LLM_MODEL: ${LLM_MODEL}
       DB_URL: mysql+pymysql://${MYSQL_USER:-uxight}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE:-uxight}
-      LOG_DIR: data/runs                 # step 로그 → /app/data/runs (아래 data/ 볼륨)
+      LOG_DIR: /app/data/runs            # step 로그 → 아래 data/ 볼륨. 절대 경로 (DB log_path 는 이 기준 상대 경로)
+      HOME: /tmp                         # read_only 컨테이너에서 Chromium 이 쓸 HOME (tmpfs)
+      TZ: Asia/Seoul                     # step 로그 시각을 호스트 실행과 같은 KST 로
     ports: ["127.0.0.1:8000:8000"]
     depends_on:
       mysql: { condition: service_healthy }
