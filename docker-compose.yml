@@ -6,6 +6,7 @@ name: uxight
 services:
   mysql:
     image: mysql:8.4
+    command: ["--default-time-zone=+09:00"]   # NOW() 를 KST 로 — Spring LocalDateTime.now() 와 같은 시계
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?.env 에 설정}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-uxight}
