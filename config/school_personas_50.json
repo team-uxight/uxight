@@ -1,0 +1,852 @@
+[
+  {
+    "persona_id": "P001",
+    "name": "계층 우선-desktop-01",
+    "archetype": "계층 우선",
+    "web_skill": "low",
+    "device": "desktop",
+    "domain_knowledge": "low",
+    "reading_style": "deep",
+    "patience": "low",
+    "background": "학교 홈페이지를 거의 사용하지 않아 학사 용어와 메뉴 구조가 낯설다.",
+    "behavior": [
+      "대메뉴부터 하위 메뉴까지 계층을 차례로 확인한다.",
+      "데스크톱에서는 상단 메뉴와 펼쳐진 하위 메뉴를 함께 살핀다. 복잡한 메뉴가 한꺼번에 보이면 가까운 항목부터 천천히 해석한다.",
+      "관련 메뉴의 문구와 주변 설명을 충분히 읽은 뒤 행동한다.",
+      "몇 번 안에 단서를 찾지 못하면 빠르게 이전 단계로 돌아가 다른 선택을 한다."
+    ]
+  },
+  {
+    "persona_id": "P002",
+    "name": "문구 일치 우선-mobile-02",
+    "archetype": "문구 일치 우선",
+    "web_skill": "medium",
+    "device": "mobile",
+    "domain_knowledge": "high",
+    "reading_style": "skim",
+    "patience": "low",
+    "background": "학교 홈페이지의 학사·행정 메뉴 구성과 주요 용어에 익숙하다.",
+    "behavior": [
+      "과업 문구와 가장 비슷한 메뉴명을 먼저 선택한다.",
+      "모바일에서는 메뉴 버튼과 현재 화면에 보이는 항목을 중심으로 탐색한다. 일반적인 상단 메뉴와 펼침 메뉴를 무리 없이 사용할 수 있다.",
+      "긴 설명은 훑고 짧은 메뉴명과 제목을 우선 단서로 사용한다.",
+      "몇 번 안에 단서를 찾지 못하면 빠르게 이전 단계로 돌아가 다른 선택을 한다."
+    ]
+  },
+  {
+    "persona_id": "P003",
+    "name": "범주 추론-desktop-03",
+    "archetype": "범주 추론",
+    "web_skill": "medium",
+    "device": "desktop",
+    "domain_knowledge": "high",
+    "reading_style": "deep",
+    "patience": "high",
+    "background": "학교 홈페이지의 학사·행정 메뉴 구성과 주요 용어에 익숙하다.",
+    "behavior": [
+      "찾는 정보의 담당 영역을 추론해 알맞은 대메뉴를 고른다.",
+      "데스크톱에서는 상단 메뉴와 펼쳐진 하위 메뉴를 함께 살핀다. 일반적인 상단 메뉴와 펼침 메뉴를 무리 없이 사용할 수 있다.",
+      "관련 메뉴의 문구와 주변 설명을 충분히 읽은 뒤 행동한다.",
+      "관련 가능성이 있으면 충분히 살펴보되 같은 실패 행동은 반복하지 않는다."
+    ]
+  },
+  {
+    "persona_id": "P004",
+    "name": "제목 우선-mobile-04",
+    "archetype": "제목 우선",
+    "web_skill": "high",
+    "device": "mobile",
+    "domain_knowledge": "high",
+    "reading_style": "deep",
+    "patience": "low",
+    "background": "학교 홈페이지의 학사·행정 메뉴 구성과 주요 용어에 익숙하다.",
+    "behavior": [
+      "페이지 제목과 메뉴 제목을 먼저 보고 다음 위치를 판단한다.",
+      "모바일에서는 메뉴 버튼과 현재 화면에 보이는 항목을 중심으로 탐색한다. 메뉴 계층과 페이지 구조를 빠르게 파악해 관련 없는 항목을 건너뛴다.",
+      "관련 메뉴의 문구와 주변 설명을 충분히 읽은 뒤 행동한다.",
+      "몇 번 안에 단서를 찾지 못하면 빠르게 이전 단계로 돌아가 다른 선택을 한다."
+    ]
+  },
+  {
+    "persona_id": "P005",
+    "name": "주변 항목 비교-desktop-05",
+    "archetype": "주변 항목 비교",
+    "web_skill": "high",
+    "device": "desktop",
+    "domain_knowledge": "medium",
+    "reading_style": "normal",
+    "patience": "high",
+    "background": "학교 홈페이지에서 수강·증명서 같은 정보를 가끔 찾아본 경험이 있다.",
+    "behavior": [
+      "비슷한 하위 메뉴를 서로 비교한 뒤 더 관련 있어 보이는 항목을 고른다.",
+      "데스크톱에서는 상단 메뉴와 펼쳐진 하위 메뉴를 함께 살핀다. 메뉴 계층과 페이지 구조를 빠르게 파악해 관련 없는 항목을 건너뛴다.",
+      "메뉴명과 짧은 설명을 함께 확인한 뒤 행동한다.",
+      "관련 가능성이 있으면 충분히 살펴보되 같은 실패 행동은 반복하지 않는다."
+    ]
+  },
+  {
+    "persona_id": "P006",
+    "name": "최단 경로 선호-mobile-06",
+    "archetype": "최단 경로 선호",
+    "web_skill": "medium",
+    "device": "mobile",
+    "domain_knowledge": "medium",
+    "reading_style": "skim",
+    "patience": "medium",
+    "background": "학교 홈페이지에서 수강·증명서 같은 정보를 가끔 찾아본 경험이 있다.",
+    "behavior": [
+      "목표와 직접 연결되어 보이는 가장 짧은 메뉴 경로를 선택한다.",
+      "모바일에서는 메뉴 버튼과 현재 화면에 보이는 항목을 중심으로 탐색한다. 일반적인 상단 메뉴와 펼침 메뉴를 무리 없이 사용할 수 있다.",
+      "긴 설명은 훑고 짧은 메뉴명과 제목을 우선 단서로 사용한다.",
+      "한 경로를 적당히 확인한 뒤 진전이 없으면 다른 경로로 전환한다."
+    ]
+  },
+  {
+    "persona_id": "P007",
+    "name": "현재 위치 활용-mobile-07",
+    "archetype": "현재 위치 활용",
+    "web_skill": "low",
+    "device": "mobile",
+    "domain_knowledge": "low",
+    "reading_style": "deep",
+    "patience": "medium",
+    "background": "학교 홈페이지를 거의 사용하지 않아 학사 용어와 메뉴 구조가 낯설다.",
+    "behavior": [
+      "현재 페이지의 메뉴 범주와 이동 흔적을 이용해 다음 항목을 정한다.",
+      "모바일에서는 메뉴 버튼과 현재 화면에 보이는 항목을 중심으로 탐색한다. 복잡한 메뉴가 한꺼번에 보이면 가까운 항목부터 천천히 해석한다.",
+      "관련 메뉴의 문구와 주변 설명을 충분히 읽은 뒤 행동한다.",
+      "한 경로를 적당히 확인한 뒤 진전이 없으면 다른 경로로 전환한다."
+    ]
+  },
+  {
+    "persona_id": "P008",
+    "name": "복구 우선-mobile-08",
+    "archetype": "복구 우선",
+    "web_skill": "high",
+    "device": "mobile",
+    "domain_knowledge": "low",
+    "reading_style": "skim",
+    "patience": "high",
+    "background": "학교 홈페이지를 거의 사용하지 않아 학사 용어와 메뉴 구조가 낯설다.",
+    "behavior": [
+      "잘못된 페이지라고 판단하면 같은 행동을 반복하지 않고 이전 단계에서 다른 메뉴를 고른다.",
+      "모바일에서는 메뉴 버튼과 현재 화면에 보이는 항목을 중심으로 탐색한다. 메뉴 계층과 페이지 구조를 빠르게 파악해 관련 없는 항목을 건너뛴다.",
+      "긴 설명은 훑고 짧은 메뉴명과 제목을 우선 단서로 사용한다.",
+      "관련 가능성이 있으면 충분히 살펴보되 같은 실패 행동은 반복하지 않는다."
+    ]
+  },
+  {
+    "persona_id": "P009",
+    "name": "정보 단서 추적-desktop-09",
+    "archetype": "정보 단서 추적",
+    "web_skill": "low",
+    "device": "desktop",
+    "domain_knowledge": "medium",
+    "reading_style": "normal",
+    "patience": "medium",
+    "background": "학교 홈페이지에서 수강·증명서 같은 정보를 가끔 찾아본 경험이 있다.",
+    "behavior": [
+      "목표와 의미상 가까운 단어를 단서로 삼아 관련 메뉴를 따라간다.",
+      "데스크톱에서는 상단 메뉴와 펼쳐진 하위 메뉴를 함께 살핀다. 복잡한 메뉴가 한꺼번에 보이면 가까운 항목부터 천천히 해석한다.",
+      "메뉴명과 짧은 설명을 함께 확인한 뒤 행동한다.",
+      "한 경로를 적당히 확인한 뒤 진전이 없으면 다른 경로로 전환한다."
+    ]
+  },
+  {
+    "persona_id": "P010",
+    "name": "선택 전 검증-desktop-10",
+    "archetype": "선택 전 검증",
+    "web_skill": "low",
+    "device": "desktop",
+    "domain_knowledge": "high",
+    "reading_style": "normal",
+    "patience": "medium",
+    "background": "학교 홈페이지의 학사·행정 메뉴 구성과 주요 용어에 익숙하다.",
+    "behavior": [
+      "클릭하기 전에 상위 범주와 하위 메뉴가 목표와 맞는지 한 번 확인한다.",
+      "데스크톱에서는 상단 메뉴와 펼쳐진 하위 메뉴를 함께 살핀다. 복잡한 메뉴가 한꺼번에 보이면 가까운 항목부터 천천히 해석한다.",
+      "메뉴명과 짧은 설명을 함께 확인한 뒤 행동한다.",
+      "한 경로를 적당히 확인한 뒤 진전이 없으면 다른 경로로 전환한다."
+    ]
+  },
+  {
+    "persona_id": "P011",
+    "name": "주변 항목 비교-desktop-11",
+    "archetype": "주변 항목 비교",
+    "web_skill": "medium",
+    "device": "desktop",
+    "domain_knowledge": "medium",
+    "reading_style": "deep",
+    "patience": "medium",
+    "background": "학교 홈페이지에서 수강·증명서 같은 정보를 가끔 찾아본 경험이 있다.",
+    "behavior": [
+      "비슷한 하위 메뉴를 서로 비교한 뒤 더 관련 있어 보이는 항목을 고른다.",
+      "데스크톱에서는 상단 메뉴와 펼쳐진 하위 메뉴를 함께 살핀다. 일반적인 상단 메뉴와 펼침 메뉴를 무리 없이 사용할 수 있다.",
+      "관련 메뉴의 문구와 주변 설명을 충분히 읽은 뒤 행동한다.",
+      "한 경로를 적당히 확인한 뒤 진전이 없으면 다른 경로로 전환한다."
+    ]
+  },
+  {
+    "persona_id": "P012",
+    "name": "최단 경로 선호-mobile-12",
+    "archetype": "최단 경로 선호",
+    "web_skill": "high",
+    "device": "mobile",
+    "domain_knowledge": "low",
+    "reading_style": "deep",
+    "patience": "high",
+    "background": "학교 홈페이지를 거의 사용하지 않아 학사 용어와 메뉴 구조가 낯설다.",
+    "behavior": [
+      "목표와 직접 연결되어 보이는 가장 짧은 메뉴 경로를 선택한다.",
+      "모바일에서는 메뉴 버튼과 현재 화면에 보이는 항목을 중심으로 탐색한다. 메뉴 계층과 페이지 구조를 빠르게 파악해 관련 없는 항목을 건너뛴다.",
+      "관련 메뉴의 문구와 주변 설명을 충분히 읽은 뒤 행동한다.",
+      "관련 가능성이 있으면 충분히 살펴보되 같은 실패 행동은 반복하지 않는다."
+    ]
+  },
+  {
+    "persona_id": "P013",
+    "name": "현재 위치 활용-desktop-13",
+    "archetype": "현재 위치 활용",
+    "web_skill": "medium",
+    "device": "desktop",
+    "domain_knowledge": "low",
+    "reading_style": "skim",
+    "patience": "high",
+    "background": "학교 홈페이지를 거의 사용하지 않아 학사 용어와 메뉴 구조가 낯설다.",
+    "behavior": [
+      "현재 페이지의 메뉴 범주와 이동 흔적을 이용해 다음 항목을 정한다.",
+      "데스크톱에서는 상단 메뉴와 펼쳐진 하위 메뉴를 함께 살핀다. 일반적인 상단 메뉴와 펼침 메뉴를 무리 없이 사용할 수 있다.",
+      "긴 설명은 훑고 짧은 메뉴명과 제목을 우선 단서로 사용한다.",
+      "관련 가능성이 있으면 충분히 살펴보되 같은 실패 행동은 반복하지 않는다."
+    ]
+  },
+  {
+    "persona_id": "P014",
+    "name": "복구 우선-mobile-14",
+    "archetype": "복구 우선",
+    "web_skill": "high",
+    "device": "mobile",
+    "domain_knowledge": "high",
+    "reading_style": "deep",
+    "patience": "medium",
+    "background": "학교 홈페이지의 학사·행정 메뉴 구성과 주요 용어에 익숙하다.",
+    "behavior": [
+      "잘못된 페이지라고 판단하면 같은 행동을 반복하지 않고 이전 단계에서 다른 메뉴를 고른다.",
+      "모바일에서는 메뉴 버튼과 현재 화면에 보이는 항목을 중심으로 탐색한다. 메뉴 계층과 페이지 구조를 빠르게 파악해 관련 없는 항목을 건너뛴다.",
+      "관련 메뉴의 문구와 주변 설명을 충분히 읽은 뒤 행동한다.",
+      "한 경로를 적당히 확인한 뒤 진전이 없으면 다른 경로로 전환한다."
+    ]
+  },
+  {
+    "persona_id": "P015",
+    "name": "정보 단서 추적-desktop-15",
+    "archetype": "정보 단서 추적",
+    "web_skill": "medium",
+    "device": "desktop",
+    "domain_knowledge": "high",
+    "reading_style": "normal",
+    "patience": "low",
+    "background": "학교 홈페이지의 학사·행정 메뉴 구성과 주요 용어에 익숙하다.",
+    "behavior": [
+      "목표와 의미상 가까운 단어를 단서로 삼아 관련 메뉴를 따라간다.",
+      "데스크톱에서는 상단 메뉴와 펼쳐진 하위 메뉴를 함께 살핀다. 일반적인 상단 메뉴와 펼침 메뉴를 무리 없이 사용할 수 있다.",
+      "메뉴명과 짧은 설명을 함께 확인한 뒤 행동한다.",
+      "몇 번 안에 단서를 찾지 못하면 빠르게 이전 단계로 돌아가 다른 선택을 한다."
+    ]
+  },
+  {
+    "persona_id": "P016",
+    "name": "선택 전 검증-mobile-16",
+    "archetype": "선택 전 검증",
+    "web_skill": "low",
+    "device": "mobile",
+    "domain_knowledge": "high",
+    "reading_style": "normal",
+    "patience": "low",
+    "background": "학교 홈페이지의 학사·행정 메뉴 구성과 주요 용어에 익숙하다.",
+    "behavior": [
+      "클릭하기 전에 상위 범주와 하위 메뉴가 목표와 맞는지 한 번 확인한다.",
+      "모바일에서는 메뉴 버튼과 현재 화면에 보이는 항목을 중심으로 탐색한다. 복잡한 메뉴가 한꺼번에 보이면 가까운 항목부터 천천히 해석한다.",
+      "메뉴명과 짧은 설명을 함께 확인한 뒤 행동한다.",
+      "몇 번 안에 단서를 찾지 못하면 빠르게 이전 단계로 돌아가 다른 선택을 한다."
+    ]
+  },
+  {
+    "persona_id": "P017",
+    "name": "계층 우선-mobile-17",
+    "archetype": "계층 우선",
+    "web_skill": "medium",
+    "device": "mobile",
+    "domain_knowledge": "medium",
+    "reading_style": "normal",
+    "patience": "high",
+    "background": "학교 홈페이지에서 수강·증명서 같은 정보를 가끔 찾아본 경험이 있다.",
+    "behavior": [
+      "대메뉴부터 하위 메뉴까지 계층을 차례로 확인한다.",
+      "모바일에서는 메뉴 버튼과 현재 화면에 보이는 항목을 중심으로 탐색한다. 일반적인 상단 메뉴와 펼침 메뉴를 무리 없이 사용할 수 있다.",
+      "메뉴명과 짧은 설명을 함께 확인한 뒤 행동한다.",
+      "관련 가능성이 있으면 충분히 살펴보되 같은 실패 행동은 반복하지 않는다."
+    ]
+  },
+  {
+    "persona_id": "P018",
+    "name": "문구 일치 우선-desktop-18",
+    "archetype": "문구 일치 우선",
+    "web_skill": "high",
+    "device": "desktop",
+    "domain_knowledge": "high",
+    "reading_style": "skim",
+    "patience": "medium",
+    "background": "학교 홈페이지의 학사·행정 메뉴 구성과 주요 용어에 익숙하다.",
+    "behavior": [
+      "과업 문구와 가장 비슷한 메뉴명을 먼저 선택한다.",
+      "데스크톱에서는 상단 메뉴와 펼쳐진 하위 메뉴를 함께 살핀다. 메뉴 계층과 페이지 구조를 빠르게 파악해 관련 없는 항목을 건너뛴다.",
+      "긴 설명은 훑고 짧은 메뉴명과 제목을 우선 단서로 사용한다.",
+      "한 경로를 적당히 확인한 뒤 진전이 없으면 다른 경로로 전환한다."
+    ]
+  },
+  {
+    "persona_id": "P019",
+    "name": "범주 추론-mobile-19",
+    "archetype": "범주 추론",
+    "web_skill": "high",
+    "device": "mobile",
+    "domain_knowledge": "medium",
+    "reading_style": "normal",
+    "patience": "medium",
+    "background": "학교 홈페이지에서 수강·증명서 같은 정보를 가끔 찾아본 경험이 있다.",
+    "behavior": [
+      "찾는 정보의 담당 영역을 추론해 알맞은 대메뉴를 고른다.",
+      "모바일에서는 메뉴 버튼과 현재 화면에 보이는 항목을 중심으로 탐색한다. 메뉴 계층과 페이지 구조를 빠르게 파악해 관련 없는 항목을 건너뛴다.",
+      "메뉴명과 짧은 설명을 함께 확인한 뒤 행동한다.",
+      "한 경로를 적당히 확인한 뒤 진전이 없으면 다른 경로로 전환한다."
+    ]
+  },
+  {
+    "persona_id": "P020",
+    "name": "제목 우선-desktop-20",
+    "archetype": "제목 우선",
+    "web_skill": "medium",
+    "device": "desktop",
+    "domain_knowledge": "low",
+    "reading_style": "skim",
+    "patience": "low",
+    "background": "학교 홈페이지를 거의 사용하지 않아 학사 용어와 메뉴 구조가 낯설다.",
+    "behavior": [
+      "페이지 제목과 메뉴 제목을 먼저 보고 다음 위치를 판단한다.",
+      "데스크톱에서는 상단 메뉴와 펼쳐진 하위 메뉴를 함께 살핀다. 일반적인 상단 메뉴와 펼침 메뉴를 무리 없이 사용할 수 있다.",
+      "긴 설명은 훑고 짧은 메뉴명과 제목을 우선 단서로 사용한다.",
+      "몇 번 안에 단서를 찾지 못하면 빠르게 이전 단계로 돌아가 다른 선택을 한다."
+    ]
+  },
+  {
+    "persona_id": "P021",
+    "name": "주변 항목 비교-mobile-21",
+    "archetype": "주변 항목 비교",
+    "web_skill": "low",
+    "device": "mobile",
+    "domain_knowledge": "high",
+    "reading_style": "skim",
+    "patience": "medium",
+    "background": "학교 홈페이지의 학사·행정 메뉴 구성과 주요 용어에 익숙하다.",
+    "behavior": [
+      "비슷한 하위 메뉴를 서로 비교한 뒤 더 관련 있어 보이는 항목을 고른다.",
+      "모바일에서는 메뉴 버튼과 현재 화면에 보이는 항목을 중심으로 탐색한다. 복잡한 메뉴가 한꺼번에 보이면 가까운 항목부터 천천히 해석한다.",
+      "긴 설명은 훑고 짧은 메뉴명과 제목을 우선 단서로 사용한다.",
+      "한 경로를 적당히 확인한 뒤 진전이 없으면 다른 경로로 전환한다."
+    ]
+  },
+  {
+    "persona_id": "P022",
+    "name": "최단 경로 선호-desktop-22",
+    "archetype": "최단 경로 선호",
+    "web_skill": "low",
+    "device": "desktop",
+    "domain_knowledge": "medium",
+    "reading_style": "skim",
+    "patience": "medium",
+    "background": "학교 홈페이지에서 수강·증명서 같은 정보를 가끔 찾아본 경험이 있다.",
+    "behavior": [
+      "목표와 직접 연결되어 보이는 가장 짧은 메뉴 경로를 선택한다.",
+      "데스크톱에서는 상단 메뉴와 펼쳐진 하위 메뉴를 함께 살핀다. 복잡한 메뉴가 한꺼번에 보이면 가까운 항목부터 천천히 해석한다.",
+      "긴 설명은 훑고 짧은 메뉴명과 제목을 우선 단서로 사용한다.",
+      "한 경로를 적당히 확인한 뒤 진전이 없으면 다른 경로로 전환한다."
+    ]
+  },
+  {
+    "persona_id": "P023",
+    "name": "현재 위치 활용-mobile-23",
+    "archetype": "현재 위치 활용",
+    "web_skill": "medium",
+    "device": "mobile",
+    "domain_knowledge": "high",
+    "reading_style": "normal",
+    "patience": "low",
+    "background": "학교 홈페이지의 학사·행정 메뉴 구성과 주요 용어에 익숙하다.",
+    "behavior": [
+      "현재 페이지의 메뉴 범주와 이동 흔적을 이용해 다음 항목을 정한다.",
+      "모바일에서는 메뉴 버튼과 현재 화면에 보이는 항목을 중심으로 탐색한다. 일반적인 상단 메뉴와 펼침 메뉴를 무리 없이 사용할 수 있다.",
+      "메뉴명과 짧은 설명을 함께 확인한 뒤 행동한다.",
+      "몇 번 안에 단서를 찾지 못하면 빠르게 이전 단계로 돌아가 다른 선택을 한다."
+    ]
+  },
+  {
+    "persona_id": "P024",
+    "name": "복구 우선-desktop-24",
+    "archetype": "복구 우선",
+    "web_skill": "low",
+    "device": "desktop",
+    "domain_knowledge": "medium",
+    "reading_style": "skim",
+    "patience": "low",
+    "background": "학교 홈페이지에서 수강·증명서 같은 정보를 가끔 찾아본 경험이 있다.",
+    "behavior": [
+      "잘못된 페이지라고 판단하면 같은 행동을 반복하지 않고 이전 단계에서 다른 메뉴를 고른다.",
+      "데스크톱에서는 상단 메뉴와 펼쳐진 하위 메뉴를 함께 살핀다. 복잡한 메뉴가 한꺼번에 보이면 가까운 항목부터 천천히 해석한다.",
+      "긴 설명은 훑고 짧은 메뉴명과 제목을 우선 단서로 사용한다.",
+      "몇 번 안에 단서를 찾지 못하면 빠르게 이전 단계로 돌아가 다른 선택을 한다."
+    ]
+  },
+  {
+    "persona_id": "P025",
+    "name": "정보 단서 추적-mobile-25",
+    "archetype": "정보 단서 추적",
+    "web_skill": "low",
+    "device": "mobile",
+    "domain_knowledge": "low",
+    "reading_style": "skim",
+    "patience": "high",
+    "background": "학교 홈페이지를 거의 사용하지 않아 학사 용어와 메뉴 구조가 낯설다.",
+    "behavior": [
+      "목표와 의미상 가까운 단어를 단서로 삼아 관련 메뉴를 따라간다.",
+      "모바일에서는 메뉴 버튼과 현재 화면에 보이는 항목을 중심으로 탐색한다. 복잡한 메뉴가 한꺼번에 보이면 가까운 항목부터 천천히 해석한다.",
+      "긴 설명은 훑고 짧은 메뉴명과 제목을 우선 단서로 사용한다.",
+      "관련 가능성이 있으면 충분히 살펴보되 같은 실패 행동은 반복하지 않는다."
+    ]
+  },
+  {
+    "persona_id": "P026",
+    "name": "계층 우선-desktop-26",
+    "archetype": "계층 우선",
+    "web_skill": "high",
+    "device": "desktop",
+    "domain_knowledge": "high",
+    "reading_style": "deep",
+    "patience": "medium",
+    "background": "학교 홈페이지의 학사·행정 메뉴 구성과 주요 용어에 익숙하다.",
+    "behavior": [
+      "대메뉴부터 하위 메뉴까지 계층을 차례로 확인한다.",
+      "데스크톱에서는 상단 메뉴와 펼쳐진 하위 메뉴를 함께 살핀다. 메뉴 계층과 페이지 구조를 빠르게 파악해 관련 없는 항목을 건너뛴다.",
+      "관련 메뉴의 문구와 주변 설명을 충분히 읽은 뒤 행동한다.",
+      "한 경로를 적당히 확인한 뒤 진전이 없으면 다른 경로로 전환한다."
+    ]
+  },
+  {
+    "persona_id": "P027",
+    "name": "문구 일치 우선-mobile-27",
+    "archetype": "문구 일치 우선",
+    "web_skill": "high",
+    "device": "mobile",
+    "domain_knowledge": "low",
+    "reading_style": "normal",
+    "patience": "medium",
+    "background": "학교 홈페이지를 거의 사용하지 않아 학사 용어와 메뉴 구조가 낯설다.",
+    "behavior": [
+      "과업 문구와 가장 비슷한 메뉴명을 먼저 선택한다.",
+      "모바일에서는 메뉴 버튼과 현재 화면에 보이는 항목을 중심으로 탐색한다. 메뉴 계층과 페이지 구조를 빠르게 파악해 관련 없는 항목을 건너뛴다.",
+      "메뉴명과 짧은 설명을 함께 확인한 뒤 행동한다.",
+      "한 경로를 적당히 확인한 뒤 진전이 없으면 다른 경로로 전환한다."
+    ]
+  },
+  {
+    "persona_id": "P028",
+    "name": "범주 추론-desktop-28",
+    "archetype": "범주 추론",
+    "web_skill": "medium",
+    "device": "desktop",
+    "domain_knowledge": "medium",
+    "reading_style": "skim",
+    "patience": "medium",
+    "background": "학교 홈페이지에서 수강·증명서 같은 정보를 가끔 찾아본 경험이 있다.",
+    "behavior": [
+      "찾는 정보의 담당 영역을 추론해 알맞은 대메뉴를 고른다.",
+      "데스크톱에서는 상단 메뉴와 펼쳐진 하위 메뉴를 함께 살핀다. 일반적인 상단 메뉴와 펼침 메뉴를 무리 없이 사용할 수 있다.",
+      "긴 설명은 훑고 짧은 메뉴명과 제목을 우선 단서로 사용한다.",
+      "한 경로를 적당히 확인한 뒤 진전이 없으면 다른 경로로 전환한다."
+    ]
+  },
+  {
+    "persona_id": "P029",
+    "name": "제목 우선-mobile-29",
+    "archetype": "제목 우선",
+    "web_skill": "medium",
+    "device": "mobile",
+    "domain_knowledge": "high",
+    "reading_style": "normal",
+    "patience": "medium",
+    "background": "학교 홈페이지의 학사·행정 메뉴 구성과 주요 용어에 익숙하다.",
+    "behavior": [
+      "페이지 제목과 메뉴 제목을 먼저 보고 다음 위치를 판단한다.",
+      "모바일에서는 메뉴 버튼과 현재 화면에 보이는 항목을 중심으로 탐색한다. 일반적인 상단 메뉴와 펼침 메뉴를 무리 없이 사용할 수 있다.",
+      "메뉴명과 짧은 설명을 함께 확인한 뒤 행동한다.",
+      "한 경로를 적당히 확인한 뒤 진전이 없으면 다른 경로로 전환한다."
+    ]
+  },
+  {
+    "persona_id": "P030",
+    "name": "현재 위치 활용-desktop-30",
+    "archetype": "현재 위치 활용",
+    "web_skill": "low",
+    "device": "desktop",
+    "domain_knowledge": "high",
+    "reading_style": "deep",
+    "patience": "high",
+    "background": "학교 홈페이지의 학사·행정 메뉴 구성과 주요 용어에 익숙하다.",
+    "behavior": [
+      "현재 페이지의 메뉴 범주와 이동 흔적을 이용해 다음 항목을 정한다.",
+      "데스크톱에서는 상단 메뉴와 펼쳐진 하위 메뉴를 함께 살핀다. 복잡한 메뉴가 한꺼번에 보이면 가까운 항목부터 천천히 해석한다.",
+      "관련 메뉴의 문구와 주변 설명을 충분히 읽은 뒤 행동한다.",
+      "관련 가능성이 있으면 충분히 살펴보되 같은 실패 행동은 반복하지 않는다."
+    ]
+  },
+  {
+    "persona_id": "P031",
+    "name": "정보 단서 추적-desktop-31",
+    "archetype": "정보 단서 추적",
+    "web_skill": "high",
+    "device": "desktop",
+    "domain_knowledge": "medium",
+    "reading_style": "deep",
+    "patience": "low",
+    "background": "학교 홈페이지에서 수강·증명서 같은 정보를 가끔 찾아본 경험이 있다.",
+    "behavior": [
+      "목표와 의미상 가까운 단어를 단서로 삼아 관련 메뉴를 따라간다.",
+      "데스크톱에서는 상단 메뉴와 펼쳐진 하위 메뉴를 함께 살핀다. 메뉴 계층과 페이지 구조를 빠르게 파악해 관련 없는 항목을 건너뛴다.",
+      "관련 메뉴의 문구와 주변 설명을 충분히 읽은 뒤 행동한다.",
+      "몇 번 안에 단서를 찾지 못하면 빠르게 이전 단계로 돌아가 다른 선택을 한다."
+    ]
+  },
+  {
+    "persona_id": "P032",
+    "name": "선택 전 검증-mobile-32",
+    "archetype": "선택 전 검증",
+    "web_skill": "medium",
+    "device": "mobile",
+    "domain_knowledge": "low",
+    "reading_style": "deep",
+    "patience": "low",
+    "background": "학교 홈페이지를 거의 사용하지 않아 학사 용어와 메뉴 구조가 낯설다.",
+    "behavior": [
+      "클릭하기 전에 상위 범주와 하위 메뉴가 목표와 맞는지 한 번 확인한다.",
+      "모바일에서는 메뉴 버튼과 현재 화면에 보이는 항목을 중심으로 탐색한다. 일반적인 상단 메뉴와 펼침 메뉴를 무리 없이 사용할 수 있다.",
+      "관련 메뉴의 문구와 주변 설명을 충분히 읽은 뒤 행동한다.",
+      "몇 번 안에 단서를 찾지 못하면 빠르게 이전 단계로 돌아가 다른 선택을 한다."
+    ]
+  },
+  {
+    "persona_id": "P033",
+    "name": "계층 우선-mobile-33",
+    "archetype": "계층 우선",
+    "web_skill": "high",
+    "device": "mobile",
+    "domain_knowledge": "medium",
+    "reading_style": "skim",
+    "patience": "low",
+    "background": "학교 홈페이지에서 수강·증명서 같은 정보를 가끔 찾아본 경험이 있다.",
+    "behavior": [
+      "대메뉴부터 하위 메뉴까지 계층을 차례로 확인한다.",
+      "모바일에서는 메뉴 버튼과 현재 화면에 보이는 항목을 중심으로 탐색한다. 메뉴 계층과 페이지 구조를 빠르게 파악해 관련 없는 항목을 건너뛴다.",
+      "긴 설명은 훑고 짧은 메뉴명과 제목을 우선 단서로 사용한다.",
+      "몇 번 안에 단서를 찾지 못하면 빠르게 이전 단계로 돌아가 다른 선택을 한다."
+    ]
+  },
+  {
+    "persona_id": "P034",
+    "name": "문구 일치 우선-desktop-34",
+    "archetype": "문구 일치 우선",
+    "web_skill": "medium",
+    "device": "desktop",
+    "domain_knowledge": "medium",
+    "reading_style": "deep",
+    "patience": "low",
+    "background": "학교 홈페이지에서 수강·증명서 같은 정보를 가끔 찾아본 경험이 있다.",
+    "behavior": [
+      "과업 문구와 가장 비슷한 메뉴명을 먼저 선택한다.",
+      "데스크톱에서는 상단 메뉴와 펼쳐진 하위 메뉴를 함께 살핀다. 일반적인 상단 메뉴와 펼침 메뉴를 무리 없이 사용할 수 있다.",
+      "관련 메뉴의 문구와 주변 설명을 충분히 읽은 뒤 행동한다.",
+      "몇 번 안에 단서를 찾지 못하면 빠르게 이전 단계로 돌아가 다른 선택을 한다."
+    ]
+  },
+  {
+    "persona_id": "P035",
+    "name": "범주 추론-mobile-35",
+    "archetype": "범주 추론",
+    "web_skill": "low",
+    "device": "mobile",
+    "domain_knowledge": "low",
+    "reading_style": "deep",
+    "patience": "low",
+    "background": "학교 홈페이지를 거의 사용하지 않아 학사 용어와 메뉴 구조가 낯설다.",
+    "behavior": [
+      "찾는 정보의 담당 영역을 추론해 알맞은 대메뉴를 고른다.",
+      "모바일에서는 메뉴 버튼과 현재 화면에 보이는 항목을 중심으로 탐색한다. 복잡한 메뉴가 한꺼번에 보이면 가까운 항목부터 천천히 해석한다.",
+      "관련 메뉴의 문구와 주변 설명을 충분히 읽은 뒤 행동한다.",
+      "몇 번 안에 단서를 찾지 못하면 빠르게 이전 단계로 돌아가 다른 선택을 한다."
+    ]
+  },
+  {
+    "persona_id": "P036",
+    "name": "제목 우선-desktop-36",
+    "archetype": "제목 우선",
+    "web_skill": "low",
+    "device": "desktop",
+    "domain_knowledge": "low",
+    "reading_style": "deep",
+    "patience": "medium",
+    "background": "학교 홈페이지를 거의 사용하지 않아 학사 용어와 메뉴 구조가 낯설다.",
+    "behavior": [
+      "페이지 제목과 메뉴 제목을 먼저 보고 다음 위치를 판단한다.",
+      "데스크톱에서는 상단 메뉴와 펼쳐진 하위 메뉴를 함께 살핀다. 복잡한 메뉴가 한꺼번에 보이면 가까운 항목부터 천천히 해석한다.",
+      "관련 메뉴의 문구와 주변 설명을 충분히 읽은 뒤 행동한다.",
+      "한 경로를 적당히 확인한 뒤 진전이 없으면 다른 경로로 전환한다."
+    ]
+  },
+  {
+    "persona_id": "P037",
+    "name": "주변 항목 비교-mobile-37",
+    "archetype": "주변 항목 비교",
+    "web_skill": "low",
+    "device": "mobile",
+    "domain_knowledge": "high",
+    "reading_style": "skim",
+    "patience": "high",
+    "background": "학교 홈페이지의 학사·행정 메뉴 구성과 주요 용어에 익숙하다.",
+    "behavior": [
+      "비슷한 하위 메뉴를 서로 비교한 뒤 더 관련 있어 보이는 항목을 고른다.",
+      "모바일에서는 메뉴 버튼과 현재 화면에 보이는 항목을 중심으로 탐색한다. 복잡한 메뉴가 한꺼번에 보이면 가까운 항목부터 천천히 해석한다.",
+      "긴 설명은 훑고 짧은 메뉴명과 제목을 우선 단서로 사용한다.",
+      "관련 가능성이 있으면 충분히 살펴보되 같은 실패 행동은 반복하지 않는다."
+    ]
+  },
+  {
+    "persona_id": "P038",
+    "name": "최단 경로 선호-desktop-38",
+    "archetype": "최단 경로 선호",
+    "web_skill": "high",
+    "device": "desktop",
+    "domain_knowledge": "high",
+    "reading_style": "normal",
+    "patience": "high",
+    "background": "학교 홈페이지의 학사·행정 메뉴 구성과 주요 용어에 익숙하다.",
+    "behavior": [
+      "목표와 직접 연결되어 보이는 가장 짧은 메뉴 경로를 선택한다.",
+      "데스크톱에서는 상단 메뉴와 펼쳐진 하위 메뉴를 함께 살핀다. 메뉴 계층과 페이지 구조를 빠르게 파악해 관련 없는 항목을 건너뛴다.",
+      "메뉴명과 짧은 설명을 함께 확인한 뒤 행동한다.",
+      "관련 가능성이 있으면 충분히 살펴보되 같은 실패 행동은 반복하지 않는다."
+    ]
+  },
+  {
+    "persona_id": "P039",
+    "name": "복구 우선-desktop-39",
+    "archetype": "복구 우선",
+    "web_skill": "medium",
+    "device": "desktop",
+    "domain_knowledge": "low",
+    "reading_style": "normal",
+    "patience": "medium",
+    "background": "학교 홈페이지를 거의 사용하지 않아 학사 용어와 메뉴 구조가 낯설다.",
+    "behavior": [
+      "잘못된 페이지라고 판단하면 같은 행동을 반복하지 않고 이전 단계에서 다른 메뉴를 고른다.",
+      "데스크톱에서는 상단 메뉴와 펼쳐진 하위 메뉴를 함께 살핀다. 일반적인 상단 메뉴와 펼침 메뉴를 무리 없이 사용할 수 있다.",
+      "메뉴명과 짧은 설명을 함께 확인한 뒤 행동한다.",
+      "한 경로를 적당히 확인한 뒤 진전이 없으면 다른 경로로 전환한다."
+    ]
+  },
+  {
+    "persona_id": "P040",
+    "name": "정보 단서 추적-mobile-40",
+    "archetype": "정보 단서 추적",
+    "web_skill": "medium",
+    "device": "mobile",
+    "domain_knowledge": "low",
+    "reading_style": "skim",
+    "patience": "medium",
+    "background": "학교 홈페이지를 거의 사용하지 않아 학사 용어와 메뉴 구조가 낯설다.",
+    "behavior": [
+      "목표와 의미상 가까운 단어를 단서로 삼아 관련 메뉴를 따라간다.",
+      "모바일에서는 메뉴 버튼과 현재 화면에 보이는 항목을 중심으로 탐색한다. 일반적인 상단 메뉴와 펼침 메뉴를 무리 없이 사용할 수 있다.",
+      "긴 설명은 훑고 짧은 메뉴명과 제목을 우선 단서로 사용한다.",
+      "한 경로를 적당히 확인한 뒤 진전이 없으면 다른 경로로 전환한다."
+    ]
+  },
+  {
+    "persona_id": "P041",
+    "name": "선택 전 검증-desktop-41",
+    "archetype": "선택 전 검증",
+    "web_skill": "high",
+    "device": "desktop",
+    "domain_knowledge": "low",
+    "reading_style": "skim",
+    "patience": "high",
+    "background": "학교 홈페이지를 거의 사용하지 않아 학사 용어와 메뉴 구조가 낯설다.",
+    "behavior": [
+      "클릭하기 전에 상위 범주와 하위 메뉴가 목표와 맞는지 한 번 확인한다.",
+      "데스크톱에서는 상단 메뉴와 펼쳐진 하위 메뉴를 함께 살핀다. 메뉴 계층과 페이지 구조를 빠르게 파악해 관련 없는 항목을 건너뛴다.",
+      "긴 설명은 훑고 짧은 메뉴명과 제목을 우선 단서로 사용한다.",
+      "관련 가능성이 있으면 충분히 살펴보되 같은 실패 행동은 반복하지 않는다."
+    ]
+  },
+  {
+    "persona_id": "P042",
+    "name": "계층 우선-desktop-42",
+    "archetype": "계층 우선",
+    "web_skill": "medium",
+    "device": "desktop",
+    "domain_knowledge": "low",
+    "reading_style": "normal",
+    "patience": "high",
+    "background": "학교 홈페이지를 거의 사용하지 않아 학사 용어와 메뉴 구조가 낯설다.",
+    "behavior": [
+      "대메뉴부터 하위 메뉴까지 계층을 차례로 확인한다.",
+      "데스크톱에서는 상단 메뉴와 펼쳐진 하위 메뉴를 함께 살핀다. 일반적인 상단 메뉴와 펼침 메뉴를 무리 없이 사용할 수 있다.",
+      "메뉴명과 짧은 설명을 함께 확인한 뒤 행동한다.",
+      "관련 가능성이 있으면 충분히 살펴보되 같은 실패 행동은 반복하지 않는다."
+    ]
+  },
+  {
+    "persona_id": "P043",
+    "name": "문구 일치 우선-mobile-43",
+    "archetype": "문구 일치 우선",
+    "web_skill": "low",
+    "device": "mobile",
+    "domain_knowledge": "medium",
+    "reading_style": "deep",
+    "patience": "high",
+    "background": "학교 홈페이지에서 수강·증명서 같은 정보를 가끔 찾아본 경험이 있다.",
+    "behavior": [
+      "과업 문구와 가장 비슷한 메뉴명을 먼저 선택한다.",
+      "모바일에서는 메뉴 버튼과 현재 화면에 보이는 항목을 중심으로 탐색한다. 복잡한 메뉴가 한꺼번에 보이면 가까운 항목부터 천천히 해석한다.",
+      "관련 메뉴의 문구와 주변 설명을 충분히 읽은 뒤 행동한다.",
+      "관련 가능성이 있으면 충분히 살펴보되 같은 실패 행동은 반복하지 않는다."
+    ]
+  },
+  {
+    "persona_id": "P044",
+    "name": "범주 추론-desktop-44",
+    "archetype": "범주 추론",
+    "web_skill": "low",
+    "device": "desktop",
+    "domain_knowledge": "high",
+    "reading_style": "skim",
+    "patience": "high",
+    "background": "학교 홈페이지의 학사·행정 메뉴 구성과 주요 용어에 익숙하다.",
+    "behavior": [
+      "찾는 정보의 담당 영역을 추론해 알맞은 대메뉴를 고른다.",
+      "데스크톱에서는 상단 메뉴와 펼쳐진 하위 메뉴를 함께 살핀다. 복잡한 메뉴가 한꺼번에 보이면 가까운 항목부터 천천히 해석한다.",
+      "긴 설명은 훑고 짧은 메뉴명과 제목을 우선 단서로 사용한다.",
+      "관련 가능성이 있으면 충분히 살펴보되 같은 실패 행동은 반복하지 않는다."
+    ]
+  },
+  {
+    "persona_id": "P045",
+    "name": "제목 우선-mobile-45",
+    "archetype": "제목 우선",
+    "web_skill": "high",
+    "device": "mobile",
+    "domain_knowledge": "medium",
+    "reading_style": "normal",
+    "patience": "high",
+    "background": "학교 홈페이지에서 수강·증명서 같은 정보를 가끔 찾아본 경험이 있다.",
+    "behavior": [
+      "페이지 제목과 메뉴 제목을 먼저 보고 다음 위치를 판단한다.",
+      "모바일에서는 메뉴 버튼과 현재 화면에 보이는 항목을 중심으로 탐색한다. 메뉴 계층과 페이지 구조를 빠르게 파악해 관련 없는 항목을 건너뛴다.",
+      "메뉴명과 짧은 설명을 함께 확인한 뒤 행동한다.",
+      "관련 가능성이 있으면 충분히 살펴보되 같은 실패 행동은 반복하지 않는다."
+    ]
+  },
+  {
+    "persona_id": "P046",
+    "name": "주변 항목 비교-desktop-46",
+    "archetype": "주변 항목 비교",
+    "web_skill": "high",
+    "device": "desktop",
+    "domain_knowledge": "low",
+    "reading_style": "normal",
+    "patience": "low",
+    "background": "학교 홈페이지를 거의 사용하지 않아 학사 용어와 메뉴 구조가 낯설다.",
+    "behavior": [
+      "비슷한 하위 메뉴를 서로 비교한 뒤 더 관련 있어 보이는 항목을 고른다.",
+      "데스크톱에서는 상단 메뉴와 펼쳐진 하위 메뉴를 함께 살핀다. 메뉴 계층과 페이지 구조를 빠르게 파악해 관련 없는 항목을 건너뛴다.",
+      "메뉴명과 짧은 설명을 함께 확인한 뒤 행동한다.",
+      "몇 번 안에 단서를 찾지 못하면 빠르게 이전 단계로 돌아가 다른 선택을 한다."
+    ]
+  },
+  {
+    "persona_id": "P047",
+    "name": "최단 경로 선호-mobile-47",
+    "archetype": "최단 경로 선호",
+    "web_skill": "low",
+    "device": "mobile",
+    "domain_knowledge": "low",
+    "reading_style": "normal",
+    "patience": "low",
+    "background": "학교 홈페이지를 거의 사용하지 않아 학사 용어와 메뉴 구조가 낯설다.",
+    "behavior": [
+      "목표와 직접 연결되어 보이는 가장 짧은 메뉴 경로를 선택한다.",
+      "모바일에서는 메뉴 버튼과 현재 화면에 보이는 항목을 중심으로 탐색한다. 복잡한 메뉴가 한꺼번에 보이면 가까운 항목부터 천천히 해석한다.",
+      "메뉴명과 짧은 설명을 함께 확인한 뒤 행동한다.",
+      "몇 번 안에 단서를 찾지 못하면 빠르게 이전 단계로 돌아가 다른 선택을 한다."
+    ]
+  },
+  {
+    "persona_id": "P048",
+    "name": "현재 위치 활용-desktop-48",
+    "archetype": "현재 위치 활용",
+    "web_skill": "high",
+    "device": "desktop",
+    "domain_knowledge": "medium",
+    "reading_style": "skim",
+    "patience": "low",
+    "background": "학교 홈페이지에서 수강·증명서 같은 정보를 가끔 찾아본 경험이 있다.",
+    "behavior": [
+      "현재 페이지의 메뉴 범주와 이동 흔적을 이용해 다음 항목을 정한다.",
+      "데스크톱에서는 상단 메뉴와 펼쳐진 하위 메뉴를 함께 살핀다. 메뉴 계층과 페이지 구조를 빠르게 파악해 관련 없는 항목을 건너뛴다.",
+      "긴 설명은 훑고 짧은 메뉴명과 제목을 우선 단서로 사용한다.",
+      "몇 번 안에 단서를 찾지 못하면 빠르게 이전 단계로 돌아가 다른 선택을 한다."
+    ]
+  },
+  {
+    "persona_id": "P049",
+    "name": "복구 우선-mobile-49",
+    "archetype": "복구 우선",
+    "web_skill": "low",
+    "device": "mobile",
+    "domain_knowledge": "medium",
+    "reading_style": "normal",
+    "patience": "low",
+    "background": "학교 홈페이지에서 수강·증명서 같은 정보를 가끔 찾아본 경험이 있다.",
+    "behavior": [
+      "잘못된 페이지라고 판단하면 같은 행동을 반복하지 않고 이전 단계에서 다른 메뉴를 고른다.",
+      "모바일에서는 메뉴 버튼과 현재 화면에 보이는 항목을 중심으로 탐색한다. 복잡한 메뉴가 한꺼번에 보이면 가까운 항목부터 천천히 해석한다.",
+      "메뉴명과 짧은 설명을 함께 확인한 뒤 행동한다.",
+      "몇 번 안에 단서를 찾지 못하면 빠르게 이전 단계로 돌아가 다른 선택을 한다."
+    ]
+  },
+  {
+    "persona_id": "P050",
+    "name": "선택 전 검증-mobile-50",
+    "archetype": "선택 전 검증",
+    "web_skill": "medium",
+    "device": "mobile",
+    "domain_knowledge": "medium",
+    "reading_style": "deep",
+    "patience": "high",
+    "background": "학교 홈페이지에서 수강·증명서 같은 정보를 가끔 찾아본 경험이 있다.",
+    "behavior": [
+      "클릭하기 전에 상위 범주와 하위 메뉴가 목표와 맞는지 한 번 확인한다.",
+      "모바일에서는 메뉴 버튼과 현재 화면에 보이는 항목을 중심으로 탐색한다. 일반적인 상단 메뉴와 펼침 메뉴를 무리 없이 사용할 수 있다.",
+      "관련 메뉴의 문구와 주변 설명을 충분히 읽은 뒤 행동한다.",
+      "관련 가능성이 있으면 충분히 살펴보되 같은 실패 행동은 반복하지 않는다."
+    ]
+  }
+]
