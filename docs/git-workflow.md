@@ -1,60 +1,77 @@
-# Git 워크플로 가이드 (v1, 2026-09-12)
+# Git 워크플로 (v2, 2026-10-02)
 
-09/10 위클리 M8 합의를 문서화한 것. **처음 협업하는 사람 기준**으로 쓴다. 모르면 PM 에게 묻는다.
+09/29 위클리 결정: **파트 브랜치는 유지하고, develop 으로 올릴 때 리뷰를 받는다.** 모르면 PM 에게.
 
 ## 1. 브랜치
 
-```
-main      배포 가능한 것만. 직접 push 금지. develop → main 은 PM 이 릴리스 때
-develop   통합 브랜치. 파트 브랜치의 PR 이 여기로 머지된다
-fe / be / ai   파트 작업 브랜치. 각 파트 리드가 관리
-feat/…    실제 작업은 여기서. 파트 브랜치에서 따고, 파트 브랜치로 PR
-```
+| 브랜치 | 무엇 | push | 병합 |
+| --- | --- | --- | --- |
+| `main` | 진도표 · 발표 때 찍는 스냅샷. 태그 `v0.x` | 금지 | develop → main, PM 이 |
+| `develop` | 통합 · 배포 서버가 받는 브랜치 | 금지 | **PR + 승인 1명 + CI 통과**, **merge commit** |
+| `be` · `ai` · `fe` | 파트 작업 브랜치 | **파트원 직접 push** (강제 push 금지) | 기능 하나가 끝나면 develop 으로 PR |
+| `feat/GACA-123-짧은설명` | (선택) 큰 작업 · 두 명이 같이 할 때. 파트 브랜치에서 딴다 | 자유 | 파트 브랜치로 PR, squash |
+| `docs/주제` | PM 문서 | 자유 | develop 으로 PR |
 
-**피처 브랜치 이름:** `feat/GACA-123-short-desc` — Jira 키를 넣으면 이슈에 자동 연결된다 (GitHub for Jira).
-버그면 `fix/GACA-123-…`, 문서면 `docs/…`.
-
-파트 브랜치(`fe`·`be`·`ai`)를 두는 이유: 파트 안에서 자주 합치고, develop 엔 파트 단위로 안정된 것만 올리기 위해서다.
-파트가 작아 부담이면 리드 판단으로 피처 → develop 직행도 된다.
+**왜 develop 병합만 merge commit 인가:** squash 로 합치면 파트 브랜치가 develop 과 갈라져서 **두 번째 PR 부터 이미 올린 파일이 다시 충돌한다.** merge commit 은 파트 브랜치를 그대로 이어 가게 해 준다. GitHub 가 develop 에서는 merge commit 만 허용하도록 막아 둔다.
 
 ## 2. 하루 흐름
 
 ```sh
-git switch fe                    # 내 파트 브랜치로
-git pull                         # 최신화
-git switch -c feat/GACA-51-approval-screen
-# … 작업 …
-git add -A && git commit -m "GACA-51 승인 화면 레이아웃"
-git push -u origin feat/GACA-51-approval-screen
-# GitHub 에서 PR: feat/… → fe
+git switch be && git pull                 # 내 파트 브랜치 최신화
+# … 작업 · 작게 자주 커밋 …
+git commit -m "GACA-101 runs 테이블 Flyway V1 추가"
+git push                                  # 파트 브랜치에 바로 올린다 (CI 가 돈다)
+# 기능 하나가 끝나면: GitHub 에서 PR  be → develop
 ```
 
-- **커밋 메시지 첫 줄에 Jira 키.** `GACA-51 승인 화면 레이아웃`. 형식 강제는 안 하되 키는 필수
-- 작게 자주 커밋. 하루 끝에 한 번 몰아서 올리지 않는다
-- `main` · `develop` 에 직접 push 하면 protection 이 막는다
+**다른 파트 변경 · 최신 문서 받기 (주 1회 이상, PR 올리기 전엔 꼭):**
 
-## 3. PR
+```sh
+git switch be && git pull
+git fetch origin && git merge origin/develop   # rebase 말고 merge — 파트 브랜치는 여럿이 쓴다
+git push
+```
 
-- 제목에 Jira 키. 본문은 템플릿(`.github/PULL_REQUEST_TEMPLATE.md`) 따라 — **무엇을 · 왜 · 어떻게 확인했나**
-- **리뷰어 1명 필수** (파트 리드 또는 PM). CODEOWNERS 가 자동 지정한다
-- CI 통과 전 머지 불가
-- 머지는 **Squash** — develop 이력이 PR 단위로 남는다
-- 리뷰는 24시간 안에. 막히면 Slack 파트 채널에 멘션
-- 리뷰 중 **이 PR 에서 안 고칠 결함**을 찾으면 GitHub Issue 를 만들고 Jira 에 버그로 짝을 만든다 (`docs/jira.md` 역할 분담)
+## 3. 이름 규칙
 
-## 4. 충돌
+| 대상 | 형식 | 예 |
+| --- | --- | --- |
+| 커밋 첫 줄 | `GACA-번호 무엇을 했나` (Jira 키 필수) | `GACA-107 관측 결과에서 숨은 요소 제거` |
+| PR 제목 | `[파트] GACA-번호 기능 이름` | `[AI] GACA-107 Persona Agent 루프 1차` |
+| PR 본문 | 템플릿 그대로 — 무엇을 · 왜 · **어떻게 확인했나** | 화면 변경이면 스크린샷 |
+| 태그 | `v0.진척률` | `v0.2`(10/11) `v0.3`(10/18) … `v1.0`(11/15) |
 
-1. `git switch fe && git pull` 후 내 피처 브랜치에서 `git rebase fe` (또는 `git merge fe` — 둘 다 OK, 편한 걸로)
-2. 충돌 파일 열어 `<<<<<<<` 정리 → `git add` → `git rebase --continue`
-3. 모르겠으면 **멈추고 PM 호출.** 강제 push 는 자기 피처 브랜치에만
+Jira 키를 넣어 두면 GitHub ↔ Jira 연동 후 커밋 · PR 이 티켓에 자동으로 붙는다.
 
-## 5. 하지 말 것
+## 4. 리뷰
 
-- `main`/`develop` 직접 push · 강제 push
-- 토큰·API 키 커밋 (`docs/secrets.md`)
-- 남의 피처 브랜치에 커밋 (필요하면 PR 로)
-- 빌드 산출물 · `node_modules` · `.env` 커밋 (`.gitignore` 가 막지만 확인)
+- **develop 으로 가는 PR 은 1명 승인 필수.** 리뷰는 다른 파트가 본다 — 서로 맞물리는 곳이 가장 잘 깨진다.
 
-## 6. 릴리스 (PM)
+| PR | 리뷰어 (먼저 적힌 사람) |
+| --- | --- |
+| BE (`services/api`) | 박소영 → PM |
+| AI (`services/agent`) | 한재완 → PM |
+| FE (`apps/web`) | 이수훈 ↔ 이유진 서로 → PM |
+| 문서 · compose · CI | 한재완 또는 박소영 |
 
-develop → main PR. 태그 `v0.x`. 중간발표(10/20) · 최종(11/22) 전에 각 1회.
+- **PR 올리기 전에 자기 코딩 에이전트(Codex · Claude 등)로 한 번 셀프 리뷰.** 사람 리뷰는 설계 · 계약 위주로 본다.
+- **24시간 안에** 리뷰. 막히면 Slack 에서 멘션.
+- PR 은 기능 하나 크기로. 1,000줄이 넘으면 나눈다.
+- 리뷰 중 이 PR 에서 안 고칠 문제는 Jira 버그로 남기고 넘어간다.
+
+## 5. 충돌
+
+1. 파트 브랜치에서 `git merge origin/develop` → 충돌 파일의 `<<<<<<<` 정리 → `git add` → `git commit`
+2. 남의 파트 코드가 걸린 충돌이면 **그 파트 사람과 같이** 푼다.
+3. 모르겠으면 멈추고 PM 호출.
+
+## 6. 하지 말 것
+
+- `main` · `develop` 직접 push, 어느 브랜치든 강제 push
+- develop PR 을 squash 로 병합 (GitHub 가 막지만 우회하지 않는다)
+- 토큰 · API 키 · `.env` 커밋 (`docs/secrets.md`), 빌드 산출물 · `node_modules` 커밋
+- 남의 파트 브랜치에 직접 push — 필요하면 PR 로
+
+## 7. 릴리스 (PM)
+
+진도표 제출 금요일에 develop → main PR(merge commit) → 태그 `v0.x` → 진도표에 태그 링크를 적는다.
