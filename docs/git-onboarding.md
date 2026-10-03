@@ -88,7 +88,7 @@ git push
 5. 리뷰어는 자동으로 요청된다 — BE · AI 코드는 상대 파트 사람과 PM, FE 코드는 다른 FE 한 명과 PM. **리뷰는 권장**이다 — 다른 파트와 맞물리는 변경(API 요청 · 응답, DB, 화면이 쓰는 값)이면 승인을 받고 병합한다. PR 에 적은 Jira 티켓은 **QA** 로 옮긴다.
 6. **자동 검사가 통과**하면 올린 사람이 **Create a merge commit** 으로 병합한다 (develop 은 이 방식만 열려 있다). 티켓은 **완료** 로.
 
-- 병합 버튼이 회색(**Merging is blocked**)이면 자동 검사가 아직 돌고 있거나 실패한 것이다. 버튼 위 목록에 뭐가 남았는지 나온다.
+- 병합 버튼이 회색(**Merging is blocked**)이면 자동 검사가 아직 돌고 있거나 실패했거나, 누가 **Request changes**(수정 요청)를 남긴 것이다 — 그 사람이 승인하면 풀린다. 버튼 위 목록에 뭐가 남았는지 나온다.
 - PR 이 열려 있는 동안 파트 브랜치에 push 한 커밋은 팀원 것이라도 **그 PR 에 같이 들어간다** (받아 둔 승인도 풀린다). 리뷰를 기다리는 동안 다른 작업은 push 를 미루거나 `feat/` 에서.
 - 병합해도 파트 브랜치는 지워지지 않는다. 그대로 이어서 쓴다.
 - PR 은 기능 하나 크기. 1,000줄이 넘으면 나눈다.
@@ -125,7 +125,7 @@ git push
 | 상황 | 이렇게 |
 | --- | --- |
 | push 가 `[rejected]` (fetch first · non-fast-forward) | GitHub 쪽이 앞서 있다 (팀원이 올렸거나 GitHub 에서 병합함). `git pull` → `git push` |
-| push 가 `GH006` · `GH013` 으로 거부 | `main` · `develop` 에 올리려 한 것. 바로 아래 "커밋 후에 브랜치가 틀린 걸 알았다" 대로 옮긴다 |
+| push 가 `GH006` · `GH013` 으로 거부 | 보호된 브랜치다. `main` · `develop` 에 올리려 했으면 바로 아래 "커밋 후에 브랜치가 틀린 걸 알았다" 대로 옮긴다. `--force` 를 붙였으면 빼고 `git pull` → `git push` |
 | 커밋 **후**에 브랜치가 틀린 걸 알았다 | `git log --oneline -3` 으로 커밋번호 확인 → `git switch fe` → `git cherry-pick 커밋번호` → `git push`. 틀린 쪽은 `git branch -f main origin/main` (develop 이면 develop) 으로 원래대로 |
 | 커밋 **전**에 브랜치가 틀린 걸 알았다 | `git switch fe` — 고친 파일은 따라온다. 안 되면 `git stash` → `git switch fe` → `git stash pop` |
 | `git pull` 이 `local changes … would be overwritten` | 먼저 커밋하거나, `git stash` → `git pull` → `git stash pop` |
