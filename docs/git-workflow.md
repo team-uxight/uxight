@@ -4,7 +4,7 @@
 
 **git 협업이 처음이면 [`git-onboarding.md`](git-onboarding.md) 부터** — 이 규칙을 명령 순서와 "실수했을 때" 로 풀어 뒀다.
 
-10/04 에 바뀐 것: develop PR 리뷰 필수 → 권장 · GitHub 기본 브랜치 main → develop · `feat/*` 는 동시 작업용으로 자유 · 병합된 브랜치를 자동으로 지우지 않음.
+10/04 에 바뀐 것: develop PR 리뷰 필수 → 권장 · GitHub 기본 브랜치 main → develop · `feat/*` 는 동시 작업용으로 자유 (여러 파트에 걸치면 develop 으로 바로) · 병합된 브랜치를 자동으로 지우지 않음.
 
 ## 1. 브랜치
 
@@ -13,7 +13,7 @@
 | `main` | 진도표 · 발표 때 찍는 스냅샷. 태그 `v0.x` | 금지 | develop → main PR, PM 이. merge commit |
 | `develop` | 통합 · 배포 서버가 받는 브랜치. **GitHub 기본 브랜치** | 금지 | **PR + CI 통과**, **merge commit**. 리뷰 권장 |
 | `be` · `ai` · `fe` | 파트 작업 브랜치 | **파트원 직접 push** (강제 push 금지) | 기능 하나가 끝나면 develop 으로 PR |
-| `feat/GACA-번호-짧은설명` | 동시 작업용 — 필요하면 자유롭게 만든다. 파트 브랜치에서 딴다 | 자유 (강제 push 는 쓰지 않는다) | 파트 브랜치로 PR — 리뷰 없이 바로 병합해도 된다. squash |
+| `feat/GACA-번호-짧은설명` | 동시 작업용 — 필요하면 자유롭게 만든다. 파트 브랜치에서 딴다 | 자유 (강제 push 는 쓰지 않는다) | 파트 브랜치로 PR — 리뷰 없이 바로 병합해도 된다. squash. **여러 파트에 걸치면**(예: agent · api 를 같이 고침) develop 에서 따서 develop 으로 바로 PR — develop 규칙(CI 필수 · merge commit · 리뷰 권장)을 따른다 |
 | `docs/주제` | PM 문서 | 자유 | develop 으로 PR |
 
 **왜 develop 병합만 merge commit 인가:** squash 로 합치면 파트 브랜치가 develop 과 갈라져서 **두 번째 PR 부터 이미 올린 파일이 다시 충돌한다.** merge commit 은 파트 브랜치를 그대로 이어 가게 해 준다. GitHub 가 develop 에서는 merge commit 만 허용하도록 막아 둔다.

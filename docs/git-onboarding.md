@@ -63,7 +63,7 @@ git switch -c feat/GACA-번호-login-layout       # 파트 브랜치에서 딴�
 git push -u origin feat/GACA-번호-login-layout  # -u 는 처음 한 번만
 ```
 
-GitHub 에서 PR 을 열 때 **base 를 `fe` 로** 바꾼다 (기본값은 `develop`). 리뷰 없이 바로 **Squash and merge** 해도 된다. 병합된 `feat/` 는 지워지지 않고 남는다 — Jira 티켓에서 찾아갈 수 있게. **다시 쓰지 말고** 다음 작업은 새 `feat/` 로 (이미 합쳐진 변경이 PR 에 또 보이고 충돌하기 쉽다).
+agent · api 처럼 **여러 파트에 걸친 작업**이면 `develop` 에서 따고 `develop` 으로 바로 PR 한다 (병합은 Create a merge commit). 그 밖에는 GitHub 에서 PR 을 열 때 **base 를 `fe` 로** 바꾼다 (기본값은 `develop`). 리뷰 없이 바로 **Squash and merge** 해도 된다. 병합된 `feat/` 는 지워지지 않고 남는다 — Jira 티켓에서 찾아갈 수 있게. **다시 쓰지 말고** 다음 작업은 새 `feat/` 로 (이미 합쳐진 변경이 PR 에 또 보이고 충돌하기 쉽다).
 
 ## 3. develop 받아 오기 — 주 1회 이상, PR 올리기 전엔 꼭
 
