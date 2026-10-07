@@ -1,0 +1,272 @@
+openapi: 3.1.0
+info:
+  title: UXight 내부 API (BE-AI)
+  version: 0.1.0
+  description: |-
+    UXight 프로젝트에서 백엔드(Spring)와 AI 모듈(FastAPI) 간 통신에 사용되는 내부 REST API 명세이다.
+    기준 문서는 '내부 REST API 설계.md'이다.
+
+    **규칙**
+    - AI 모듈의 API는 Spring만 호출한다. Spring의 내부 API는 /internal로 시작하고, AI 모듈만 호출한다. 두 쪽 모두 프론트엔드는 호출하지 않는다.
+    - 모든 내부 API는 공유 토큰 헤더(X-Internal-Token)를 보낸다. 받는 쪽은 자기 환경 변수의 값과 다르면 401을 응답한다.
+    - AI 모듈의 실패 응답 본문은 FastAPI 기본 형식(detail)을 따른다. Spring은 이 본문을 프론트엔드에 전달하지 않고 오류 파일에만 남긴다.
+    - Spring의 /internal API 실패 응답 본문은 code, message를 담는다.
+    - 회차 상태, 진행률, 결과(진단, 개선안, 지표)는 AI 모듈이 DB에 직접 쓴다. AI 모듈이 Spring에 상태를 보고하는 콜백 API는 없다.
+    - 취소는 Spring이 runs 테이블의 cancel_requested 컬럼만 기록하고, AI 모듈이 step 경계에서 확인한다.
+    - JSON 필드 이름은 snake_case를 사용한다.
+
+    **서버**
+    - /success-rules, /runs는 AI 모듈 서버로, /internal로 시작하는 API는 Spring 서버로 보낸다. 경로별 servers에 지정했다.
+servers:
+  - url: http://localhost:8000
+    description: AI 모듈(FastAPI) 로컬 예시
+security:
+  - internalToken: []
+tags:
+  - name: AI 모듈
+    description: Spring이 호출하는 AI 모듈의 API
+  - name: Spring 내부 API
+    description: AI 모듈이 호출하는 Spring의 /internal API
+
+paths:
+
+  /success-rules:
+    post:
+      tags: [AI 모듈]
+      operationId: createSuccessRule
+      summary: 성공 기준 생성
+      description: |-
+        실험 요청 처리 중 Spring이 동기로 호출한다.
+        - AI 모듈은 DB에 쓰지 않고 성공 기준만 반환한다. tasks 테이블의 success_rule 컬럼 저장은 tasks의 쓰기 주인인 Spring이 한다. 그래서 201이 아니라 200이다.
+        - 성공 기준은 화면 요소 기준이 아니라 도달 상태 기준으로 생성한다.
+        - Spring은 정해진 시간 안에 응답을 받지 못하면 504, 그 밖의 실패(실패 응답, 연결 실패)는 502를 프론트엔드에 응답한다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SuccessRuleRequest'
+      responses:
+        '200':
+          description: 생성 완료
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessRuleResponse'
+        '401':
+          description: 공유 토큰이 없거나 다름
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FastApiError'
+        '5XX':
+          description: 성공 기준 생성 실패. HTTPException으로 낸 오류는 detail 형식이지만, 처리되지 않은 예외는 평문 본문이 올 수 있다.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FastApiError'
+            text/plain:
+              schema:
+                type: string
+
+  /runs:
+    post:
+      tags: [AI 모듈]
+      operationId: dispatchRun
+      summary: 회차 실행 요청
+      description: |-
+        AI 모듈은 run_id로 runs 행의 스냅샷(대상 URL, Task, Persona, 정책)을 읽어 실행한다. 스냅샷은 Spring의 runs 테이블 INSERT 시점에 만들어지므로 run_id만 보낸다.
+        - Spring은 회차 INSERT를 커밋한 뒤에 호출한다. 실험 요청과 다음 회차 승인 모두 이 API로 회차를 전달한다.
+        - 멱등: AI 모듈은 status가 queued일 때만 accepted로 바꾸는 UPDATE를 실행하고, 바뀐 행이 있으면 202, 없으면 200을 응답한다. 같은 요청이 동시에 두 번 와도 한쪽만 202를 받는다.
+        - Spring은 queued로 남은 회차에 이 API를 다시 보낸다(재전송). 이미 받은 회차면 200만 돌아오므로 안전하다.
+        - 202는 실행 시작이 아니라 접수를 뜻한다. 동시 실행 한도가 차 있으면 회차는 accepted 상태로 자리가 날 때까지 기다린다.
+        - Spring은 호출 결과를 dispatch_state(sent, unreachable, timeout)에만 기록하고 status는 바꾸지 않는다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RunDispatchRequest'
+      responses:
+        '202':
+          description: 접수 완료. status를 queued에서 accepted로 바꿨다.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunAcceptedResponse'
+        '200':
+          description: 이미 받은 회차. status가 queued가 아니다.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunAlreadyReceivedResponse'
+        '401':
+          description: 공유 토큰이 없거나 다름
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FastApiError'
+        '404':
+          description: 회차가 없음
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FastApiError'
+        '5XX':
+          description: 처리 실패. 처리되지 않은 예외는 평문 본문이 올 수 있다.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FastApiError'
+            text/plain:
+              schema:
+                type: string
+
+  /internal/runs/{runId}/credentials:
+    servers:
+      - url: http://localhost:8080
+        description: Spring 로컬 예시
+    get:
+      tags: [Spring 내부 API]
+      operationId: getRunCredentials
+      summary: 테스트 계정 자격증명 제공
+      description: |-
+        Persona Agent 루프 시작 전 로그인 스크립트에 사용한다.
+        - Spring은 test_accounts 테이블에서 assigned_run_id가 runId인 계정만 복호화해 제공한다.
+        - AI 모듈은 회차의 자격증명 전부를 status를 running으로 바꾸기 전에 한 번에 받는다. 동시 Persona 수 상한 때문에 나중에 시작하는 Persona는 회차가 이미 running일 때 시작하기 때문이다.
+        - 제공 횟수는 제한하지 않는다. AI 모듈이 재시작으로 accepted 회차를 다시 가져가면 다시 받을 수 있다.
+        - 받은 평문은 메모리에만 두고, LLM 프롬프트, 관측, 로그, 스크린샷 어디에도 남기지 않는다.
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: 자격증명 목록. 테스트 계정이 없으면 빈 목록이며, AI 모듈은 로그인 단계를 건너뛴다.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Credential'
+        '401':
+          description: 공유 토큰이 없거나 다름
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalErrorResponse'
+        '404':
+          description: 회차가 없음
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalErrorResponse'
+        '409':
+          description: 회차가 accepted가 아니거나 취소 요청된 회차
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalErrorResponse'
+
+components:
+  securitySchemes:
+    internalToken:
+      type: apiKey
+      in: header
+      name: X-Internal-Token
+      description: 공유 비밀값. Spring과 AI 모듈이 같은 값을 환경 변수로 갖는다. 사용자와 무관한 서버 간 호출이라 JWT 대신 이 방식을 쓴다.
+
+  schemas:
+
+    RunStatus:
+      type: string
+      enum: [queued, accepted, running, done, failed, cancelled]
+      description: 회차 상태(runs.status)
+
+    SuccessRuleRequest:
+      type: object
+      required: [target_url, goal, success_url]
+      properties:
+        target_url:
+          type: string
+          description: 프로젝트의 대상 URL
+        goal:
+          type: string
+          description: Task 목표
+        success_url:
+          type: string
+          description: 리서처가 입력한 성공 URL
+
+    SuccessRuleResponse:
+      type: object
+      description: tasks 테이블의 is_one_shot 컬럼을 이 Agent에 맡기기로 하면 is_one_shot을 추가한다.
+      required: [success_rule]
+      properties:
+        success_rule:
+          type: string
+          description: 도달 상태 기준의 성공 기준. Spring이 tasks.success_rule에 저장한다.
+
+    RunDispatchRequest:
+      type: object
+      required: [run_id]
+      properties:
+        run_id:
+          type: integer
+          format: int64
+
+    RunAcceptedResponse:
+      type: object
+      required: [run_id]
+      properties:
+        run_id:
+          type: integer
+          format: int64
+
+    RunAlreadyReceivedResponse:
+      type: object
+      required: [run_id, status]
+      properties:
+        run_id:
+          type: integer
+          format: int64
+        status:
+          $ref: '#/components/schemas/RunStatus'
+          description: 회차의 현재 status
+
+    Credential:
+      type: object
+      required: [test_account_id, login_id, password]
+      properties:
+        test_account_id:
+          type: integer
+          format: int64
+        login_id:
+          type: string
+          description: 테스트 계정 아이디
+        password:
+          type: string
+          format: password
+          description: 복호화된 비밀번호
+
+    FastApiError:
+      type: object
+      description: FastAPI 기본 실패 응답 형식
+      required: [detail]
+      properties:
+        detail:
+          description: 오류 내용. HTTPException으로 낸 오류는 문자열이다.
+
+    InternalErrorResponse:
+      type: object
+      description: Spring의 /internal API 실패 응답 형식
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: 오류 코드
+        message:
+          type: string
+          description: 오류 메시지
