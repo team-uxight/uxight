@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [develop, main, fe, be, ai]
   push:
-    branches: [develop, main]
+    branches: [develop, main, fe, be, ai]   # 파트 브랜치 직접 push 도 검사 (브랜치 규칙 v2)
 
 # 바뀐 surface 만 검사한다 (paths-filter). 각 잡은 `make check` 의 해당 항목과 같다.
 jobs:

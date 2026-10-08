@@ -24,4 +24,4 @@ API 로 못 하는 것들. 순서대로, 각 10분 내.
 4. 개인 알림은 각자 `/jira notifications on`
 
 ## 4. Branch protection — 저장소 확정 후 API 로 (PM)
-`main`·`develop`: PR 필수 · 리뷰 1 · CI 통과 · 강제 push 금지 · 삭제 금지. `fe`·`be`·`ai`: PR 필수 · 강제 push 금지.
+`main`·`develop`: PR 필수 · 승인 0명(리뷰 권장) · CI 6개 통과 · merge commit 만 · 강제 push · 삭제 금지. `fe`·`be`·`ai`: 직접 push · 강제 push · 삭제 금지. 기본 브랜치 `develop` · 병합 후 브랜치 자동 삭제 끔 (10/04).

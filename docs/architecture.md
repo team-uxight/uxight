@@ -443,7 +443,7 @@ uxight/
 | --- | --- | --- | --- |
 | web | 5173 | node:22 dev 서버, 소스 바인드 | `VITE_API_BASE_URL` |
 | api | 8080 | Dockerfile (gradle → temurin 21 jre) | `DB_URL` `DB_USER` `DB_PASSWORD` `AGENT_BASE_URL` `INTERNAL_TOKEN` `JWT_SECRET` `CREDENTIAL_KEY` `GOOGLE_CLIENT_ID` `GOOGLE_CLIENT_SECRET` · **볼륨 `./services/agent/data/runs:/data/runs:ro`** — step 로그·스크린샷 API(§8)가 읽는 곳 |
-| agent | 8000 | Dockerfile (python 3.12 + uv + playwright chromium) — 첫 빌드 느림 | **역할별** `LLM_STEP_BASE_URL`/`LLM_STEP_MODEL` · `LLM_DIAG_BASE_URL`/`LLM_DIAG_MODEL` (프록시는 배포 단위로 모델이 핀된다, tech-stack §6 T19) · `LLM_API_KEY`(공용) · `DB_URL` `INTERNAL_TOKEN` · `read_only` · `cap_drop` · **`shm_size: 1gb`** (없으면 `read_only` + 기본 64MB `/dev/shm` 에서 Chromium 이 탭 단위로 죽는다. 대안은 `--disable-dev-shm-usage` 지만 느려진다) · 볼륨 `…/data/runs` 읽기·쓰기 |
+| agent | 8000 | Dockerfile (python 3.12 + uv + playwright chromium) — 첫 빌드 느림 | `LLM_BASE_URL` · `LLM_MODEL` · `LLM_API_KEY` — 10/04 엘리스 MLAPI 배포 하나(`openai/gpt-5.6-luna`)를 가상 사용자 step 과 진단이 같이 쓴다. 진단용 모델을 따로 받으면 그때 역할별 env 로 나눈다 (MLAPI 는 배포 주소 하나에 모델 하나가 묶인다). 모델 값은 `.env.example` 에, 회사 배포 주소는 저장소에 올리지 않고 PM 이 DM 으로 · `DB_URL` `INTERNAL_TOKEN` · `read_only` · `cap_drop` · **`shm_size: 1gb`** (없으면 `read_only` + 기본 64MB `/dev/shm` 에서 Chromium 이 탭 단위로 죽는다. 대안은 `--disable-dev-shm-usage` 지만 느려진다) · 볼륨 `…/data/runs` 읽기·쓰기 |
 | mysql | 3306 | mysql:8.4, healthcheck, named volume | `MYSQL_ROOT_PASSWORD` `MYSQL_DATABASE` |
 
 로컬: `cp .env.example .env` → `make up` → web `http://localhost:5173`. 값은 `.env` 에만, 이름은 `.env.example` 에만 (`secrets.md`).

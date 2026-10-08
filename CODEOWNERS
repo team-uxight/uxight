@@ -1,9 +1,10 @@
-# PR 리뷰어 자동 지정. 경로가 겹치면 아래 줄이 이긴다.
+# PR 리뷰어 자동 지정 — 다른 파트가 리뷰한다 (docs/git-workflow.md §4). 경로가 겹치면 아래 줄이 이긴다. 작성자 본인은 빠진다.
 # 안준석 @Junja0419 · 이수훈 @leesuhun · 한재완 @H4NJA2W4N · 박소영 @Kaia-nyoung · 이유진 @youjin730
-*                         @Junja0419
-/apps/web/                @team-uxight/fe
-/services/api/            @team-uxight/be
-/services/agent/          @team-uxight/ai
-/docs/                    @Junja0419
-/.github/                 @Junja0419
-/docker-compose.yml       @Junja0419
+*                      @Junja0419
+/services/api/         @Kaia-nyoung @Junja0419
+/services/agent/       @H4NJA2W4N @Junja0419
+/apps/web/             @team-uxight/fe @Junja0419
+/docs/                 @H4NJA2W4N @Kaia-nyoung
+/docker-compose.yml    @H4NJA2W4N @Kaia-nyoung
+/Makefile              @H4NJA2W4N @Kaia-nyoung
+/.github/              @H4NJA2W4N @Kaia-nyoung
