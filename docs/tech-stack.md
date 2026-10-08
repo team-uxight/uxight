@@ -158,13 +158,21 @@ Flutter 는 경험자가 없어 기각. T1 의 "Flutter 확정" 은 이 문서�
 
 OpenRouter 는 예비로만 남긴다 — 회사 프록시 하나로 역할별 모델 A/B(T4)까지 가능해 보인다. 캡스톤 키 발급 후 `scripts/probe-llm-api.py` 로 모델 목록 · rate limit 재확인이 S1 첫 주 PM 항목.
 
+### 모델 후보 메모 — Luna · Jev (09/22, **T22 로 기록 — Jev 미채택**)
+
+| | GPT-5.6 Luna (기본 후보) | Jev 1.13 (TypeSafe, 09/15 출시) |
+| --- | --- | --- |
+| 무엇 | 텍스트 생성 LLM, reasoning 모델. $0.20 / $1.20 per M, 컨텍스트 1M | **LLM 이 아니다.** 상태(텍스트) + 질문(Choice ≤255 · Score · Yes/No) → 확률 붙은 타입 답. 텍스트 · 근거 · 이미지 없음. 70~500ms, ~$0.0004/결정 |
+| 우리 루프에 | 관측 → 행동 JSON 5종 + `reasoning`(think-aloud, Friction 입력) · Task 확인 스텝 · `type` 텍스트 생성 — 전부 됨. reasoning 토큰이 output 과금이라 **step 호출은 reasoning 최소 설정** | "다음 클릭 = 어느 요소" 는 Choice 로 딱 맞음(진짜 System 1). 그러나 ① `reasoning` 없음 → Friction Detector 입력이 사라짐 ② SoM 스크린샷 못 봄 ③ `type` 텍스트 못 만듦 ④ **정답 확률에 보정된 모델이라 "초보처럼 헤매는" Persona 편향을 못 낸다** — 50명이 같은 최적 경로로 수렴할 위험(09/14 질문 그 자체) |
+| 결론 | **Persona step 루프는 Luna(또는 프록시의 동급 저가 모델) 유지** | **탐색 모델로는 부적합. 후보로 남길 자리 = 결정만 하는 곳:** 가드의 "위험한 버튼인가"(Yes/No) · 성공 판정 보조(도달했나) · Friction 규칙 보조 분류(4종 Choice). 대기 목록 · 별도 API(OpenAI 호환 아님) · 프록시에 없음 → S3 A/B(T4) 후보로만 |
+
 ### 프록시 사용 규칙 — 운영 문서 확인 (09/19, T19)
 
 프록시 운영 문서를 확인해 위 표를 보강한다. **설계에 직접 걸리는 것 5개**:
 
 | 사실 | 우리 설계에 미치는 것 |
 | --- | --- |
-| **모델은 이름이 아니라 base URL(배포 단위)에 핀된다.** `/models` 는 그 배포의 모델만 돌려주고, 모델명은 `provider/model` 접두사 형식 | 역할별 모델(T12) = **역할별 base URL**. env 를 `LLM_BASE_URL` 하나가 아니라 `LLM_STEP_BASE_URL` · `LLM_DIAG_BASE_URL` … 로 나눈다 (architecture §10). 09/14 탐침에서 모델이 하나만 보인 이유가 이것 — "모델 목록" 은 키가 아니라 **배포를 몇 개 받느냐**의 문제 |
+| **모델은 이름이 아니라 base URL(배포 단위)에 핀된다.** `/models` 는 그 배포의 모델만 돌려주고, 모델명은 `provider/model` 접두사 형식 | 역할마다 모델을 다르게 쓰려면 역할마다 base URL 이 필요하다. **10/04 확정: 배포 하나(`openai/gpt-5.6-luna`)를 가상 사용자 step 과 진단이 같이 쓰므로 env 는 `LLM_BASE_URL` · `LLM_MODEL` 하나씩** — 진단용 모델을 따로 받으면 그때 나눈다. 09/14 탐침에서 모델이 하나만 보인 이유가 이것 — "모델 목록" 은 키가 아니라 **배포를 몇 개 받느냐**의 문제 |
 | 지원: 표준 Chat Completions 파라미터 · 스트리밍 · `response_format`/pydantic · 사용자 정의 function tool. **미지원: 제공사 내장 도구(web_search 류) · Anthropic Messages API** | 우리 루프에 필요한 건 전부 있다. tool calling 은 정책상 안 쓴다(D18) |
 | **긴 스트리밍은 수 분 뒤 끊길 수 있다** (연결 수명) | Persona step 호출은 짧고 non-streaming — 해당 없음. 진단·개선안 생성도 **한 호출 2분 이내**로 `max_tokens` 를 잡고 쪼갠다 |
 | **코드·명령어처럼 보이는 프롬프트가 LLM 도달 전에 차단될 수 있다** — 이때 응답이 JSON 이 아니라 HTML 로 온다 | **우리 관측은 DOM 조각 · 셀렉터라 정확히 이 패턴이다.** ①SoM 모드(T18)는 번호 목록이라 코드성이 낮다 — 기본값으로 둔 이유가 하나 더 붙는다 ②DOM 모드는 태그 · 속성을 벗겨 텍스트 + 역할로 요약해 보낸다 ③클라이언트는 non-JSON 응답을 `blocked("proxy_html")` 로 분류하고 관측을 더 줄여 1회 재시도 ④**09/24 드라이런에 "실제 관측 프롬프트가 통과하는가" 를 넣는다** (architecture §11) |

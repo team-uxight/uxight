@@ -49,7 +49,7 @@ uv tool install pre-commit && pre-commit install   # 커밋 전 검사 (secrets 
 백엔드 3종은 compose 로, **FE 는 호스트에서** 돌린다 — 컨테이너 web 은 up 마다 `npm ci` 를 해서 느리다.
 
 ```sh
-cp .env.example .env                 # 값 채우기 (docs/secrets.md)
+cp .env.example .env                 # 빈 칸만 채운다 — LLM 주소 · 키는 PM DM, 모델은 이미 들어 있다 (docs/secrets.md)
 make up                              # mysql · api · agent — 첫 빌드는 느리다
 make logs
 

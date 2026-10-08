@@ -14,7 +14,7 @@
 ## 하지 말 것
 
 - `docs/` 를 직접 고치지 않는다 — PM 작업공간에서 동기화된다. 틀린 게 있으면 Slack `#pm`.
-- `main` · `develop` 직접 push 금지. 머지는 Squash (`docs/git-workflow.md`).
+- `main` · `develop` 직접 push 금지. develop · main 병합은 merge commit 만, squash 는 `feat/` → 파트 브랜치 PR 에만 (`docs/git-workflow.md`).
 - `.env` · 키 · 토큰 · 계정을 코드 · 로그 · 프롬프트 · 커밋에 넣지 않는다 (`docs/secrets.md`). 이름은 `.env.example` 에만.
 - LangChain 류 프레임워크를 추가하지 않는다 (T15). LLM 은 OpenAI-compatible SDK + pydantic.
 - `services/agent` 에서 LLM 출력으로 코드 · 셸 · 임의 URL 을 실행하지 않는다. 행동은 `schemas.Action` 5종뿐이고 Runner 가드를 거친다 (D18).
