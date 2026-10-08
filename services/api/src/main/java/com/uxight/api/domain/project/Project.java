@@ -8,7 +8,7 @@ public record Project(
     String title,
     String targetUrl,
     String description,
-    String allowedDomains,
+    String allowedDomains,   // JSON 배열 원문
     LocalDateTime createdAt,
     LocalDateTime updatedAt
 ) {

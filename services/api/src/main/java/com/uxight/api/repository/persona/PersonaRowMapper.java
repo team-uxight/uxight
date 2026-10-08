@@ -12,7 +12,7 @@ public class PersonaRowMapper implements RowMapper<Persona> {
   public Persona mapRow(ResultSet rs, int rowNum) throws SQLException {
     return new Persona(
         rs.getLong("persona_id"),
-        rs.getLong("project_id"),
+        (Long) rs.getObject("user_id"),
         rs.getString("name"),
         rs.getString("profile"),
         rs.getTimestamp("created_at").toLocalDateTime(),

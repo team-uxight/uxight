@@ -6,13 +6,9 @@ from pydantic import BaseModel, ConfigDict
 
 
 class RunRequest(BaseModel):
-    """api → agent: 실행 시작 요청 (fire-and-forget)."""
+    """api → agent: 회차 실행 요청 (내부 API 1). 스냅샷은 runs 행에서 직접 읽는다."""
 
     run_id: int
-    task_snapshot: dict
-    persona_snapshot: list[dict]
-    policy_snapshot: dict
-    allowed_domains: dict
 
 
 class Action(BaseModel):

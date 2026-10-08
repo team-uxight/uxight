@@ -6,8 +6,8 @@ from typing import Literal, TypeVar
 
 from ..driver.dom_driver import DomDriver
 from ..persona.persona_agent import MockDecider, PersonaAgent, StepResult
-from ..repositories.run_persona_repository import run_persona_repository
-from ..repositories.run_repository import run_repository
+from ..repositories.run_persona_repository import PersonaOutcome, run_persona_repository
+from ..repositories.run_repository import RunSnapshot, run_repository
 from .step_log_writer import step_log_writer
 
 logger = logging.getLogger(__name__)
@@ -22,23 +22,26 @@ decider = MockDecider()
 
 
 class RunOrchestrator:
-    def try_accept_and_start(self, run_id: int, persona_ids: list[int]) -> bool:
+    def try_accept_and_start(self, run_id: int) -> RunSnapshot | None:
+        """queued 인 회차만 수락한다. 이미 받은 회차거나 없는 회차면 None."""
         if not run_repository.accept_if_queued(run_id):
-            return False
+            return None
+        snapshot = run_repository.get_snapshot(run_id)
         run_repository.mark_running(run_id)
         run_persona_repository.create_for_persona(
             run_id,
             {
-                persona_id: step_log_writer.relative_path(run_id, persona_id)
-                for persona_id in persona_ids
+                persona["persona_id"]: step_log_writer.relative_path(run_id, persona["persona_id"])
+                for persona in snapshot.personas
             },
         )
-        return True
+        return snapshot
 
-    async def run_personas(
-        self, run_id: int, task: dict, personas: list[dict], max_steps: int
-    ) -> None:
-        target_url = run_repository.get_target_url(run_id)
+    async def run_personas(self, run_id: int, snapshot: RunSnapshot) -> None:
+        target_url = snapshot.target_url
+        task = snapshot.task
+        personas = snapshot.personas
+        max_steps = snapshot.policy["max_steps"]
         # 요청된 페르소나 수만큼 세마포어를 두고 병렬 수행한다.
         semaphore = asyncio.Semaphore(len(personas))
         # 런 단위 취소 신호. 감시 태스크나 스텝 종료 후 확인에서 취소 요청을 발견하면
@@ -94,10 +97,10 @@ class RunOrchestrator:
         elif "cancelled" in statuses.values():
             run_repository.mark_cancelled(run_id)
         else:
-            # 여기까지 오면 모든 페르소나가 completed다.
-            # Walking Skeleton: 성공 기준이 정해지기 전까지 completed 비율을 성공률로 쓴다.
-            completed = sum(1 for status in statuses.values() if status == "completed")
-            run_repository.mark_done(run_id, success_rate=round(completed / len(statuses) * 100, 2))
+            # 여기까지 오면 모든 페르소나가 정상 종료(done/max_steps)다.
+            # 성공률 = Agent 가 스스로 done 을 낸 페르소나 비율 (메인 판정 기준, D21).
+            done = sum(1 for status in statuses.values() if status == "done")
+            run_repository.mark_done(run_id, success_rate=round(done / len(statuses) * 100, 2))
 
     async def _run_single_persona(
         self,
@@ -110,6 +113,7 @@ class RunOrchestrator:
         cancel_event: asyncio.Event,
     ) -> None:
         persona_id = persona["persona_id"]
+        outcome: PersonaOutcome
         async with semaphore:
             if cancel_event.is_set():
                 # 시작 전에 취소된 런 - 브라우저를 띄우지 않고 바로 취소 처리한다.
@@ -135,12 +139,7 @@ class RunOrchestrator:
                     outcome = "fail"
 
         # 종료 처리는 이 한 곳에서만 한다. 페르소나 상태를 확정한 뒤 런의 progress를 갱신한다.
-        if outcome == "completed":
-            run_persona_repository.mark_completed(run_id, persona_id)
-        elif outcome == "cancelled":
-            run_persona_repository.mark_cancelled(run_id, persona_id)
-        else:
-            run_persona_repository.mark_failed(run_id, persona_id)
+        run_persona_repository.mark_finished(run_id, persona_id, outcome)
         run_repository.refresh_progress(run_id)
 
     async def _drive_persona(
@@ -151,7 +150,7 @@ class RunOrchestrator:
         persona: dict,
         max_steps: int,
         cancel_event: asyncio.Event,
-    ) -> Literal["completed", "cancelled"]:
+    ) -> Literal["done", "max_steps", "cancelled"]:
         persona_id = persona["persona_id"]
         step_log_writer.prepare(run_id, persona_id)
         # 어느 경로로 return하든 async with를 빠져나가며 브라우저(컨텍스트, 페이지 포함)를 폐기한다.
@@ -161,7 +160,8 @@ class RunOrchestrator:
                 logger.info("run=%s persona=%s 브라우저 시작 중단", run_id, persona_id)
                 return "cancelled"
             agent = PersonaAgent(persona, task, driver, decider)
-            # 한 스텝 = observe → decide(LLM 1회) → act. max_steps 도달 또는 성공 기준 충족 시 종료.
+            # 한 스텝 = observe → decide(LLM 1회) → act.
+            # Agent 가 done 을 내거나 max_steps 에 도달하면 종료.
             for step_no in range(1, max_steps + 1):
                 finished, step = await self._run_unless_cancelled(agent.step(), cancel_event)
                 if not finished:
@@ -196,9 +196,10 @@ class RunOrchestrator:
                     )
                     cancel_event.set()  # 같은 런의 다른 페르소나도 멈추게 한다.
                     return "cancelled"
-                if agent.is_goal_achieved():
-                    break
-        return "completed"
+                if step.action.kind == "done":
+                    # Agent 가 스스로 과업 완료를 선언했다 = 성공 (메인 판정 기준, D21).
+                    return "done"
+        return "max_steps"
 
     async def _watch_cancel(self, run_id: int, cancel_event: asyncio.Event) -> None:
         # 한 스텝(페이지 로드 대기, 이후 LLM 호출 등)이 10초를 넘을 수 있어서,

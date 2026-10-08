@@ -38,23 +38,16 @@ public class RestAgentClient implements AgentClient {
         .build();
   }
 
-  // 요청 스레드 밖에서 돈다 — 런 생성 요청은 Python 응답을 기다리지 않는다.
+  // 요청 스레드 밖에서 돈다 — 실험 요청은 Python 응답을 기다리지 않는다.
   @Async
   @Override
-  public CompletableFuture<Optional<String>> dispatch(Long runId, Object taskSnapshot, Object personaSnapshot,
-      Object policySnapshot, Object allowedDomains) {
-    return CompletableFuture.completedFuture(send(runId, taskSnapshot, personaSnapshot, policySnapshot, allowedDomains));
+  public CompletableFuture<Optional<String>> dispatch(Long runId) {
+    return CompletableFuture.completedFuture(send(runId));
   }
 
-  private Optional<String> send(Long runId, Object taskSnapshot, Object personaSnapshot, Object policySnapshot,
-      Object allowedDomains) {
-    Map<String, Object> requestBody = Map.of(
-        "run_id", runId,
-        "task_snapshot", taskSnapshot,
-        "persona_snapshot", personaSnapshot,
-        "policy_snapshot", policySnapshot,
-        "allowed_domains", allowedDomains
-    );
+  private Optional<String> send(Long runId) {
+    // 스냅샷은 runs 행에 있으므로 run_id 만 보낸다 (내부 API 1). 내부 API JSON 은 snake_case.
+    Map<String, Object> requestBody = Map.of("run_id", runId);
 
     log.info("POST {}/runs run_id={}", agentBaseUrl, runId);
     try {
@@ -69,7 +62,7 @@ public class RestAgentClient implements AgentClient {
       if (response.getStatusCode().value() == 202) {
         return Optional.of("sent");
       }
-      // 200: 이미 처리된 run_id에 대한 멱등 응답 — 최초 수락 때 이미 "sent"로 기록되어 있으므로 건드리지 않는다.
+      // 200: 이미 받은 회차에 대한 멱등 응답 — 최초 수락 때 이미 "sent"로 기록되어 있으므로 건드리지 않는다.
       return Optional.empty();
     } catch (ResourceAccessException e) {
       boolean isTimeout = e.getCause() instanceof SocketTimeoutException;

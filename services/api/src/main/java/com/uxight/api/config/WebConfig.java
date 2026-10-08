@@ -17,13 +17,19 @@ public class WebConfig implements WebMvcConfigurer {
   public void addInterceptors(InterceptorRegistry registry) {
     registry.addInterceptor(new LoginCheckInterceptor())
         .order(1)
-        .addPathPatterns("/**")
-        .excludePathPatterns("/login", "/error", "/", "/dashboard", "/api/health", "/css/**", "/js/**", "/*.ico");
+        .addPathPatterns("/api/**")
+        .excludePathPatterns("/api/health", "/api/auth/login", "/api/auth/logout");
   }
 
-  /** 로컬 개발용 CORS — 웹(5173)에서 API 호출. 배포 시 origin 은 환경변수로. */
+  /**
+   * 로컬 개발용 CORS — 웹(5173)에서 API 호출. 배포 시 origin 은 환경변수로.
+   * 세션 쿠키를 실어 보내야 하므로 allowCredentials — FE 는 fetch 에 credentials: 'include' 를 준다.
+   */
   @Override
   public void addCorsMappings(CorsRegistry registry) {
-    registry.addMapping("/api/**").allowedOrigins(webOrigin).allowedMethods("GET", "POST", "PATCH", "DELETE");
+    registry.addMapping("/api/**")
+        .allowedOrigins(webOrigin)
+        .allowedMethods("GET", "POST", "PATCH", "DELETE")
+        .allowCredentials(true);
   }
 }

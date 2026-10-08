@@ -1,48 +1,66 @@
 package com.uxight.api.web.run;
 
-import com.uxight.api.domain.project.ProjectService;
+import com.uxight.api.common.ApiException;
+import com.uxight.api.common.ErrorCode;
+import com.uxight.api.domain.run.ExperimentCreateRequest;
+import com.uxight.api.domain.run.ExperimentSummary;
 import com.uxight.api.domain.run.RunService;
+import com.uxight.api.web.common.PageResponse;
+import com.uxight.api.web.common.SessionConst;
+import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Controller;
-import org.springframework.ui.Model;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ResponseStatus;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.SessionAttribute;
 
-@Controller
+import java.util.List;
+import java.util.Map;
+
+/** 실험 관리. 경로 변수가 실험을 가리키면 firstRunId, 회차를 가리키면 runId. */
+@RestController
 public class RunController {
 
   private static final Logger log = LoggerFactory.getLogger(RunController.class);
 
   private final RunService runService;
-  private final ProjectService projectService;
 
-  public RunController(RunService runService, ProjectService projectService) {
+  public RunController(RunService runService) {
     this.runService = runService;
-    this.projectService = projectService;
   }
 
-  @PostMapping("/projects/{projectId}/runs")
-  public String createRun(@PathVariable Long projectId, @RequestParam String goal, @RequestParam Long personaIds,
-      Model model) {
-    log.info("POST /projects/{}/runs goal={} personaIds={}", projectId, goal, personaIds);
-    try {
-      runService.createRun(projectId, goal, personaIds);
-    } catch (RuntimeException e) {
-      model.addAttribute("project", projectService.getProject(projectId));
-      model.addAttribute("personas", projectService.getPersonas(projectId));
-      model.addAttribute("errorMessage", "런 생성에 실패했습니다. 입력값을 확인해 주세요.");
-      return "project";
+  @PostMapping("/api/projects/{projectId}/runs")
+  @ResponseStatus(HttpStatus.CREATED)
+  public Map<String, Long> createExperiment(@PathVariable Long projectId,
+      @Valid @RequestBody ExperimentCreateRequest request,
+      @SessionAttribute(SessionConst.LOGIN_USER_ID) Long userId) {
+    log.info("POST /api/projects/{}/runs mode={} personaIds={}", projectId, request.mode(), request.personaIds());
+    return Map.of("runId", runService.createExperiment(userId, projectId, request));
+  }
+
+  /** TODO: keyword · finishedFrom 필터는 실험 이력 화면 구현 때. */
+  @GetMapping("/api/runs")
+  public PageResponse<ExperimentSummary> experiments(@RequestParam(required = false) String state,
+      @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size,
+      @SessionAttribute(SessionConst.LOGIN_USER_ID) Long userId) {
+    if (page < 0 || size < 1) {
+      throw new ApiException(ErrorCode.INVALID_INPUT);
     }
-
-    return "redirect:/monitoring";
+    List<ExperimentSummary> content = runService.getExperiments(userId, state, page, size);
+    return PageResponse.of(content, page, size, runService.countExperiments(userId, state));
   }
 
-  @PostMapping("/monitoring/{runId}/cancel")
-  public String cancel(@PathVariable Long runId) {
-    log.info("POST /monitoring/{}/cancel", runId);
-    runService.requestCancel(runId);
-    return "redirect:/history";
+  @PostMapping("/api/runs/{firstRunId}/cancel")
+  @ResponseStatus(HttpStatus.ACCEPTED)
+  public void cancelExperiment(@PathVariable Long firstRunId,
+      @SessionAttribute(SessionConst.LOGIN_USER_ID) Long userId) {
+    log.info("POST /api/runs/{}/cancel", firstRunId);
+    runService.cancelExperiment(userId, firstRunId);
   }
 }

@@ -1,50 +1,45 @@
 package com.uxight.api.domain.project;
 
-import com.uxight.api.domain.persona.Persona;
-import com.uxight.api.domain.persona.PersonaRepository;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.uxight.api.common.ApiException;
+import com.uxight.api.common.ErrorCode;
 import org.springframework.stereotype.Service;
 
+import java.io.UncheckedIOException;
 import java.util.List;
-import java.util.NoSuchElementException;
 
 @Service
 public class ProjectService {
 
-  private static final int MOCK_PERSONA_COUNT = 1;
-  private static final String MOCK_PERSONA_NAME = "재완";
-  private static final String MOCK_PERSONA_PROFILE =
-      "{\"age_group\": 20, \"web_skill\": \"low\", \"device\": \"desktop\", "
-      + "\"domain_knowledge\": \"low\", \"patience\": \"medium\", \"exploration_tendency\": \"low\", "
-      + "\"behavior_instruction\": [\"메뉴 이름이 모호하면 쉽게 헤맨다.\", \"실패한 경로를 반복하지 않는다.\"]}";
-
   private final ProjectRepository projectRepository;
-  private final PersonaRepository personaRepository;
+  private final ObjectMapper objectMapper;
 
-  public ProjectService(ProjectRepository projectRepository, PersonaRepository personaRepository) {
+  public ProjectService(ProjectRepository projectRepository, ObjectMapper objectMapper) {
     this.projectRepository = projectRepository;
-    this.personaRepository = personaRepository;
+    this.objectMapper = objectMapper;
   }
 
-  public void createProject(Long userId, ProjectForm form) {
-    Project project = Project.newProject(userId, form.getTitle(), form.getTargetUrl(),
-        form.getDescription(), form.getAllowedDomains());
-    Long projectId = projectRepository.save(project);
-
-    for (int i = 0; i < MOCK_PERSONA_COUNT; i++) {
-      personaRepository.save(Persona.newPersona(projectId, MOCK_PERSONA_NAME, MOCK_PERSONA_PROFILE));
-    }
+  public Long createProject(Long userId, ProjectCreateRequest request) {
+    Project project = Project.newProject(userId, request.title(), request.targetUrl(),
+        request.description(), writeJson(request.allowedDomains()));
+    return projectRepository.save(project);
   }
 
-  public Project getProject(Long projectId) {
-    return projectRepository.findById(projectId)
-        .orElseThrow(() -> new NoSuchElementException("project not found: " + projectId));
-  }
-
-  public List<Persona> getPersonas(Long projectId) {
-    return personaRepository.findByProjectId(projectId);
+  public Project getProject(Long userId, Long projectId) {
+    return projectRepository.findByIdAndUserId(projectId, userId)
+        .orElseThrow(() -> new ApiException(ErrorCode.PROJECT_NOT_FOUND));
   }
 
   public List<Project> getProjectsByUser(Long userId) {
     return projectRepository.findByUserId(userId);
+  }
+
+  private String writeJson(Object value) {
+    try {
+      return objectMapper.writeValueAsString(value);
+    } catch (JsonProcessingException e) {
+      throw new UncheckedIOException(e);
+    }
   }
 }

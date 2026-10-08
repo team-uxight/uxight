@@ -21,6 +21,14 @@ public class JdbcTemplateUserRepository implements UserRepository {
   }
 
   @Override
+  public Optional<User> findById(Long userId) {
+    return jdbcTemplate
+      .query("SELECT * FROM users WHERE user_id = ?", ROW_MAPPER, userId)
+      .stream()
+      .findFirst();
+  }
+
+  @Override
   public Optional<User> findByEmail(String email) {
     return jdbcTemplate
       .query("SELECT * FROM users WHERE email = ?", ROW_MAPPER, email)

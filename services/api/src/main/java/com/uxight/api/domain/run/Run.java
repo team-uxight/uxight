@@ -10,8 +10,10 @@ public record Run(
     String mode,
     Integer loopMax,
     Long parentRunId,
+    Long firstRunId,
     Long improvementId,
     String targetUrlSnapshot,
+    String allowedDomainsSnapshot,   // JSON 배열 원문
     String taskSnapshot,
     String policySnapshot,
     String personaSnapshot,
@@ -20,18 +22,19 @@ public record Run(
     String status,
     Integer progress,
     LocalDateTime heartbeatAt,
-    boolean nextLoopRequested,
     String error,
     Long tokens,
     BigDecimal costUsd,
     LocalDateTime acceptedAt,
     LocalDateTime startedAt,
+    LocalDateTime finishedAt,
     LocalDateTime createdAt
 ) {
-  public static Run newRun(Long projectId, Long taskId, String targetUrlSnapshot, String taskSnapshot,
-      String policySnapshot, String personaSnapshot) {
-    return new Run(null, projectId, taskId, "diagnose", null, null, null,
-        targetUrlSnapshot, taskSnapshot, policySnapshot, personaSnapshot,
-        null, false, "queued", null, null, false, null, null, null, null, null, null);
+  /** 최초 회차. first_run_id 는 INSERT 뒤 같은 트랜잭션에서 자기 run_id 로 채운다 (RunRepository.updateFirstRunId). */
+  public static Run newFirstRound(Long projectId, Long taskId, String mode, Integer loopMax, String targetUrlSnapshot,
+      String allowedDomainsSnapshot, String taskSnapshot, String policySnapshot, String personaSnapshot) {
+    return new Run(null, projectId, taskId, mode, loopMax, null, null, null,
+        targetUrlSnapshot, allowedDomainsSnapshot, taskSnapshot, policySnapshot, personaSnapshot,
+        null, false, "queued", null, null, null, null, null, null, null, null, null);
   }
 }

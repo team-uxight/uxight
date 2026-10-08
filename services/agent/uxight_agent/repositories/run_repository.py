@@ -1,6 +1,20 @@
+import json
+from dataclasses import dataclass
+
 from sqlalchemy import text
 
 from ..db import engine
+
+
+@dataclass(frozen=True)
+class RunSnapshot:
+    """Spring 이 회차 INSERT 때 남긴 [S] 스냅샷. 한 실험의 회차는 모두 같은 스냅샷으로 실행한다."""
+
+    target_url: str
+    allowed_domains: list[str]  # 가드 허용 도메인. 아직 읽기만 한다 (guard 미구현)
+    task: dict  # task_id, goal, success_rule, success_url, is_one_shot
+    personas: list[dict]  # [{persona_id, name, profile}]
+    policy: dict  # max_steps, ...
 
 
 class RunRepository:
@@ -31,7 +45,7 @@ class RunRepository:
 
     def mark_done(self, run_id: int, success_rate: float) -> None:
         # runs.status='done' UPDATE와 run_metrics INSERT는 한 트랜잭션으로 묶는다.
-        # 상태가 실제로 바뀐 경우에만 INSERT해서 run 당 1행을 보장한다.
+        # 상태가 실제로 바뀐 경우에만 INSERT해서 회차 당 1행을 보장한다.
         # Walking Skeleton에서는 avg_*, tokens, cost_usd를 채우지 않는다(NULL).
         with engine.begin() as conn:
             result = conn.execute(
@@ -70,23 +84,42 @@ class RunRepository:
                 {"run_id": run_id},
             )
 
-    def get_target_url(self, run_id: int) -> str:
-        # 대상 URL은 Spring이 런 생성 시 [S] 컬럼에 저장한 사본을 읽는다.
+    def get_status(self, run_id: int) -> str | None:
+        # 회차가 없으면 None.
         with engine.begin() as conn:
             return conn.execute(
-                text("SELECT target_url_snapshot FROM runs WHERE run_id = :run_id"),
+                text("SELECT status FROM runs WHERE run_id = :run_id"),
                 {"run_id": run_id},
-            ).scalar_one()
+            ).scalar_one_or_none()
+
+    def get_snapshot(self, run_id: int) -> RunSnapshot:
+        # JSON 컬럼은 PyMySQL 이 문자열로 돌려준다.
+        with engine.begin() as conn:
+            row = conn.execute(
+                text(
+                    "SELECT target_url_snapshot, allowed_domains_snapshot, task_snapshot, "
+                    "persona_snapshot, policy_snapshot "
+                    "FROM runs WHERE run_id = :run_id"
+                ),
+                {"run_id": run_id},
+            ).one()
+        return RunSnapshot(
+            target_url=row.target_url_snapshot,
+            allowed_domains=json.loads(row.allowed_domains_snapshot),
+            task=json.loads(row.task_snapshot),
+            personas=json.loads(row.persona_snapshot),
+            policy=json.loads(row.policy_snapshot),
+        )
 
     def refresh_progress(self, run_id: int) -> None:
-        # progress = 정상 종료된(completed) 페르소나 수. fail/timeout/cancelled는 세지 않는다.
+        # progress = 정상 종료된(done/max_steps) 페르소나 수. fail/timeout/cancelled는 세지 않는다.
         # +1 대신 매번 다시 세어 덮어쓰므로 중복 호출이나 동시 완료에도 값이 정확하다.
         with engine.begin() as conn:
             conn.execute(
                 text(
                     "UPDATE runs SET progress = ("
                     "  SELECT COUNT(*) FROM run_personas "
-                    "  WHERE run_id = :run_id AND status = 'completed'"
+                    "  WHERE run_id = :run_id AND status IN ('done', 'max_steps')"
                     ") WHERE run_id = :run_id"
                 ),
                 {"run_id": run_id},

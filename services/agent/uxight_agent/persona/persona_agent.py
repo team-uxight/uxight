@@ -77,7 +77,3 @@ class PersonaAgent:
         )
         self.history.append(step_result)
         return step_result
-
-    def is_goal_achieved(self) -> bool:
-        # TODO: 성공 기준이 아직 정해지지 않았다. 정해지기 전까지는 max_steps까지 수행한다.
-        return False

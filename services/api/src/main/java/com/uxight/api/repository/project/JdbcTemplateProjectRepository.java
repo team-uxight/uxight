@@ -24,9 +24,9 @@ public class JdbcTemplateProjectRepository implements ProjectRepository {
   }
 
   @Override
-  public Optional<Project> findById(Long projectId) {
+  public Optional<Project> findByIdAndUserId(Long projectId, Long userId) {
     return jdbcTemplate
-        .query("SELECT * FROM projects WHERE project_id = ?", ROW_MAPPER, projectId)
+        .query("SELECT * FROM projects WHERE project_id = ? AND user_id = ?", ROW_MAPPER, projectId, userId)
         .stream()
         .findFirst();
   }
