@@ -4,9 +4,9 @@ WORKDIR /app
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
-# Chromium + 시스템 의존성. S2 (GACA-78) 에서 복원한다 — 지금 runner 는 스텁이라 브라우저를 열지 않는다.
-# 복원 시 주의: compose 의 read_only:true 때문에 HOME 을 tmpfs 로 주어야 Chromium 이 뜬다.
-# RUN uv run --no-sync playwright install --with-deps chromium
+# Chromium + 시스템 의존성(--with-deps = apt). apt 가 돌아야 하므로 USER app 전환 전에 root 로 설치한다.
+# 주의: compose 의 read_only:true 때문에 HOME 을 tmpfs 로 주어야 Chromium 이 뜬다 (compose agent.environment.HOME).
+RUN uv run --no-sync playwright install --with-deps chromium
 COPY uxight_agent ./uxight_agent
 RUN uv sync --frozen --no-dev
 # 비root 실행 (agent-safety §2.2). uid 1000 = compose 바인드마운트 data/ 의 소유자와 맞춘다.

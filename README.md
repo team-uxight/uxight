@@ -31,7 +31,7 @@ docs/             위 문서
 docker-compose.yml  로컬 3 서비스 (mysql · api · agent) + web 프로필
 ```
 
-경계: `api` 는 실행하지 않는다. `POST /api/runs` → runs 행 생성 → `agent` 에 `POST /runs` 한 번(fire-and-forget).
+경계: `api` 는 실행하지 않는다. `POST /api/projects/{projectId}/runs` → runs 행 생성 → `agent` 에 `POST /runs` 한 번(fire-and-forget).
 이후 상태·로그는 `agent` 가 MySQL 에 쓰고 `api` 가 읽는다. 09/27 walking skeleton 게이트(GACA-69)가 이 경로를 검증한다.
 
 ## 처음 한 번
@@ -54,6 +54,13 @@ make up                              # mysql · api · agent — 첫 빌드는 �
 make logs
 
 cd apps/web && npm install && npm run dev    # FE 는 호스트에서
+```
+
+DB 를 비우고 다시 시작할 때 (마이그레이션이 바뀌어 api 가 Flyway 검증에서 죽을 때도):
+
+```sh
+docker compose down -v && rm -rf services/agent/data/runs/*   # step 로그도 같이 비운다 — 새 DB 는 run_id 가 1부터라 옛 로그 파일에 이어 쓴다
+make up
 ```
 
 | 서비스 | 주소 | 어디서 |
