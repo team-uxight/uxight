@@ -42,10 +42,19 @@ public class AuthController {
     return ResponseEntity.status(HttpStatus.CREATED).body(new SignupResponse(userId));
   }
 
-  /** access 토큰은 본문으로, refresh 토큰 원문은 HttpOnly 쿠키로만 내보낸다. */
   @PostMapping("/login")
   public ResponseEntity<TokenResponse> login(@Valid @RequestBody LoginRequest request) {
-    LoginTokens tokens = authService.login(request.email(), request.password());
+    return tokenResponse(authService.login(request.email(), request.password()));
+  }
+
+  /** 처음 보는 Google 계정이면 가입 후 로그인 처리한다. */
+  @PostMapping("/google")
+  public ResponseEntity<TokenResponse> google(@Valid @RequestBody GoogleLoginRequest request) {
+    return tokenResponse(authService.googleLogin(request.idToken()));
+  }
+
+  // access 토큰은 본문으로, refresh 토큰 원문은 HttpOnly 쿠키로만 내보낸다.
+  private ResponseEntity<TokenResponse> tokenResponse(LoginTokens tokens) {
     ResponseCookie refreshTokenCookie = ResponseCookie.from(AuthConst.REFRESH_TOKEN_COOKIE, tokens.refreshToken())
         .httpOnly(true)
         .secure(true)

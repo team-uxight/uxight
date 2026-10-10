@@ -18,16 +18,18 @@ public class AuthService {
   private final RefreshTokenRepository refreshTokenRepository;
   private final PasswordEncoder passwordEncoder;
   private final JwtProvider jwtProvider;
+  private final GoogleIdTokenVerifier googleIdTokenVerifier;
   private final Duration refreshTokenTtl;
 
   @Autowired
   public AuthService(UserRepository userRepository, RefreshTokenRepository refreshTokenRepository,
-      PasswordEncoder passwordEncoder, JwtProvider jwtProvider,
+      PasswordEncoder passwordEncoder, JwtProvider jwtProvider, GoogleIdTokenVerifier googleIdTokenVerifier,
       @Value("${uxight.auth.refresh-token-ttl}") Duration refreshTokenTtl) {
     this.userRepository = userRepository;
     this.refreshTokenRepository = refreshTokenRepository;
     this.passwordEncoder = passwordEncoder;
     this.jwtProvider = jwtProvider;
+    this.googleIdTokenVerifier = googleIdTokenVerifier;
     this.refreshTokenTtl = refreshTokenTtl;
   }
 
@@ -54,6 +56,37 @@ public class AuthService {
     User user = userRepository.findByEmail(email)
         .filter(found -> found.matchesPassword(password, passwordEncoder))
         .orElseThrow(() -> new ApiException(ErrorCode.LOGIN_FAILED));
+    return issueTokens(user);
+  }
+
+  /**
+   * Google 회원가입 · 로그인. ID 토큰의 Google 계정 고유 식별자(sub)로 계정을 찾고, 없으면 리서처로 가입시킨다.
+   * 같은 이메일의 이메일 가입 계정이 있으면 연결하지 않고 AUT-ERR-008 — 이메일 가입은 이메일 소유를 확인하지 않았기 때문이다.
+   */
+  @Transactional
+  public LoginTokens googleLogin(String idToken) {
+    GoogleAccount account = googleIdTokenVerifier.verify(idToken)
+        .orElseThrow(() -> new ApiException(ErrorCode.GOOGLE_AUTH_FAILED));
+    User user = userRepository.findByGoogleSub(account.sub())
+        .orElseGet(() -> signUpWithGoogle(account));
+    return issueTokens(user);
+  }
+
+  private User signUpWithGoogle(GoogleAccount account) {
+    if (userRepository.findByEmail(account.email()).isPresent()) {
+      throw new ApiException(ErrorCode.EMAIL_ACCOUNT_EXISTS);
+    }
+
+    try {
+      return userRepository.save(User.signUpWithGoogle(account.email(), account.sub(), account.name()));
+    } catch (DataIntegrityViolationException e) {
+      // 조회 뒤 같은 이메일이 먼저 가입한 경우 — uk_users_email 이 최종 판정이다.
+      throw new ApiException(ErrorCode.EMAIL_ACCOUNT_EXISTS);
+    }
+  }
+
+  // 인증을 마친 계정의 활성 여부를 확인하고 access · refresh 토큰을 발급한다. 이메일 · Google 로그인 공통.
+  private LoginTokens issueTokens(User user) {
     if (!user.isActive()) {
       throw new ApiException(ErrorCode.ACCOUNT_DISABLED);
     }

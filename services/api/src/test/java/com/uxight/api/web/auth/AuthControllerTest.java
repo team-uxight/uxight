@@ -1,14 +1,18 @@
 package com.uxight.api.web.auth;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.empty;
 import static org.hamcrest.Matchers.matchesPattern;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.uxight.api.domain.user.GoogleAccount;
+import com.uxight.api.domain.user.GoogleIdTokenVerifier;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -19,15 +23,24 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.transaction.annotation.Transactional;
 
-/** POST /api/auth/signup · login 의 요청 · 응답이 설계(7.3 · 8.4 · OpenAPI)와 같은지 본다. 실제 MySQL, 테스트마다 롤백. */
+import java.util.Map;
+import java.util.Optional;
+
+/**
+ * POST /api/auth/signup · login · google 의 요청 · 응답이 설계(7.3 · 8.4 · OpenAPI)와 같은지 본다. 실제 MySQL, 테스트마다 롤백.
+ * Google ID 토큰 검증은 GoogleIdTokenVerifierTest 가 보고, 여기서는 검증 결과를 정해 두고 가입 · 로그인 흐름만 본다.
+ */
 @SpringBootTest
 @AutoConfigureMockMvc
 @Transactional
 class AuthControllerTest {
+
+  private static final String GOOGLE_ID_TOKEN = "google-id-token";
 
   @Autowired
   private MockMvc mvc;
@@ -37,6 +50,9 @@ class AuthControllerTest {
 
   @Autowired
   private PasswordEncoder passwordEncoder;
+
+  @MockitoBean
+  private GoogleIdTokenVerifier googleIdTokenVerifier;
 
   @Test
   void signup_created() throws Exception {
@@ -149,6 +165,94 @@ class AuthControllerTest {
         .andExpect(jsonPath("$.code").value("AUT-ERR-005"))
         .andExpect(jsonPath("$.message").value("비활성화된 계정입니다."))
         .andExpect(jsonPath("$.fieldErrors").value(empty()));
+  }
+
+  @Test
+  void google_newAccount_signsUpResearcherWithoutPassword() throws Exception {
+    givenGoogleAccount("google-sub-1", "new-google@gmail.com");
+
+    google(GOOGLE_ID_TOKEN)
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.accessToken").value(notNullValue()))
+        .andExpect(header().string(HttpHeaders.SET_COOKIE, matchesPattern(
+            "refreshToken=[0-9a-f]{64}; Path=/api/auth; Max-Age=1209600; Expires=.+; Secure; HttpOnly; SameSite=Strict")));
+
+    Map<String, Object> user = jdbcTemplate.queryForMap(
+        "SELECT email, password_hash, auth_provider, name, role, is_active FROM users WHERE google_sub = 'google-sub-1'");
+    assertThat(user).containsEntry("email", "new-google@gmail.com")
+        .containsEntry("password_hash", null)
+        .containsEntry("auth_provider", "google")
+        .containsEntry("name", "구글 사용자")
+        .containsEntry("role", "researcher")
+        .containsEntry("is_active", true);
+  }
+
+  @Test
+  void google_existingAccount_logsInWithoutSigningUpAgain() throws Exception {
+    givenGoogleAccount("google-sub-1", "google@gmail.com");
+
+    google(GOOGLE_ID_TOKEN).andExpect(status().isOk());
+    google(GOOGLE_ID_TOKEN).andExpect(status().isOk());
+
+    assertThat(jdbcTemplate.queryForObject(
+        "SELECT COUNT(*) FROM users WHERE google_sub = 'google-sub-1'", Integer.class)).isEqualTo(1);
+    assertThat(jdbcTemplate.queryForObject(
+        "SELECT COUNT(*) FROM refresh_tokens t JOIN users u ON u.user_id = t.user_id WHERE u.google_sub = 'google-sub-1'",
+        Integer.class)).isEqualTo(2);
+  }
+
+  @Test
+  void google_invalidIdToken_returnsUnauthorized() throws Exception {
+    when(googleIdTokenVerifier.verify(GOOGLE_ID_TOKEN)).thenReturn(Optional.empty());
+
+    google(GOOGLE_ID_TOKEN)
+        .andExpect(status().isUnauthorized())
+        .andExpect(header().doesNotExist(HttpHeaders.SET_COOKIE))
+        .andExpect(jsonPath("$.code").value("AUT-ERR-003"))
+        .andExpect(jsonPath("$.message").value("Google 인증에 실패했습니다."))
+        .andExpect(jsonPath("$.fieldErrors").value(empty()));
+  }
+
+  @Test
+  void google_emailAlreadySignedUpByEmail_returnsConflict() throws Exception {
+    insertUser("taken@gmail.com", true);
+    givenGoogleAccount("google-sub-1", "taken@gmail.com");
+
+    google(GOOGLE_ID_TOKEN)
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("AUT-ERR-008"))
+        .andExpect(jsonPath("$.message").value("이메일로 가입된 계정입니다. 이메일로 로그인해 주세요."))
+        .andExpect(jsonPath("$.fieldErrors").value(empty()));
+    assertThat(jdbcTemplate.queryForObject(
+        "SELECT google_sub FROM users WHERE email = 'taken@gmail.com'", String.class)).isNull();   // 연결하지 않는다
+  }
+
+  @Test
+  void google_inactiveAccount_returnsUnauthorized() throws Exception {
+    jdbcTemplate.update("INSERT INTO users (email, auth_provider, google_sub, name, role, is_active) "
+        + "VALUES ('inactive-google@gmail.com', 'google', 'google-sub-1', '비활성', 'researcher', false)");
+    givenGoogleAccount("google-sub-1", "inactive-google@gmail.com");
+
+    google(GOOGLE_ID_TOKEN)
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("AUT-ERR-005"));
+  }
+
+  @Test
+  void google_blankIdToken_returnsFieldErrors() throws Exception {
+    mvc.perform(post("/api/auth/google").contentType(MediaType.APPLICATION_JSON).content("{\"idToken\": \"\"}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("GLB-ERR-002"))
+        .andExpect(jsonPath("$.fieldErrors[0].field").value("idToken"));
+  }
+
+  private void givenGoogleAccount(String sub, String email) {
+    when(googleIdTokenVerifier.verify(GOOGLE_ID_TOKEN)).thenReturn(Optional.of(new GoogleAccount(sub, email, "구글 사용자")));
+  }
+
+  private ResultActions google(String idToken) throws Exception {
+    return mvc.perform(post("/api/auth/google").contentType(MediaType.APPLICATION_JSON)
+        .content("{\"idToken\": \"%s\"}".formatted(idToken)));
   }
 
   private ResultActions signup(String body) throws Exception {
