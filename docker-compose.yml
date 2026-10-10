@@ -27,6 +27,7 @@ services:
       DB_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE:-uxight}
       DB_USER: ${MYSQL_USER:-uxight}
       DB_PASSWORD: ${MYSQL_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET:-}
       AGENT_BASE_URL: http://agent:8000
       WEB_ORIGIN: http://localhost:5173
       TZ: Asia/Seoul                     # JVM 기본 시간대 — LocalDateTime.now() 를 MySQL(+09:00) 과 같은 시계로

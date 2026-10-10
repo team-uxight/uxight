@@ -2,7 +2,7 @@ package com.uxight.api.web.project;
 
 import com.uxight.api.domain.project.ProjectCreateRequest;
 import com.uxight.api.domain.project.ProjectService;
-import com.uxight.api.web.common.SessionConst;
+import com.uxight.api.web.common.AuthConst;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -12,7 +12,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.bind.annotation.SessionAttribute;
+import org.springframework.web.bind.annotation.RequestAttribute;
 
 import java.util.List;
 import java.util.Map;
@@ -28,7 +28,7 @@ public class ProjectController {
   }
 
   @GetMapping
-  public Map<String, List<ProjectSummary>> projects(@SessionAttribute(SessionConst.LOGIN_USER_ID) Long userId) {
+  public Map<String, List<ProjectSummary>> projects(@RequestAttribute(AuthConst.LOGIN_USER_ID) Long userId) {
     List<ProjectSummary> projects = projectService.getProjectsByUser(userId).stream()
         .map(ProjectSummary::from)
         .toList();
@@ -38,12 +38,12 @@ public class ProjectController {
   @PostMapping
   @ResponseStatus(HttpStatus.CREATED)
   public Map<String, Long> createProject(@Valid @RequestBody ProjectCreateRequest request,
-      @SessionAttribute(SessionConst.LOGIN_USER_ID) Long userId) {
+      @RequestAttribute(AuthConst.LOGIN_USER_ID) Long userId) {
     return Map.of("projectId", projectService.createProject(userId, request));
   }
 
   @GetMapping("/{projectId}")
-  public ProjectDetail project(@PathVariable Long projectId, @SessionAttribute(SessionConst.LOGIN_USER_ID) Long userId) {
+  public ProjectDetail project(@PathVariable Long projectId, @RequestAttribute(AuthConst.LOGIN_USER_ID) Long userId) {
     return ProjectDetail.from(projectService.getProject(userId, projectId));
   }
 }

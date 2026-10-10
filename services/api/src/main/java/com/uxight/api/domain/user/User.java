@@ -11,6 +11,7 @@ import jakarta.persistence.Table;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.time.LocalDateTime;
 
@@ -61,5 +62,10 @@ public class User {
   /** 이메일 가입. 가입 계정은 리서처로 시작한다. passwordHash 는 해시된 값이어야 한다. */
   public static User signUp(String email, String passwordHash, String name) {
     return new User(email, passwordHash, AuthProvider.local, name, Role.researcher);
+  }
+
+  /** 이메일 로그인 비밀번호 확인. Google 로만 가입해 비밀번호가 없는 계정은 항상 false. */
+  public boolean matchesPassword(String rawPassword, PasswordEncoder passwordEncoder) {
+    return passwordHash != null && passwordEncoder.matches(rawPassword, passwordHash);
   }
 }

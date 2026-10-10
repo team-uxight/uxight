@@ -13,6 +13,7 @@ public enum ErrorCode {
 
   UNAUTHORIZED(HttpStatus.UNAUTHORIZED, "AUT-ERR-001", "인증이 필요합니다."),
   LOGIN_FAILED(HttpStatus.UNAUTHORIZED, "AUT-ERR-002", "이메일 또는 비밀번호가 올바르지 않습니다."),
+  ACCOUNT_DISABLED(HttpStatus.UNAUTHORIZED, "AUT-ERR-005", "비활성화된 계정입니다."),
   EMAIL_DUPLICATED(HttpStatus.CONFLICT, "AUT-ERR-007", "이미 가입된 이메일입니다."),
 
   PROJECT_NOT_FOUND(HttpStatus.NOT_FOUND, "PRJ-ERR-001", "프로젝트를 찾을 수 없습니다."),
