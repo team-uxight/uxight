@@ -8,8 +8,7 @@ import com.uxight.api.domain.run.RunService;
 import com.uxight.api.web.common.PageResponse;
 import com.uxight.api.web.common.SessionConst;
 import jakarta.validation.Valid;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -25,9 +24,8 @@ import java.util.Map;
 
 /** 실험 관리. 경로 변수가 실험을 가리키면 firstRunId, 회차를 가리키면 runId. */
 @RestController
+@Slf4j
 public class RunController {
-
-  private static final Logger log = LoggerFactory.getLogger(RunController.class);
 
   private final RunService runService;
 

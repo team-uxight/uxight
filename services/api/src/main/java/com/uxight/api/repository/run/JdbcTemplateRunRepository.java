@@ -3,8 +3,7 @@ package com.uxight.api.repository.run;
 import com.uxight.api.domain.run.ExperimentSummary;
 import com.uxight.api.domain.run.Run;
 import com.uxight.api.domain.run.RunRepository;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
@@ -17,9 +16,9 @@ import java.util.List;
 import java.util.Optional;
 
 @Repository
+@Slf4j
 public class JdbcTemplateRunRepository implements RunRepository {
 
-  private static final Logger log = LoggerFactory.getLogger(JdbcTemplateRunRepository.class);
   private static final RunRowMapper ROW_MAPPER = new RunRowMapper();
   private static final ExperimentSummaryRowMapper EXPERIMENT_ROW_MAPPER = new ExperimentSummaryRowMapper();
 

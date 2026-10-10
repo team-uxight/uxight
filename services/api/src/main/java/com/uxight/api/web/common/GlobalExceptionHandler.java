@@ -2,8 +2,7 @@ package com.uxight.api.web.common;
 
 import com.uxight.api.common.ApiException;
 import com.uxight.api.common.ErrorCode;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
@@ -18,9 +17,8 @@ import java.util.List;
 
 /** 예외를 공통 실패 본문으로 바꾼다. 화면 이동은 FE 가 정하므로 리다이렉트하지 않는다 (design-decision §8). */
 @RestControllerAdvice
+@Slf4j
 public class GlobalExceptionHandler {
-
-  private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
   @ExceptionHandler(ApiException.class)
   public ResponseEntity<ErrorResponse> handleApi(ApiException e) {
