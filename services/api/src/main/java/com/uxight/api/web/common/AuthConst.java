@@ -7,5 +7,6 @@ package com.uxight.api.web.common;
 public class AuthConst {
 
   public static final String LOGIN_USER_ID = "loginUserId";
+  public static final String LOGIN_USER_ROLE = "loginUserRole";   // AdminCheckInterceptor 전용. 컨트롤러는 userId 만 받는다
   public static final String REFRESH_TOKEN_COOKIE = "refreshToken";
 }

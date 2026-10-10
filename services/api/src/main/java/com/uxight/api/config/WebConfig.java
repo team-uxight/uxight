@@ -1,5 +1,6 @@
 package com.uxight.api.config;
 
+import com.uxight.api.web.common.AdminCheckInterceptor;
 import com.uxight.api.web.common.LoginCheckInterceptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -26,6 +27,10 @@ public class WebConfig implements WebMvcConfigurer {
         .order(1)
         .addPathPatterns("/api/**")
         .excludePathPatterns("/api/health", "/api/auth/signup", "/api/auth/login", "/api/auth/google", "/api/auth/refresh", "/api/auth/logout");
+    // 로그인 확인(order 1)이 역할을 요청 속성에 담은 뒤에 돈다
+    registry.addInterceptor(new AdminCheckInterceptor())
+        .order(2)
+        .addPathPatterns("/api/admin/**");
   }
 
   /**

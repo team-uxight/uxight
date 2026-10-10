@@ -75,8 +75,45 @@ class LoginCheckInterceptorTest {
         .andExpect(status().isOk());
   }
 
+  @Test
+  void adminPath_allowsAdmin() throws Exception {
+    Long adminId = insertUser("admin-test@uxight.com", "admin", true);
+
+    adminMock("Bearer " + jwtProvider.createAccessToken(adminId))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.userId").value(adminId));
+  }
+
+  @Test
+  void adminPath_rejectsResearcher() throws Exception {
+    Long researcherId = insertUser("researcher@uxight.com", "researcher", true);
+
+    adminMock("Bearer " + jwtProvider.createAccessToken(researcherId))
+        .andExpect(status().isForbidden())
+        .andExpect(jsonPath("$.code").value("AUT-ERR-006"))
+        .andExpect(jsonPath("$.message").value("권한이 없습니다."));
+  }
+
+  @Test
+  void adminPath_withoutToken_isUnauthorizedBeforeRoleCheck() throws Exception {
+    expectUnauthorized(mvc.perform(get("/api/admin/mock")));
+  }
+
+  @Test
+  void adminPath_inactiveAdmin_isUnauthorized() throws Exception {
+    Long adminId = insertUser("inactive-admin@uxight.com", "admin", false);
+
+    adminMock("Bearer " + jwtProvider.createAccessToken(adminId))
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("AUT-ERR-005"));
+  }
+
   private ResultActions me(String authorization) throws Exception {
     return mvc.perform(get("/api/users/me").header(HttpHeaders.AUTHORIZATION, authorization));
+  }
+
+  private ResultActions adminMock(String authorization) throws Exception {
+    return mvc.perform(get("/api/admin/mock").header(HttpHeaders.AUTHORIZATION, authorization));
   }
 
   private void expectUnauthorized(ResultActions result) throws Exception {
@@ -86,8 +123,12 @@ class LoginCheckInterceptorTest {
   }
 
   private Long insertUser(String email, boolean active) {
+    return insertUser(email, "researcher", active);
+  }
+
+  private Long insertUser(String email, String role, boolean active) {
     jdbcTemplate.update("INSERT INTO users (email, password_hash, auth_provider, name, role, is_active) "
-        + "VALUES (?, 'hash', 'local', '홍길동', 'researcher', ?)", email, active);
+        + "VALUES (?, 'hash', 'local', '홍길동', ?, ?)", email, role, active);
     return jdbcTemplate.queryForObject("SELECT user_id FROM users WHERE email = ?", Long.class, email);
   }
 }

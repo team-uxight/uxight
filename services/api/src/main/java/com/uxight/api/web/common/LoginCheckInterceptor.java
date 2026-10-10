@@ -16,7 +16,7 @@ import org.springframework.web.servlet.HandlerInterceptor;
 /**
  * Authorization: Bearer {access 토큰} 을 검증한다. 토큰에는 userId 만 있으므로 계정 활성 여부는 매 요청 DB 에서 확인한다 —
  * 비활성화가 토큰 만료를 기다리지 않고 바로 반영된다 (design-decision 6.1).
- * TODO: 관리자 API(/api/admin/**)를 만들 때 role 확인(AUT-ERR-006)을 여기에 추가한다.
+ * 같은 행에서 읽은 역할을 요청 속성에 담아 AdminCheckInterceptor 가 쓴다 — 역할 변경도 다음 요청부터 바로 반영된다.
  */
 @Component
 public class LoginCheckInterceptor implements HandlerInterceptor {
@@ -53,6 +53,7 @@ public class LoginCheckInterceptor implements HandlerInterceptor {
     }
 
     request.setAttribute(AuthConst.LOGIN_USER_ID, userId);
+    request.setAttribute(AuthConst.LOGIN_USER_ROLE, user.getRole());
     return true;
   }
 }
