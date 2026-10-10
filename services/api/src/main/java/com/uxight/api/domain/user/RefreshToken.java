@@ -60,6 +60,11 @@ public class RefreshToken {
     return new RefreshToken(user, hash(rawToken), LocalDateTime.now().plus(ttl));
   }
 
+  /** 무효화(로그아웃)되지 않았고 만료 전이면 access 토큰 재발급에 쓸 수 있다. */
+  public boolean isUsable() {
+    return revokedAt == null && expiresAt.isAfter(LocalDateTime.now());
+  }
+
   /** 쿠키에 담을 원문. JWT 가 아닌 무작위 문자열(32바이트, hex 64자)이다. */
   public static String newRawToken() {
     byte[] bytes = new byte[TOKEN_BYTES];

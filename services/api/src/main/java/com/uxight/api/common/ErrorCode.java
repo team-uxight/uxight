@@ -14,6 +14,7 @@ public enum ErrorCode {
   UNAUTHORIZED(HttpStatus.UNAUTHORIZED, "AUT-ERR-001", "인증이 필요합니다."),
   LOGIN_FAILED(HttpStatus.UNAUTHORIZED, "AUT-ERR-002", "이메일 또는 비밀번호가 올바르지 않습니다."),
   GOOGLE_AUTH_FAILED(HttpStatus.UNAUTHORIZED, "AUT-ERR-003", "Google 인증에 실패했습니다."),
+  REFRESH_TOKEN_INVALID(HttpStatus.UNAUTHORIZED, "AUT-ERR-004", "로그인이 만료되었습니다."),
   ACCOUNT_DISABLED(HttpStatus.UNAUTHORIZED, "AUT-ERR-005", "비활성화된 계정입니다."),
   EMAIL_DUPLICATED(HttpStatus.CONFLICT, "AUT-ERR-007", "이미 가입된 이메일입니다."),
   EMAIL_ACCOUNT_EXISTS(HttpStatus.CONFLICT, "AUT-ERR-008", "이메일로 가입된 계정입니다. 이메일로 로그인해 주세요."),

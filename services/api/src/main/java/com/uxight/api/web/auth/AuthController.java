@@ -12,6 +12,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -51,6 +52,13 @@ public class AuthController {
   @PostMapping("/google")
   public ResponseEntity<TokenResponse> google(@Valid @RequestBody GoogleLoginRequest request) {
     return tokenResponse(authService.googleLogin(request.idToken()));
+  }
+
+  /** 쿠키가 없으면 AuthService 가 AUT-ERR-004 로 응답한다. refresh 토큰을 교체하지 않으므로 쿠키는 다시 내려보내지 않는다. */
+  @PostMapping("/refresh")
+  public TokenResponse refresh(
+      @CookieValue(name = AuthConst.REFRESH_TOKEN_COOKIE, required = false) String refreshToken) {
+    return new TokenResponse(authService.refresh(refreshToken));
   }
 
   // access 토큰은 본문으로, refresh 토큰 원문은 HttpOnly 쿠키로만 내보낸다.

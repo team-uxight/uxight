@@ -95,4 +95,23 @@ public class AuthService {
     refreshTokenRepository.save(RefreshToken.issue(user, rawRefreshToken, refreshTokenTtl));
     return new LoginTokens(jwtProvider.createAccessToken(user.getId()), rawRefreshToken);
   }
+
+  /**
+   * access 토큰 재발급. 쿠키의 refresh 토큰 원문을 해시해 찾고, 만료 · 무효화 여부와 계정 활성 여부를 확인한다.
+   * refresh 토큰은 교체(rotation)하지 않는다 — 로그아웃 또는 만료 때만 무효가 된다 (design-decision 6.1).
+   */
+  @Transactional(readOnly = true)
+  public String refresh(String rawRefreshToken) {
+    if (rawRefreshToken == null || rawRefreshToken.isBlank()) {
+      throw new ApiException(ErrorCode.REFRESH_TOKEN_INVALID);
+    }
+    RefreshToken refreshToken = refreshTokenRepository.findByTokenHash(RefreshToken.hash(rawRefreshToken))
+        .filter(RefreshToken::isUsable)
+        .orElseThrow(() -> new ApiException(ErrorCode.REFRESH_TOKEN_INVALID));
+    User user = refreshToken.getUser();
+    if (!user.isActive()) {
+      throw new ApiException(ErrorCode.ACCOUNT_DISABLED);
+    }
+    return jwtProvider.createAccessToken(user.getId());
+  }
 }

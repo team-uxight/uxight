@@ -6,6 +6,7 @@ import static org.hamcrest.Matchers.empty;
 import static org.hamcrest.Matchers.matchesPattern;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -13,6 +14,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.uxight.api.domain.user.GoogleAccount;
 import com.uxight.api.domain.user.GoogleIdTokenVerifier;
+import com.uxight.api.domain.user.RefreshToken;
+import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -165,6 +168,52 @@ class AuthControllerTest {
         .andExpect(jsonPath("$.code").value("AUT-ERR-005"))
         .andExpect(jsonPath("$.message").value("비활성화된 계정입니다."))
         .andExpect(jsonPath("$.fieldErrors").value(empty()));
+  }
+
+  @Test
+  void refresh_withLoginCookie_returnsNewAccessTokenAndKeepsCookie() throws Exception {
+    insertUser("login@uxight.com", true);
+    Cookie refreshTokenCookie = login("login@uxight.com", "password12").andReturn().getResponse().getCookie("refreshToken");
+
+    String body = mvc.perform(post("/api/auth/refresh").cookie(refreshTokenCookie))
+        .andExpect(status().isOk())
+        .andExpect(header().doesNotExist(HttpHeaders.SET_COOKIE))   // rotation 없음 — 쿠키는 그대로
+        .andExpect(jsonPath("$.accessToken").value(notNullValue()))
+        .andReturn().getResponse().getContentAsString();
+
+    // 새 access 토큰으로 로그인이 필요한 API 를 부를 수 있다
+    String accessToken = body.replaceAll(".*\"accessToken\":\"([^\"]+)\".*", "$1");
+    mvc.perform(get("/api/users/me").header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken))
+        .andExpect(status().isOk());
+  }
+
+  @Test
+  void refresh_withoutCookie_returnsUnauthorized() throws Exception {
+    mvc.perform(post("/api/auth/refresh"))
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("AUT-ERR-004"))
+        .andExpect(jsonPath("$.message").value("로그인이 만료되었습니다."))
+        .andExpect(jsonPath("$.fieldErrors").value(empty()));
+  }
+
+  @Test
+  void refresh_unknownToken_returnsUnauthorized() throws Exception {
+    mvc.perform(post("/api/auth/refresh").cookie(new Cookie("refreshToken", RefreshToken.newRawToken())))
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("AUT-ERR-004"));
+  }
+
+  @Test
+  void refresh_inactiveAccount_returnsUnauthorized() throws Exception {
+    insertUser("inactive@uxight.com", false);
+    String raw = RefreshToken.newRawToken();
+    jdbcTemplate.update("INSERT INTO refresh_tokens (user_id, token_hash, expires_at) "
+        + "SELECT user_id, ?, NOW() + INTERVAL 1 DAY FROM users WHERE email = 'inactive@uxight.com'", RefreshToken.hash(raw));
+
+    mvc.perform(post("/api/auth/refresh").cookie(new Cookie("refreshToken", raw)))
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("AUT-ERR-005"))
+        .andExpect(jsonPath("$.message").value("비활성화된 계정입니다."));
   }
 
   @Test
