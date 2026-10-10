@@ -217,6 +217,29 @@ class AuthControllerTest {
   }
 
   @Test
+  void logout_revokesRefreshTokenAndDeletesCookie() throws Exception {
+    insertUser("login@uxight.com", true);
+    Cookie refreshTokenCookie = login("login@uxight.com", "password12").andReturn().getResponse().getCookie("refreshToken");
+
+    mvc.perform(post("/api/auth/logout").cookie(refreshTokenCookie))
+        .andExpect(status().isNoContent())
+        .andExpect(header().string(HttpHeaders.SET_COOKIE, matchesPattern(
+            "refreshToken=; Path=/api/auth; Max-Age=0; Expires=.+; Secure; HttpOnly; SameSite=Strict")));
+
+    // 로그아웃한 refresh 토큰으로는 재발급할 수 없다
+    mvc.perform(post("/api/auth/refresh").cookie(refreshTokenCookie))
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("AUT-ERR-004"));
+  }
+
+  @Test
+  void logout_withoutCookie_stillDeletesCookie() throws Exception {
+    mvc.perform(post("/api/auth/logout"))
+        .andExpect(status().isNoContent())
+        .andExpect(header().string(HttpHeaders.SET_COOKIE, matchesPattern("refreshToken=; Path=/api/auth; Max-Age=0; .+")));
+  }
+
+  @Test
   void google_newAccount_signsUpResearcherWithoutPassword() throws Exception {
     givenGoogleAccount("google-sub-1", "new-google@gmail.com");
 

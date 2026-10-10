@@ -114,4 +114,14 @@ public class AuthService {
     }
     return jwtProvider.createAccessToken(user.getId());
   }
+
+  /** 로그아웃. 쿠키의 refresh 토큰을 무효화한다. 쿠키가 없거나 모르는 토큰이면 할 일이 없다 — 같은 결과이므로 실패로 보지 않는다. */
+  @Transactional
+  public void logout(String rawRefreshToken) {
+    if (rawRefreshToken == null || rawRefreshToken.isBlank()) {
+      return;
+    }
+    refreshTokenRepository.findByTokenHash(RefreshToken.hash(rawRefreshToken))
+        .ifPresent(RefreshToken::revoke);
+  }
 }

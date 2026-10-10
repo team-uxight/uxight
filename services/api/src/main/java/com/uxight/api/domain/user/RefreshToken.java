@@ -65,6 +65,13 @@ public class RefreshToken {
     return revokedAt == null && expiresAt.isAfter(LocalDateTime.now());
   }
 
+  /** 로그아웃. 무효화 시각을 기록한다. 이미 무효화된 토큰이면 처음 시각을 유지한다. */
+  public void revoke() {
+    if (revokedAt == null) {
+      revokedAt = LocalDateTime.now();
+    }
+  }
+
   /** 쿠키에 담을 원문. JWT 가 아닌 무작위 문자열(32바이트, hex 64자)이다. */
   public static String newRawToken() {
     byte[] bytes = new byte[TOKEN_BYTES];

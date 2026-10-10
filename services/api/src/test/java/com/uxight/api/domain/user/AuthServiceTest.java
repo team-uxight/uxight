@@ -2,6 +2,7 @@ package com.uxight.api.domain.user;
 
 import com.uxight.api.common.ApiException;
 import com.uxight.api.common.ErrorCode;
+import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -12,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** 실제 MySQL 에 붙는다. 테스트마다 롤백한다. */
@@ -36,6 +38,9 @@ class AuthServiceTest {
 
   @Autowired
   private JdbcTemplate jdbcTemplate;
+
+  @Autowired
+  private EntityManager entityManager;
 
   @Test
   void signup_savesResearcherWithHashedPassword() {
@@ -140,6 +145,40 @@ class AuthServiceTest {
     String raw = insertRefreshToken(userId, "NOW() + INTERVAL 1 DAY", null);
 
     assertRefreshFails(raw, ErrorCode.ACCOUNT_DISABLED);
+  }
+
+  @Test
+  void logout_revokesRefreshTokenInDb() {
+    authService.signup("logout@uxight.com", "password12", "홍길동");
+    LoginTokens tokens = authService.login("logout@uxight.com", "password12");
+
+    authService.logout(tokens.refreshToken());
+    entityManager.flush();   // 변경 감지로 나간 UPDATE 를 DB 에서 확인한다
+
+    assertThat(jdbcTemplate.queryForObject("SELECT revoked_at FROM refresh_tokens WHERE token_hash = ?",
+        LocalDateTime.class, RefreshToken.hash(tokens.refreshToken()))).isNotNull();
+    assertRefreshFails(tokens.refreshToken(), ErrorCode.REFRESH_TOKEN_INVALID);
+  }
+
+  @Test
+  void logout_isIdempotent_andKeepsFirstRevokedAt() {
+    Long userId = insertUser("logout@uxight.com", true);
+    String raw = insertRefreshToken(userId, "NOW() + INTERVAL 1 DAY", "'2026-01-01 00:00:00'");
+
+    authService.logout(raw);
+    entityManager.flush();
+
+    assertThat(jdbcTemplate.queryForObject("SELECT revoked_at FROM refresh_tokens WHERE token_hash = ?",
+        LocalDateTime.class, RefreshToken.hash(raw))).isEqualTo(LocalDateTime.of(2026, 1, 1, 0, 0));
+  }
+
+  @Test
+  void logout_withoutOrUnknownToken_doesNothing() {
+    assertThatCode(() -> {
+      authService.logout(null);
+      authService.logout("");
+      authService.logout(RefreshToken.newRawToken());
+    }).doesNotThrowAnyException();
   }
 
   private void assertLoginFails(String email, String password, ErrorCode expected) {

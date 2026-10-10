@@ -3,8 +3,6 @@ package com.uxight.api.web.auth;
 import com.uxight.api.domain.user.AuthService;
 import com.uxight.api.domain.user.LoginTokens;
 import com.uxight.api.web.common.AuthConst;
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpSession;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -61,27 +59,34 @@ public class AuthController {
     return new TokenResponse(authService.refresh(refreshToken));
   }
 
+  /**
+   * 현재 브라우저의 refresh 토큰을 무효화하고 쿠키를 지운다. 쿠키가 없거나 이미 무효인 토큰이어도 204 — 결과가 같기 때문이다.
+   * access 토큰은 상태가 없어 만료 전까지 유효하다 — FE 가 보관하던 토큰을 지운다.
+   */
+  @PostMapping("/logout")
+  public ResponseEntity<Void> logout(
+      @CookieValue(name = AuthConst.REFRESH_TOKEN_COOKIE, required = false) String refreshToken) {
+    authService.logout(refreshToken);
+    return ResponseEntity.noContent()
+        .header(HttpHeaders.SET_COOKIE, refreshTokenCookie("", Duration.ZERO).toString())
+        .build();
+  }
+
   // access 토큰은 본문으로, refresh 토큰 원문은 HttpOnly 쿠키로만 내보낸다.
   private ResponseEntity<TokenResponse> tokenResponse(LoginTokens tokens) {
-    ResponseCookie refreshTokenCookie = ResponseCookie.from(AuthConst.REFRESH_TOKEN_COOKIE, tokens.refreshToken())
+    return ResponseEntity.ok()
+        .header(HttpHeaders.SET_COOKIE, refreshTokenCookie(tokens.refreshToken(), refreshTokenTtl).toString())
+        .body(new TokenResponse(tokens.accessToken()));
+  }
+
+  // 발급과 삭제가 같은 속성(특히 Path)이어야 브라우저가 같은 쿠키로 보고 지운다. maxAge 0 = 삭제.
+  private static ResponseCookie refreshTokenCookie(String value, Duration maxAge) {
+    return ResponseCookie.from(AuthConst.REFRESH_TOKEN_COOKIE, value)
         .httpOnly(true)
         .secure(true)
         .sameSite("Strict")
         .path(REFRESH_TOKEN_COOKIE_PATH)
-        .maxAge(refreshTokenTtl)
+        .maxAge(maxAge)
         .build();
-    return ResponseEntity.ok()
-        .header(HttpHeaders.SET_COOKIE, refreshTokenCookie.toString())
-        .body(new TokenResponse(tokens.accessToken()));
-  }
-
-  // TODO: 세션 기반 Walking Skeleton 의 잔재. 로그아웃 티켓에서 refresh 토큰 무효화 + 쿠키 삭제로 바꾼다 (OpenAPI logout).
-  @PostMapping("/logout")
-  public ResponseEntity<Void> logout(HttpServletRequest httpRequest) {
-    HttpSession session = httpRequest.getSession(false);
-    if (session != null) {
-      session.invalidate();
-    }
-    return ResponseEntity.noContent().build();
   }
 }
