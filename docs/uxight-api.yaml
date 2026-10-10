@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: UXight REST API (FE-BE)
-  version: 0.2.0
+  version: 0.3.0
   description: |-
     UXight 프로젝트에서 프론트엔드(SPA)와 백엔드(Spring) 간 통신에 사용되는 REST API 명세이다.
     기준 문서는 '서비스 REST API 설계'(7.3)와 '오류 코드 및 오류 파일 설계'(8.4)이고, 두 문서에 없는 동작은 design-decision.md를 따른다.
@@ -45,7 +45,6 @@ tags:
   - name: 감사 로그 관리
 
 paths:
-
   # ───────── 1. 회원가입, 2. 로그인, 3. 로그아웃 ─────────
 
   /api/auth/signup:
@@ -60,25 +59,25 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/SignupRequest'
+              $ref: "#/components/schemas/SignupRequest"
       responses:
-        '201':
+        "201":
           description: 가입 완료
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SignupResponse'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '409':
-          description: 'AUT-ERR-007: 이메일 중복'
+                $ref: "#/components/schemas/SignupResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          description: "AUT-ERR-007: 이메일 중복"
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
               examples:
                 AUT-ERR-007:
-                  $ref: '#/components/examples/AUT-ERR-007'
+                  $ref: "#/components/examples/AUT-ERR-007"
 
   /api/auth/google:
     post:
@@ -94,41 +93,41 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/GoogleLoginRequest'
+              $ref: "#/components/schemas/GoogleLoginRequest"
       responses:
-        '200':
+        "200":
           description: 로그인 완료. refresh 토큰은 HttpOnly 쿠키로 전달한다.
           headers:
             Set-Cookie:
-              $ref: '#/components/headers/RefreshTokenSetCookie'
+              $ref: "#/components/headers/RefreshTokenSetCookie"
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TokenResponse'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
+                $ref: "#/components/schemas/TokenResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
           description: |-
             - AUT-ERR-003: ID 토큰 검증 실패
             - AUT-ERR-005: 비활성 계정
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
               examples:
                 AUT-ERR-003:
-                  $ref: '#/components/examples/AUT-ERR-003'
+                  $ref: "#/components/examples/AUT-ERR-003"
                 AUT-ERR-005:
-                  $ref: '#/components/examples/AUT-ERR-005'
-        '409':
-          description: 'AUT-ERR-008: 같은 이메일의 이메일 가입 계정이 있음'
+                  $ref: "#/components/examples/AUT-ERR-005"
+        "409":
+          description: "AUT-ERR-008: 같은 이메일의 이메일 가입 계정이 있음"
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
               examples:
                 AUT-ERR-008:
-                  $ref: '#/components/examples/AUT-ERR-008'
+                  $ref: "#/components/examples/AUT-ERR-008"
 
   /api/auth/login:
     post:
@@ -141,32 +140,32 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/LoginRequest'
+              $ref: "#/components/schemas/LoginRequest"
       responses:
-        '200':
+        "200":
           description: 로그인 완료. refresh 토큰은 HttpOnly 쿠키로 전달한다.
           headers:
             Set-Cookie:
-              $ref: '#/components/headers/RefreshTokenSetCookie'
+              $ref: "#/components/headers/RefreshTokenSetCookie"
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TokenResponse'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
+                $ref: "#/components/schemas/TokenResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
           description: |-
             - AUT-ERR-002: 이메일 또는 비밀번호가 틀림. 이메일이 없는 경우와 비밀번호가 틀린 경우를 구분하지 않는다.
             - AUT-ERR-005: 비활성 계정. 비밀번호를 확인한 뒤에 알린다. 비밀번호를 모르는 사람에게 계정이 있다는 것을 알리지 않기 위해서다.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
               examples:
                 AUT-ERR-002:
-                  $ref: '#/components/examples/AUT-ERR-002'
+                  $ref: "#/components/examples/AUT-ERR-002"
                 AUT-ERR-005:
-                  $ref: '#/components/examples/AUT-ERR-005'
+                  $ref: "#/components/examples/AUT-ERR-005"
 
   /api/auth/refresh:
     post:
@@ -177,25 +176,25 @@ paths:
       security:
         - refreshTokenCookie: []
       responses:
-        '200':
+        "200":
           description: 재발급 완료
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TokenResponse'
-        '401':
+                $ref: "#/components/schemas/TokenResponse"
+        "401":
           description: |-
             - AUT-ERR-004: refresh 토큰이 없거나 만료 또는 무효화됨
             - AUT-ERR-005: 비활성 계정
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
               examples:
                 AUT-ERR-004:
-                  $ref: '#/components/examples/AUT-ERR-004'
+                  $ref: "#/components/examples/AUT-ERR-004"
                 AUT-ERR-005:
-                  $ref: '#/components/examples/AUT-ERR-005'
+                  $ref: "#/components/examples/AUT-ERR-005"
 
   /api/auth/logout:
     post:
@@ -206,7 +205,7 @@ paths:
       security:
         - refreshTokenCookie: []
       responses:
-        '204':
+        "204":
           description: 로그아웃 완료
           headers:
             Set-Cookie:
@@ -225,14 +224,14 @@ paths:
       summary: 로그인 사용자 조회
       description: 로그인 사용자 이름 표시와 관리자 메뉴 노출 여부 판단에 쓴다.
       responses:
-        '200':
+        "200":
           description: 조회 성공
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UserMe'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+                $ref: "#/components/schemas/UserMe"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /api/projects:
     get:
@@ -240,14 +239,14 @@ paths:
       operationId: listProjects
       summary: 본인 프로젝트 목록 조회
       responses:
-        '200':
+        "200":
           description: 조회 성공
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ProjectListResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+                $ref: "#/components/schemas/ProjectListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
     post:
       tags: [프로젝트 관리]
       operationId: createProject
@@ -257,39 +256,39 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ProjectCreateRequest'
+              $ref: "#/components/schemas/ProjectCreateRequest"
       responses:
-        '201':
+        "201":
           description: 생성 완료
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ProjectCreateResponse'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+                $ref: "#/components/schemas/ProjectCreateResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   # ───────── 5. 프로젝트 관리 ─────────
 
   /api/projects/{projectId}:
     parameters:
-      - $ref: '#/components/parameters/ProjectId'
+      - $ref: "#/components/parameters/ProjectId"
     get:
       tags: [프로젝트 관리]
       operationId: getProject
       summary: 프로젝트 상세 조회
       responses:
-        '200':
+        "200":
           description: 조회 성공
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ProjectDetail'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/ProjectNotFound'
+                $ref: "#/components/schemas/ProjectDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/ProjectNotFound"
     patch:
       tags: [프로젝트 관리]
       operationId: updateProject
@@ -300,41 +299,41 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ProjectUpdateRequest'
+              $ref: "#/components/schemas/ProjectUpdateRequest"
       responses:
-        '200':
+        "200":
           description: 수정된 프로젝트 정보
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ProjectDetail'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/ProjectNotFound'
+                $ref: "#/components/schemas/ProjectDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/ProjectNotFound"
     delete:
       tags: [프로젝트 관리]
       operationId: deleteProject
       summary: 프로젝트 삭제
       description: 삭제 방식(실제 삭제, 삭제 표시)과 로그 파일 정리는 미결이다.
       responses:
-        '204':
+        "204":
           description: 삭제 완료
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/ProjectNotFound'
-        '409':
-          description: 'EXP-ERR-004: 진행 중인 실험이 있음'
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/ProjectNotFound"
+        "409":
+          description: "EXP-ERR-004: 진행 중인 실험이 있음"
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
               examples:
                 EXP-ERR-004:
-                  $ref: '#/components/examples/EXP-ERR-004'
+                  $ref: "#/components/examples/EXP-ERR-004"
 
   /api/personas:
     get:
@@ -343,18 +342,18 @@ paths:
       summary: Persona 목록 조회
       description: 실험 요청 폼의 Persona 선택 목록이다. 본인 소유 Persona와 공용 Persona를 함께 조회한다.
       responses:
-        '200':
+        "200":
           description: 조회 성공
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PersonaListResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+                $ref: "#/components/schemas/PersonaListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /api/projects/{projectId}/test-accounts:
     parameters:
-      - $ref: '#/components/parameters/ProjectId'
+      - $ref: "#/components/parameters/ProjectId"
     post:
       tags: [프로젝트 관리]
       operationId: createTestAccount
@@ -365,87 +364,87 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/TestAccountCreateRequest'
+              $ref: "#/components/schemas/TestAccountCreateRequest"
       responses:
-        '201':
+        "201":
           description: 등록 완료
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TestAccountCreateResponse'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/ProjectNotFound'
-        '409':
-          description: 'PRJ-ERR-003: 같은 프로젝트에 같은 loginId가 있음'
+                $ref: "#/components/schemas/TestAccountCreateResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/ProjectNotFound"
+        "409":
+          description: "PRJ-ERR-003: 같은 프로젝트에 같은 loginId가 있음"
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
               examples:
                 PRJ-ERR-003:
-                  $ref: '#/components/examples/PRJ-ERR-003'
+                  $ref: "#/components/examples/PRJ-ERR-003"
     get:
       tags: [프로젝트 관리]
       operationId: listTestAccounts
       summary: 테스트 계정 목록 조회
       description: 비밀번호는 반환하지 않는다.
       responses:
-        '200':
+        "200":
           description: 조회 성공
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TestAccountListResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/ProjectNotFound'
+                $ref: "#/components/schemas/TestAccountListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/ProjectNotFound"
 
   /api/projects/{projectId}/test-accounts/{testAccountId}:
     parameters:
-      - $ref: '#/components/parameters/ProjectId'
-      - $ref: '#/components/parameters/TestAccountId'
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/TestAccountId"
     delete:
       tags: [프로젝트 관리]
       operationId: deleteTestAccount
       summary: 테스트 계정 삭제
       responses:
-        '204':
+        "204":
           description: 삭제 완료
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
           description: |-
             - PRJ-ERR-001: 프로젝트가 없거나 본인 소유가 아님
             - PRJ-ERR-002: 테스트 계정이 없거나 이 프로젝트의 계정이 아님
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
               examples:
                 PRJ-ERR-001:
-                  $ref: '#/components/examples/PRJ-ERR-001'
+                  $ref: "#/components/examples/PRJ-ERR-001"
                 PRJ-ERR-002:
-                  $ref: '#/components/examples/PRJ-ERR-002'
-        '409':
-          description: 'EXP-ERR-004: 진행 중인 실험이 있음'
+                  $ref: "#/components/examples/PRJ-ERR-002"
+        "409":
+          description: "EXP-ERR-004: 진행 중인 실험이 있음"
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
               examples:
                 EXP-ERR-004:
-                  $ref: '#/components/examples/EXP-ERR-004'
+                  $ref: "#/components/examples/EXP-ERR-004"
 
   # ───────── 6. 실험 관리 ─────────
 
   /api/projects/{projectId}/runs:
     parameters:
-      - $ref: '#/components/parameters/ProjectId'
+      - $ref: "#/components/parameters/ProjectId"
     post:
       tags: [실험 관리]
       operationId: createExperiment
@@ -459,62 +458,62 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ExperimentCreateRequest'
+              $ref: "#/components/schemas/ExperimentCreateRequest"
       responses:
-        '201':
+        "201":
           description: 실험 요청 완료
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ExperimentCreateResponse'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
+                $ref: "#/components/schemas/ExperimentCreateResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
           description: |-
             - PRJ-ERR-001: 프로젝트가 없거나 본인 소유가 아님
             - EXP-ERR-003: 선택한 Persona가 없거나, 본인 소유도 공용도 아님
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
               examples:
                 PRJ-ERR-001:
-                  $ref: '#/components/examples/PRJ-ERR-001'
+                  $ref: "#/components/examples/PRJ-ERR-001"
                 EXP-ERR-003:
-                  $ref: '#/components/examples/EXP-ERR-003'
-        '409':
+                  $ref: "#/components/examples/EXP-ERR-003"
+        "409":
           description: |-
             - EXP-ERR-004: 같은 프로젝트에 진행 중인 실험이 있음
             - EXP-ERR-005: 테스트 계정이 있고 그 수가 선택한 Persona 수보다 적음
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
               examples:
                 EXP-ERR-004:
-                  $ref: '#/components/examples/EXP-ERR-004'
+                  $ref: "#/components/examples/EXP-ERR-004"
                 EXP-ERR-005:
-                  $ref: '#/components/examples/EXP-ERR-005'
-        '502':
-          description: 'EXP-ERR-007: 성공 기준 생성 Agent 호출 실패(실패 응답, 연결 실패)'
+                  $ref: "#/components/examples/EXP-ERR-005"
+        "502":
+          description: "EXP-ERR-007: 성공 기준 생성 Agent 호출 실패(실패 응답, 연결 실패)"
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
               examples:
                 EXP-ERR-007:
-                  $ref: '#/components/examples/EXP-ERR-007'
-        '504':
-          description: 'EXP-ERR-008: 성공 기준 생성 Agent 호출 타임아웃'
+                  $ref: "#/components/examples/EXP-ERR-007"
+        "504":
+          description: "EXP-ERR-008: 성공 기준 생성 Agent 호출 타임아웃"
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
               examples:
                 EXP-ERR-008:
-                  $ref: '#/components/examples/EXP-ERR-008'
+                  $ref: "#/components/examples/EXP-ERR-008"
 
   /api/runs:
     get:
@@ -530,7 +529,7 @@ paths:
           required: false
           description: 실험 분류. 생략하면 전체를 조회한다.
           schema:
-            $ref: '#/components/schemas/ExperimentState'
+            $ref: "#/components/schemas/ExperimentState"
         - name: keyword
           in: query
           required: false
@@ -546,19 +545,19 @@ paths:
           schema:
             type: string
             format: date-time
-        - $ref: '#/components/parameters/Page'
-        - $ref: '#/components/parameters/Size'
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Size"
       responses:
-        '200':
+        "200":
           description: 조회 성공
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ExperimentPage'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+                $ref: "#/components/schemas/ExperimentPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /api/runs/stats:
     get:
@@ -567,18 +566,18 @@ paths:
       summary: 실험 건수와 총 소요 토큰 조회
       description: 실험 모니터링의 건수와 총 소요 토큰, 실험 이력의 건수를 조회한다.
       responses:
-        '200':
+        "200":
           description: 조회 성공
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ExperimentStats'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+                $ref: "#/components/schemas/ExperimentStats"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /api/runs/{firstRunId}/cancel:
     parameters:
-      - $ref: '#/components/parameters/FirstRunId'
+      - $ref: "#/components/parameters/FirstRunId"
     post:
       tags: [실험 관리]
       operationId: cancelExperiment
@@ -588,41 +587,41 @@ paths:
         승인 대기 중인 실험은 기록하는 즉시 취소가 끝나지만, 응답은 같은 202로 통일한다.
         취소 요청된 실험(취소된 실험 포함)은 상태와 관계없이 202를 응답한다(멱등).
       responses:
-        '202':
+        "202":
           description: 취소 요청 접수
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/ExperimentNotFound'
-        '409':
-          description: 'EXP-ERR-006: 취소 요청이 없고, 진행 중이거나 승인 대기 중인 실험도 아님'
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/ExperimentNotFound"
+        "409":
+          description: "EXP-ERR-006: 취소 요청이 없고, 진행 중이거나 승인 대기 중인 실험도 아님"
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
               examples:
                 EXP-ERR-006:
-                  $ref: '#/components/examples/EXP-ERR-006'
+                  $ref: "#/components/examples/EXP-ERR-006"
 
   /api/runs/{firstRunId}/rounds:
     parameters:
-      - $ref: '#/components/parameters/FirstRunId'
+      - $ref: "#/components/parameters/FirstRunId"
     get:
       tags: [실험 관리]
       operationId: listRounds
       summary: 실험 회차 목록 조회
       description: 실험 모니터링에서 실험의 회차 목록을 조회한다. status가 done인 회차에서 진단 결과로 이동할 수 있다.
       responses:
-        '200':
+        "200":
           description: 조회 성공
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RoundListResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/ExperimentNotFound'
+                $ref: "#/components/schemas/RoundListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/ExperimentNotFound"
 
   /api/admin/runs:
     get:
@@ -630,121 +629,123 @@ paths:
       operationId: listAdminExperiments
       summary: 전체 실험 목록 조회
       parameters:
-        - $ref: '#/components/parameters/Page'
-        - $ref: '#/components/parameters/Size'
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Size"
       responses:
-        '200':
+        "200":
           description: 조회 성공
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AdminExperimentPage'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
+                $ref: "#/components/schemas/AdminExperimentPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   /api/admin/runs/{firstRunId}/rounds:
     parameters:
-      - $ref: '#/components/parameters/FirstRunId'
+      - $ref: "#/components/parameters/FirstRunId"
     get:
       tags: [실험 관리]
       operationId: listAdminRounds
       summary: 실험 회차 목록 조회(관리자)
       description: 실험의 회차 목록과 회차별 Persona 실행 결과를 조회한다.
       responses:
-        '200':
+        "200":
           description: 조회 성공
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AdminRoundListResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/ExperimentNotFound'
+                $ref: "#/components/schemas/AdminRoundListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/ExperimentNotFound"
 
   # ───────── 7. 행동 로그 관리 ─────────
 
   /api/admin/runs/{runId}/personas/{personaId}/steps:
     parameters:
-      - $ref: '#/components/parameters/RunId'
-      - $ref: '#/components/parameters/PersonaIdPath'
+      - $ref: "#/components/parameters/RunId"
+      - $ref: "#/components/parameters/PersonaIdPath"
     get:
       tags: [행동 로그 관리]
       operationId: listStepLogs
       summary: Persona별 step 로그 조회
-      description: 회차의 Persona별 step 로그를 조회한다. 행동 로그 스키마는 미정이다(PM, AI 파트와 논의 필요).
+      description: |-
+        회차의 Persona별 step 로그를 조회한다. Spring은 steps.jsonl을 그대로 넘기지 않고, 화면에 필요한 키만 camelCase로 바꿔 응답한다. 필드 정의는 행동 로그 명세(AI 파트)를 따른다.
+        기록된 step 전체를 반환한다(페이지네이션 없음). Persona 실행이 running이고 아직 기록된 step이 없으면 404가 아니라 빈 목록을 응답한다.
       responses:
-        '200':
+        "200":
           description: 조회 성공
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/StepLogListResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
+                $ref: "#/components/schemas/StepLogListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
           description: |-
             - EXP-ERR-002: 회차가 없음
-            - LOG-ERR-001: 그 회차에 해당 Persona의 step 로그가 없음
+            - LOG-ERR-001: 그 회차에 해당 Persona 실행이 없거나, 종료된 Persona 실행의 step 로그 파일이 없음
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
               examples:
                 EXP-ERR-002:
-                  $ref: '#/components/examples/EXP-ERR-002'
+                  $ref: "#/components/examples/EXP-ERR-002"
                 LOG-ERR-001:
-                  $ref: '#/components/examples/LOG-ERR-001'
+                  $ref: "#/components/examples/LOG-ERR-001"
 
   /api/admin/runs/{runId}/personas/{personaId}/steps/{step}/screenshot:
     parameters:
-      - $ref: '#/components/parameters/RunId'
-      - $ref: '#/components/parameters/PersonaIdPath'
-      - $ref: '#/components/parameters/StepPath'
+      - $ref: "#/components/parameters/RunId"
+      - $ref: "#/components/parameters/PersonaIdPath"
+      - $ref: "#/components/parameters/StepPath"
     get:
       tags: [행동 로그 관리]
       operationId: getStepScreenshot
       summary: step별 스크린샷 조회
-      description: 프론트엔드는 Authorization 헤더를 붙여 fetch로 받는다. img 태그의 src로는 헤더를 붙일 수 없기 때문이다.
+      description: 프론트엔드는 Authorization 헤더를 붙여 fetch로 받는다. img 태그의 src로는 헤더를 붙일 수 없기 때문이다. step 로그의 hasScreenshot이 false인 step은 조회하지 않는다.
       responses:
-        '200':
+        "200":
           description: 스크린샷 이미지
           content:
             image/png:
               schema:
                 type: string
                 format: binary
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
           description: |-
             - EXP-ERR-002: 회차가 없음
             - LOG-ERR-002: 스크린샷이 없음
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
               examples:
                 EXP-ERR-002:
-                  $ref: '#/components/examples/EXP-ERR-002'
+                  $ref: "#/components/examples/EXP-ERR-002"
                 LOG-ERR-002:
-                  $ref: '#/components/examples/LOG-ERR-002'
+                  $ref: "#/components/examples/LOG-ERR-002"
 
   # ───────── 8. 진단 관리 ─────────
 
   /api/runs/{runId}/findings:
     parameters:
-      - $ref: '#/components/parameters/RunId'
+      - $ref: "#/components/parameters/RunId"
     get:
       tags: [진단 관리]
       operationId: listFindings
@@ -753,16 +754,16 @@ paths:
         회차 목록의 '진단 결과'로 들어와 그 회차의 진단 목록을 조회한다.
         응답의 회차 정보(run)는 메뉴로 다시 들어온 화면을 runId 하나로 다시 그리는 데 쓴다.
       responses:
-        '200':
+        "200":
           description: 조회 성공
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/FindingListResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/RoundNotFound'
+                $ref: "#/components/schemas/FindingListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/RoundNotFound"
 
   /api/findings/stats:
     get:
@@ -771,18 +772,18 @@ paths:
       summary: Friction Taxonomy 분포 조회
       description: 실험 이력의 Friction Taxonomy 분포 그래프에 쓴다. 실험별 최초 회차의 진단을 집계하며, 최초 회차가 done이 아니면 집계하지 않는다.
       responses:
-        '200':
+        "200":
           description: 조회 성공
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TaxonomyStatsResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+                $ref: "#/components/schemas/TaxonomyStatsResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /api/findings/{findingId}:
     parameters:
-      - $ref: '#/components/parameters/FindingId'
+      - $ref: "#/components/parameters/FindingId"
     get:
       tags: [진단 관리]
       operationId: getFinding
@@ -791,20 +792,20 @@ paths:
         진단 결과의 '근거 보기'로 진단의 Taxonomy 분류, 심각도, 근거 step을 조회한다.
         근거 스크린샷은 GET /api/findings/{findingId}/screenshots로 받는다.
       responses:
-        '200':
+        "200":
           description: 조회 성공
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/FindingDetail'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/FindingNotFound'
+                $ref: "#/components/schemas/FindingDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/FindingNotFound"
 
   /api/findings/{findingId}/screenshots:
     parameters:
-      - $ref: '#/components/parameters/FindingId'
+      - $ref: "#/components/parameters/FindingId"
     get:
       tags: [진단 관리]
       operationId: getFindingScreenshot
@@ -823,36 +824,36 @@ paths:
           schema:
             type: integer
       responses:
-        '200':
+        "200":
           description: 스크린샷 이미지
           content:
             image/png:
               schema:
                 type: string
                 format: binary
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
           description: |-
             - FND-ERR-001: 진단이 없거나 본인 소유가 아님, 또는 진단의 회차가 done이 아님
             - LOG-ERR-002: 근거 범위 밖의 step이거나 스크린샷이 없음
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
               examples:
                 FND-ERR-001:
-                  $ref: '#/components/examples/FND-ERR-001'
+                  $ref: "#/components/examples/FND-ERR-001"
                 LOG-ERR-002:
-                  $ref: '#/components/examples/LOG-ERR-002'
+                  $ref: "#/components/examples/LOG-ERR-002"
 
   # ───────── 9. 개선안/다음 회차 관리 ─────────
 
   /api/runs/{runId}/improvements:
     parameters:
-      - $ref: '#/components/parameters/RunId'
+      - $ref: "#/components/parameters/RunId"
     get:
       tags: [개선안/다음 회차 관리]
       operationId: listImprovements
@@ -861,20 +862,20 @@ paths:
         진단 결과의 '개선안 확인'으로 들어와 그 회차의 진단을 종합하여 산출한 개선안 목록(최대 3안)을 조회한다.
         개선안은 회차가 done으로 기록되기 전에 저장되고, 그 뒤 회차가 실패하거나 취소되어도 남는다. 그래서 회차가 done이 아니면 404를 응답한다.
       responses:
-        '200':
+        "200":
           description: 조회 성공
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ImprovementListResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/RoundNotFound'
+                $ref: "#/components/schemas/ImprovementListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/RoundNotFound"
 
   /api/improvements/{improvementId}:
     parameters:
-      - $ref: '#/components/parameters/ImprovementId'
+      - $ref: "#/components/parameters/ImprovementId"
     get:
       tags: [개선안/다음 회차 관리]
       operationId: getImprovement
@@ -883,20 +884,20 @@ paths:
         개선안을 선택해 근거, 예상 효과, 패치 내용을 조회한다.
         승인, 반려 버튼은 awaitingApproval이 true이고 이 개선안의 approval이 null일 때만 켠다.
       responses:
-        '200':
+        "200":
           description: 조회 성공
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ImprovementDetail'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/ImprovementNotFound'
+                $ref: "#/components/schemas/ImprovementDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/ImprovementNotFound"
 
   /api/runs/{runId}/approvals:
     parameters:
-      - $ref: '#/components/parameters/RunId'
+      - $ref: "#/components/parameters/RunId"
     post:
       tags: [개선안/다음 회차 관리]
       operationId: decideNextRound
@@ -910,32 +911,32 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ApprovalCreateRequest'
+              $ref: "#/components/schemas/ApprovalCreateRequest"
       responses:
-        '201':
+        "201":
           description: 결정 완료
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApprovalCreateResponse'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
+                $ref: "#/components/schemas/ApprovalCreateResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
           description: |-
             - EXP-ERR-002: 회차가 없거나 본인 소유가 아님
             - IMP-ERR-001: 개선안이 없거나 이 회차의 개선안이 아님
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
               examples:
                 EXP-ERR-002:
-                  $ref: '#/components/examples/EXP-ERR-002'
+                  $ref: "#/components/examples/EXP-ERR-002"
                 IMP-ERR-001:
-                  $ref: '#/components/examples/IMP-ERR-001'
-        '409':
+                  $ref: "#/components/examples/IMP-ERR-001"
+        "409":
           description: |-
             - IMP-ERR-002: 다음 회차를 승인하거나 반려할 수 없는 상태(승인 가능 조건, design-decision.md 2.2). 이미 결정된 개선안도 해당한다.
             - EXP-ERR-004: 승인일 때 같은 프로젝트에 진행 중인 실험이 있음
@@ -943,20 +944,20 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
               examples:
                 IMP-ERR-002:
-                  $ref: '#/components/examples/IMP-ERR-002'
+                  $ref: "#/components/examples/IMP-ERR-002"
                 EXP-ERR-004:
-                  $ref: '#/components/examples/EXP-ERR-004'
+                  $ref: "#/components/examples/EXP-ERR-004"
                 EXP-ERR-005:
-                  $ref: '#/components/examples/EXP-ERR-005'
+                  $ref: "#/components/examples/EXP-ERR-005"
 
   # ───────── 10. 결과 관리 ─────────
 
   /api/runs/{firstRunId}/comparison:
     parameters:
-      - $ref: '#/components/parameters/FirstRunId'
+      - $ref: "#/components/parameters/FirstRunId"
     get:
       tags: [결과 관리]
       operationId: getComparison
@@ -966,29 +967,29 @@ paths:
         마지막 회차는 status가 done인 회차 중 가장 최근 회차이다. done인 회차가 하나뿐이면 after는 null이다.
         Before, After에 보여줄 스크린샷의 선택 기준은 미결이다.
       responses:
-        '200':
+        "200":
           description: 조회 성공
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ComparisonResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/ExperimentNotFound'
-        '409':
-          description: 'CMP-ERR-001: 최초 회차가 done이 아님'
+                $ref: "#/components/schemas/ComparisonResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/ExperimentNotFound"
+        "409":
+          description: "CMP-ERR-001: 최초 회차가 done이 아님"
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
               examples:
                 CMP-ERR-001:
-                  $ref: '#/components/examples/CMP-ERR-001'
+                  $ref: "#/components/examples/CMP-ERR-001"
 
   /api/runs/{firstRunId}/comparison/screenshots:
     parameters:
-      - $ref: '#/components/parameters/FirstRunId'
+      - $ref: "#/components/parameters/FirstRunId"
     get:
       tags: [결과 관리]
       operationId: getComparisonScreenshot
@@ -1013,30 +1014,30 @@ paths:
           schema:
             type: integer
       responses:
-        '200':
+        "200":
           description: 스크린샷 이미지
           content:
             image/png:
               schema:
                 type: string
                 format: binary
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
           description: |-
             - EXP-ERR-001: 실험이 없거나 본인 소유가 아님
             - LOG-ERR-002: Before, After 범위 밖의 스크린샷이거나 스크린샷이 없음
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
               examples:
                 EXP-ERR-001:
-                  $ref: '#/components/examples/EXP-ERR-001'
+                  $ref: "#/components/examples/EXP-ERR-001"
                 LOG-ERR-002:
-                  $ref: '#/components/examples/LOG-ERR-002'
+                  $ref: "#/components/examples/LOG-ERR-002"
 
   # ───────── 11. 계정 관리 ─────────
 
@@ -1046,25 +1047,25 @@ paths:
       operationId: listUsers
       summary: 계정 목록 조회
       parameters:
-        - $ref: '#/components/parameters/Page'
-        - $ref: '#/components/parameters/Size'
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Size"
       responses:
-        '200':
+        "200":
           description: 조회 성공
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AdminUserPage'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
+                $ref: "#/components/schemas/AdminUserPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   /api/admin/users/{userId}/role:
     parameters:
-      - $ref: '#/components/parameters/UserId'
+      - $ref: "#/components/parameters/UserId"
     patch:
       tags: [계정 관리]
       operationId: changeUserRole
@@ -1075,31 +1076,31 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/RoleChangeRequest'
+              $ref: "#/components/schemas/RoleChangeRequest"
       responses:
-        '200':
+        "200":
           description: 변경 완료
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RoleChangeResponse'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/UserNotFound'
-        '409':
-          description: 'ACC-ERR-002: 마지막 관리자를 리서처로 바꾸려 함'
+                $ref: "#/components/schemas/RoleChangeResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/UserNotFound"
+        "409":
+          description: "ACC-ERR-002: 마지막 관리자를 리서처로 바꾸려 함"
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: "#/components/schemas/ErrorResponse"
               examples:
                 ACC-ERR-002:
-                  $ref: '#/components/examples/ACC-ERR-002'
+                  $ref: "#/components/examples/ACC-ERR-002"
 
   # ───────── 12. 정책 관리 ─────────
 
@@ -1109,16 +1110,16 @@ paths:
       operationId: getPolicy
       summary: 전역 정책 조회
       responses:
-        '200':
+        "200":
           description: 조회 성공
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Policy'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
+                $ref: "#/components/schemas/Policy"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
     patch:
       tags: [정책 관리]
       operationId: updatePolicy
@@ -1131,20 +1132,20 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PolicyUpdateRequest'
+              $ref: "#/components/schemas/PolicyUpdateRequest"
       responses:
-        '200':
+        "200":
           description: 수정 후의 전역 정책
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Policy'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
+                $ref: "#/components/schemas/Policy"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   # ───────── 13. 실험 강제 중단 ─────────
 
@@ -1157,16 +1158,16 @@ paths:
         status가 queued, accepted, running인 모든 회차에 취소 요청을 기록한다. 승인 대기 중인 실험은 실행 자원을 쓰지 않으므로 대상에서 뺀다.
         실제 중단은 AI 모듈이 수행하므로 202로 응답한다.
       responses:
-        '202':
+        "202":
           description: 취소 요청 접수
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CancelAllResponse'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
+                $ref: "#/components/schemas/CancelAllResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   # ───────── 14. 감사 로그 관리 ─────────
 
@@ -1177,8 +1178,8 @@ paths:
       summary: 감사 로그 조회
       description: 운영 행위와 가드 차단 기록을 조회한다.
       parameters:
-        - $ref: '#/components/parameters/Page'
-        - $ref: '#/components/parameters/Size'
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Size"
         - name: from
           in: query
           required: false
@@ -1194,18 +1195,18 @@ paths:
             type: string
             format: date-time
       responses:
-        '200':
+        "200":
           description: 조회 성공
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AuditLogPage'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
+                $ref: "#/components/schemas/AuditLogPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
 components:
   securitySchemes:
@@ -1470,12 +1471,12 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ErrorResponse'
+            $ref: "#/components/schemas/ErrorResponse"
           examples:
             GLB-ERR-001:
-              $ref: '#/components/examples/GLB-ERR-001'
+              $ref: "#/components/examples/GLB-ERR-001"
             GLB-ERR-002:
-              $ref: '#/components/examples/GLB-ERR-002'
+              $ref: "#/components/examples/GLB-ERR-002"
     Unauthorized:
       description: |-
         - AUT-ERR-001: access 토큰이 없거나 만료, 위조됨
@@ -1483,30 +1484,30 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ErrorResponse'
+            $ref: "#/components/schemas/ErrorResponse"
           examples:
             AUT-ERR-001:
-              $ref: '#/components/examples/AUT-ERR-001'
+              $ref: "#/components/examples/AUT-ERR-001"
             AUT-ERR-005:
-              $ref: '#/components/examples/AUT-ERR-005'
+              $ref: "#/components/examples/AUT-ERR-005"
     Forbidden:
-      description: 'AUT-ERR-006: 관리자가 아님(리서처의 관리자 API 호출)'
+      description: "AUT-ERR-006: 관리자가 아님(리서처의 관리자 API 호출)"
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ErrorResponse'
+            $ref: "#/components/schemas/ErrorResponse"
           examples:
             AUT-ERR-006:
-              $ref: '#/components/examples/AUT-ERR-006'
+              $ref: "#/components/examples/AUT-ERR-006"
     ProjectNotFound:
-      description: 'PRJ-ERR-001: 프로젝트가 없거나 본인 소유가 아님'
+      description: "PRJ-ERR-001: 프로젝트가 없거나 본인 소유가 아님"
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ErrorResponse'
+            $ref: "#/components/schemas/ErrorResponse"
           examples:
             PRJ-ERR-001:
-              $ref: '#/components/examples/PRJ-ERR-001'
+              $ref: "#/components/examples/PRJ-ERR-001"
     ExperimentNotFound:
       description: |-
         EXP-ERR-001: 실험이 없음. 리서처 API에서는 본인 소유가 아닌 실험도 같은 코드로 응답한다.
@@ -1514,49 +1515,48 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ErrorResponse'
+            $ref: "#/components/schemas/ErrorResponse"
           examples:
             EXP-ERR-001:
-              $ref: '#/components/examples/EXP-ERR-001'
+              $ref: "#/components/examples/EXP-ERR-001"
     RoundNotFound:
-      description: 'EXP-ERR-002: 회차가 없거나 본인 소유가 아님, 또는 회차가 done이 아님'
+      description: "EXP-ERR-002: 회차가 없거나 본인 소유가 아님, 또는 회차가 done이 아님"
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ErrorResponse'
+            $ref: "#/components/schemas/ErrorResponse"
           examples:
             EXP-ERR-002:
-              $ref: '#/components/examples/EXP-ERR-002'
+              $ref: "#/components/examples/EXP-ERR-002"
     FindingNotFound:
-      description: 'FND-ERR-001: 진단이 없거나 본인 소유가 아님, 또는 진단의 회차가 done이 아님'
+      description: "FND-ERR-001: 진단이 없거나 본인 소유가 아님, 또는 진단의 회차가 done이 아님"
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ErrorResponse'
+            $ref: "#/components/schemas/ErrorResponse"
           examples:
             FND-ERR-001:
-              $ref: '#/components/examples/FND-ERR-001'
+              $ref: "#/components/examples/FND-ERR-001"
     ImprovementNotFound:
-      description: 'IMP-ERR-001: 개선안이 없거나 본인 소유가 아님, 또는 개선안의 회차가 done이 아님'
+      description: "IMP-ERR-001: 개선안이 없거나 본인 소유가 아님, 또는 개선안의 회차가 done이 아님"
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ErrorResponse'
+            $ref: "#/components/schemas/ErrorResponse"
           examples:
             IMP-ERR-001:
-              $ref: '#/components/examples/IMP-ERR-001'
+              $ref: "#/components/examples/IMP-ERR-001"
     UserNotFound:
-      description: 'ACC-ERR-001: 계정이 없음'
+      description: "ACC-ERR-001: 계정이 없음"
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ErrorResponse'
+            $ref: "#/components/schemas/ErrorResponse"
           examples:
             ACC-ERR-001:
-              $ref: '#/components/examples/ACC-ERR-001'
+              $ref: "#/components/examples/ACC-ERR-001"
 
   schemas:
-
     # ───────── 공통 ─────────
 
     ErrorResponse:
@@ -1607,7 +1607,7 @@ components:
           type: array
           description: 항목별 검증 오류 목록. GLB-ERR-002일 때만 내용이 있고, 그 밖에는 빈 목록이다.
           items:
-            $ref: '#/components/schemas/FieldError'
+            $ref: "#/components/schemas/FieldError"
 
     FieldError:
       type: object
@@ -1691,9 +1691,31 @@ components:
       enum: [running, done, max_steps, fail, timeout, cancelled]
       description: Persona 실행 상태(run_personas.status). done이면 성공이다(메인 판정 기준).
 
+    ActionKind:
+      type: string
+      enum: [click, type, scroll, back, done]
+      description: |-
+        Agent의 행동 종류
+        - click: 요소 클릭
+        - type: 요소에 문자열 입력
+        - scroll: 화면 스크롤
+        - back: 이전 페이지 이동
+        - done: 성공 기준 충족 선언
+
+    ScrollDirection:
+      type: string
+      enum: [up, down]
+      description: 스크롤 방향
+
     Taxonomy:
       type: string
-      enum: [navigation_confusion, interaction_failure, task_failure, excessive_steps]
+      enum:
+        [
+          navigation_confusion,
+          interaction_failure,
+          task_failure,
+          excessive_steps,
+        ]
       description: |-
         Friction 유형. 전체 7종 중 4종 우선 구현이며 코드값은 가칭이다.
         - navigation_confusion: Navigation Confusion
@@ -1780,10 +1802,10 @@ components:
           type: integer
           format: int64
         name:
-          type: [string, 'null']
+          type: [string, "null"]
           description: 표시 이름
         role:
-          $ref: '#/components/schemas/Role'
+          $ref: "#/components/schemas/Role"
 
     AdminUser:
       type: object
@@ -1795,12 +1817,12 @@ components:
         email:
           type: string
         name:
-          type: [string, 'null']
+          type: [string, "null"]
           description: 표시 이름
         role:
-          $ref: '#/components/schemas/Role'
+          $ref: "#/components/schemas/Role"
         authProvider:
-          $ref: '#/components/schemas/AuthProvider'
+          $ref: "#/components/schemas/AuthProvider"
         isActive:
           type: boolean
           description: 계정 활성 여부
@@ -1819,15 +1841,15 @@ components:
               type: array
               description: 계정 목록
               items:
-                $ref: '#/components/schemas/AdminUser'
-        - $ref: '#/components/schemas/PageInfo'
+                $ref: "#/components/schemas/AdminUser"
+        - $ref: "#/components/schemas/PageInfo"
 
     RoleChangeRequest:
       type: object
       required: [role]
       properties:
         role:
-          $ref: '#/components/schemas/Role'
+          $ref: "#/components/schemas/Role"
 
     RoleChangeResponse:
       type: object
@@ -1837,7 +1859,7 @@ components:
           type: integer
           format: int64
         role:
-          $ref: '#/components/schemas/Role'
+          $ref: "#/components/schemas/Role"
 
     # ───────── 프로젝트, Persona, 테스트 계정 ─────────
 
@@ -1855,7 +1877,7 @@ components:
           type: string
           description: 대상 URL(시작 URL)
         description:
-          type: [string, 'null']
+          type: [string, "null"]
           description: 설명
 
     ProjectListResponse:
@@ -1866,7 +1888,7 @@ components:
           type: array
           description: 본인 프로젝트 목록
           items:
-            $ref: '#/components/schemas/ProjectSummary'
+            $ref: "#/components/schemas/ProjectSummary"
 
     ProjectDetail:
       type: object
@@ -1882,7 +1904,7 @@ components:
           type: string
           description: 대상 URL(시작 URL)
         description:
-          type: [string, 'null']
+          type: [string, "null"]
           description: 설명
         allowedDomains:
           type: array
@@ -1902,7 +1924,7 @@ components:
           format: uri
           maxLength: 2048
         description:
-          type: [string, 'null']
+          type: [string, "null"]
           description: 설명. 길이 상한은 애플리케이션에서 정한다(미정).
         allowedDomains:
           type: array
@@ -1930,7 +1952,7 @@ components:
           format: uri
           maxLength: 2048
         description:
-          type: [string, 'null']
+          type: [string, "null"]
         allowedDomains:
           type: array
           items:
@@ -1969,7 +1991,7 @@ components:
           type: array
           description: 본인 소유 Persona와 공용 Persona 목록
           items:
-            $ref: '#/components/schemas/Persona'
+            $ref: "#/components/schemas/Persona"
 
     TestAccountCreateRequest:
       type: object
@@ -2015,7 +2037,7 @@ components:
           type: array
           description: 테스트 계정 목록
           items:
-            $ref: '#/components/schemas/TestAccount'
+            $ref: "#/components/schemas/TestAccount"
 
     # ───────── 실험, 회차 ─────────
 
@@ -2041,9 +2063,9 @@ components:
             format: int64
           description: 선택한 Persona ID 목록. 본인 소유 Persona와 공용 Persona만 선택할 수 있다.
         mode:
-          $ref: '#/components/schemas/Mode'
+          $ref: "#/components/schemas/Mode"
         loopMax:
-          type: [integer, 'null']
+          type: [integer, "null"]
           minimum: 1
           description: 최초 회차를 포함한 최대 회차 수. mode가 loop일 때 필수이다.
 
@@ -2059,7 +2081,24 @@ components:
     ExperimentSummary:
       type: object
       description: 실험 목록의 항목. runId, round, status, progress는 실험의 마지막 회차 기준이다.
-      required: [firstRunId, runId, round, status, state, endType, stale, hasResult, projectTitle, taskGoal, mode, progress, personaCount, elapsedSeconds, createdAt]
+      required:
+        [
+          firstRunId,
+          runId,
+          round,
+          status,
+          state,
+          endType,
+          stale,
+          hasResult,
+          projectTitle,
+          taskGoal,
+          mode,
+          progress,
+          personaCount,
+          elapsedSeconds,
+          createdAt,
+        ]
       properties:
         firstRunId:
           type: integer
@@ -2073,15 +2112,15 @@ components:
           type: integer
           description: 마지막 회차가 몇 번째 회차인지
         status:
-          $ref: '#/components/schemas/RunStatus'
+          $ref: "#/components/schemas/RunStatus"
           description: 마지막 회차의 status
         state:
-          $ref: '#/components/schemas/ExperimentState'
+          $ref: "#/components/schemas/ExperimentState"
         endType:
           description: state가 stopped일 때만 값이 있고, 그 밖에는 null이다.
           anyOf:
-            - $ref: '#/components/schemas/EndType'
-            - type: 'null'
+            - $ref: "#/components/schemas/EndType"
+            - type: "null"
         stale:
           type: boolean
           description: 마지막 회차의 status가 running이고 heartbeat_at 이후 임계 시간이 지났으면 true. 표시만 하며 자동으로 failed로 바꾸지 않는다.
@@ -2094,9 +2133,9 @@ components:
           type: string
           description: Task 목표
         mode:
-          $ref: '#/components/schemas/Mode'
+          $ref: "#/components/schemas/Mode"
         progress:
-          type: [integer, 'null']
+          type: [integer, "null"]
           description: 마지막 회차의 완료 Persona 수
         personaCount:
           type: integer
@@ -2120,12 +2159,21 @@ components:
               type: array
               description: 실험 목록. 최근 요청 순이다.
               items:
-                $ref: '#/components/schemas/ExperimentSummary'
-        - $ref: '#/components/schemas/PageInfo'
+                $ref: "#/components/schemas/ExperimentSummary"
+        - $ref: "#/components/schemas/PageInfo"
 
     ExperimentStats:
       type: object
-      required: [totalCount, inProgressCount, completedCount, completedThisWeekCount, awaitingApprovalCount, totalTokens, thisWeekFrom]
+      required:
+        [
+          totalCount,
+          inProgressCount,
+          completedCount,
+          completedThisWeekCount,
+          awaitingApprovalCount,
+          totalTokens,
+          thisWeekFrom,
+        ]
       properties:
         totalCount:
           type: integer
@@ -2154,33 +2202,43 @@ components:
     RunMetrics:
       type: object
       description: 회차 종료 시 확정된 지표(run_metrics). 회차 목록과 결과 조회가 같은 구성을 쓴다.
-      required: [successRate, avgSteps, avgBacktracks, avgSeconds, tokens, costUsd]
+      required:
+        [successRate, avgSteps, avgBacktracks, avgSeconds, tokens, costUsd]
       properties:
         successRate:
-          type: [number, 'null']
+          type: [number, "null"]
           minimum: 0
           maximum: 100
           description: 성공 Persona(Persona 실행 status가 done) 비율. 0 이상 100 이하
         avgSteps:
-          type: [number, 'null']
+          type: [number, "null"]
           description: 평균 step 수
         avgBacktracks:
-          type: [number, 'null']
+          type: [number, "null"]
           description: 평균 뒤로가기 횟수
         avgSeconds:
-          type: [number, 'null']
+          type: [number, "null"]
           description: 평균 소요 시간(초)
         tokens:
-          type: [integer, 'null']
+          type: [integer, "null"]
           format: int64
           description: 토큰
         costUsd:
-          type: [number, 'null']
+          type: [number, "null"]
           description: 비용(USD)
 
     RoundSummary:
       type: object
-      required: [runId, round, status, appliedImprovementId, createdAt, finishedAt, metrics]
+      required:
+        [
+          runId,
+          round,
+          status,
+          appliedImprovementId,
+          createdAt,
+          finishedAt,
+          metrics,
+        ]
       properties:
         runId:
           type: integer
@@ -2189,22 +2247,22 @@ components:
           type: integer
           description: 몇 번째 회차인지
         status:
-          $ref: '#/components/schemas/RunStatus'
+          $ref: "#/components/schemas/RunStatus"
         appliedImprovementId:
-          type: [integer, 'null']
+          type: [integer, "null"]
           format: int64
           description: 이 회차를 만든 승인 개선안. 최초 회차는 null이다.
         createdAt:
           type: string
           format: date-time
         finishedAt:
-          type: [string, 'null']
+          type: [string, "null"]
           format: date-time
         metrics:
           description: 회차의 지표. 확정된 지표가 없으면 null이다.
           anyOf:
-            - $ref: '#/components/schemas/RunMetrics'
-            - type: 'null'
+            - $ref: "#/components/schemas/RunMetrics"
+            - type: "null"
 
     RoundListResponse:
       type: object
@@ -2214,7 +2272,7 @@ components:
           type: array
           description: 회차 목록
           items:
-            $ref: '#/components/schemas/RoundSummary'
+            $ref: "#/components/schemas/RoundSummary"
         awaitingApproval:
           type: boolean
           description: 실험이 승인 대기 중이면 true
@@ -2222,7 +2280,18 @@ components:
     AdminExperimentSummary:
       type: object
       description: 전체 실험 목록의 항목. round, status, finishedAt은 실험의 마지막 회차 기준이다.
-      required: [firstRunId, projectTitle, ownerEmail, taskGoal, mode, round, status, createdAt, finishedAt]
+      required:
+        [
+          firstRunId,
+          projectTitle,
+          ownerEmail,
+          taskGoal,
+          mode,
+          round,
+          status,
+          createdAt,
+          finishedAt,
+        ]
       properties:
         firstRunId:
           type: integer
@@ -2236,17 +2305,17 @@ components:
           type: string
           description: Task 목표
         mode:
-          $ref: '#/components/schemas/Mode'
+          $ref: "#/components/schemas/Mode"
         round:
           type: integer
         status:
-          $ref: '#/components/schemas/RunStatus'
+          $ref: "#/components/schemas/RunStatus"
         createdAt:
           type: string
           format: date-time
           description: 실험 요청 시각
         finishedAt:
-          type: [string, 'null']
+          type: [string, "null"]
           format: date-time
 
     AdminExperimentPage:
@@ -2259,8 +2328,8 @@ components:
               type: array
               description: 실험 목록
               items:
-                $ref: '#/components/schemas/AdminExperimentSummary'
-        - $ref: '#/components/schemas/PageInfo'
+                $ref: "#/components/schemas/AdminExperimentSummary"
+        - $ref: "#/components/schemas/PageInfo"
 
     PersonaRunResult:
       type: object
@@ -2274,10 +2343,10 @@ components:
           type: string
           description: Persona 표시 이름
         status:
-          $ref: '#/components/schemas/PersonaRunStatus'
+          $ref: "#/components/schemas/PersonaRunStatus"
         steps:
-          type: [integer, 'null']
-          description: 총 step 수
+          type: [integer, "null"]
+          description: 총 step 수. 가드 차단과 Action 파싱 실패 step을 포함한다.
 
     AdminRoundSummary:
       type: object
@@ -2292,16 +2361,16 @@ components:
           type: string
           description: Task 목표
         mode:
-          $ref: '#/components/schemas/Mode'
+          $ref: "#/components/schemas/Mode"
         round:
           type: integer
         status:
-          $ref: '#/components/schemas/RunStatus'
+          $ref: "#/components/schemas/RunStatus"
         personas:
           type: array
           description: Persona별 실행 결과 목록
           items:
-            $ref: '#/components/schemas/PersonaRunResult'
+            $ref: "#/components/schemas/PersonaRunResult"
 
     AdminRoundListResponse:
       type: object
@@ -2311,12 +2380,26 @@ components:
           type: array
           description: 회차 목록
           items:
-            $ref: '#/components/schemas/AdminRoundSummary'
+            $ref: "#/components/schemas/AdminRoundSummary"
 
     StepLog:
       type: object
-      description: steps.jsonl의 한 줄(한 step). 행동 로그 스키마는 미정이다.
-      required: [step, ts, url, reasoning, action, result, blocked]
+      description: |-
+        step 하나의 로그. Spring이 steps.jsonl의 한 줄에서 화면에 필요한 키만 골라 camelCase로 바꾼 것이다.
+        step 번호는 1부터 이어지며, 가드 차단과 Action 파싱 실패로 실행하지 않은 step도 포함한다.
+      required:
+        [
+          step,
+          ts,
+          url,
+          reasoning,
+          action,
+          result,
+          blocked,
+          blockedReason,
+          urlReached,
+          hasScreenshot,
+        ]
       properties:
         step:
           type: integer
@@ -2324,22 +2407,69 @@ components:
         ts:
           type: string
           format: date-time
-          description: 기록 시각
+          description: 기록 시각. steps.jsonl의 값을 그대로 전달하며 시간대를 포함한다.
         url:
           type: string
-          description: 현재 페이지 URL
+          description: 행동 전 페이지 URL
         reasoning:
-          type: string
-          description: Agent의 판단 근거
+          type: [string, "null"]
+          description: Agent의 판단 근거. Action 파싱 실패 시 null이다.
         action:
-          type: string
-          description: "수행한 행동. 예: click #cart"
+          description: 수행한 행동. Action 파싱 실패 시 null이다.
+          anyOf:
+            - $ref: "#/components/schemas/StepAction"
+            - type: "null"
         result:
-          type: string
-          description: "행동 결과. 예: success"
+          $ref: "#/components/schemas/StepResult"
         blocked:
           type: boolean
-          description: 가드가 차단한 step이면 true
+          description: 실행하지 않은 step이면 true다. 가드 차단과 Action 파싱 실패가 해당한다.
+        blockedReason:
+          type: [string, "null"]
+          description: 차단 사유(domain, parse_failed 등). 값은 행동 로그 명세를 따른다. blocked가 false면 null이다.
+        urlReached:
+          type: [boolean, "null"]
+          description: 행동 뒤 URL이 성공 URL과 일치하는지. 판정하지 못하면 null이다.
+        hasScreenshot:
+          type: boolean
+          description: 이 step의 스크린샷이 있으면 true다. false인 step은 스크린샷을 조회하지 않는다.
+
+    StepAction:
+      type: object
+      description: Agent가 수행한 행동
+      required: [kind, target, text, direction]
+      properties:
+        kind:
+          $ref: "#/components/schemas/ActionKind"
+        target:
+          type: [integer, "null"]
+          description: 대상 요소 번호. click, type에서만 값이 있다.
+        text:
+          type: [string, "null"]
+          description: 입력 내용. type에서만 값이 있으며, Python이 민감정보를 마스킹한 값이다.
+        direction:
+          description: scroll에서만 값이 있다.
+          anyOf:
+            - $ref: "#/components/schemas/ScrollDirection"
+            - type: "null"
+
+    StepResult:
+      type: object
+      description: 브라우저 행동의 실행 결과. Task 달성 여부와는 별개다.
+      required: [ok, urlAfter, error, errorCode]
+      properties:
+        ok:
+          type: boolean
+          description: 브라우저 행동 실행 성공 여부
+        urlAfter:
+          type: string
+          description: 행동 뒤 페이지 URL
+        error:
+          type: [string, "null"]
+          description: 오류 설명
+        errorCode:
+          type: [string, "null"]
+          description: step 실행 결과 코드(ELEMENT_NOT_FOUND 등). 오류 코드(8.4)와 별개이며 AI 모듈이 목록을 관리한다.
 
     StepLogListResponse:
       type: object
@@ -2349,7 +2479,7 @@ components:
           type: array
           description: step 로그 목록
           items:
-            $ref: '#/components/schemas/StepLog'
+            $ref: "#/components/schemas/StepLog"
 
     # ───────── 진단 ─────────
 
@@ -2361,12 +2491,12 @@ components:
           type: integer
           format: int64
         taxonomy:
-          $ref: '#/components/schemas/Taxonomy'
+          $ref: "#/components/schemas/Taxonomy"
         severity:
           type: string
           description: 심각도. 값과 산정 기준은 미정이다(GACA-68).
         summary:
-          type: [string, 'null']
+          type: [string, "null"]
           description: 진단 요약
 
     FindingRoundInfo:
@@ -2395,12 +2525,12 @@ components:
       required: [run, findings]
       properties:
         run:
-          $ref: '#/components/schemas/FindingRoundInfo'
+          $ref: "#/components/schemas/FindingRoundInfo"
         findings:
           type: array
           description: 진단 목록
           items:
-            $ref: '#/components/schemas/FindingSummary'
+            $ref: "#/components/schemas/FindingSummary"
 
     FindingEvidence:
       type: object
@@ -2431,25 +2561,25 @@ components:
           type: integer
           format: int64
         taxonomy:
-          $ref: '#/components/schemas/Taxonomy'
+          $ref: "#/components/schemas/Taxonomy"
         severity:
           type: string
           description: 심각도. 값과 산정 기준은 미정이다(GACA-68).
         summary:
-          type: [string, 'null']
+          type: [string, "null"]
           description: 진단 요약
         evidence:
           type: array
           description: 근거 목록
           items:
-            $ref: '#/components/schemas/FindingEvidence'
+            $ref: "#/components/schemas/FindingEvidence"
 
     TaxonomyCount:
       type: object
       required: [taxonomy, count]
       properties:
         taxonomy:
-          $ref: '#/components/schemas/Taxonomy'
+          $ref: "#/components/schemas/Taxonomy"
         count:
           type: integer
           description: 진단 수
@@ -2462,7 +2592,7 @@ components:
           type: array
           description: Taxonomy별 진단 수 목록
           items:
-            $ref: '#/components/schemas/TaxonomyCount'
+            $ref: "#/components/schemas/TaxonomyCount"
 
     # ───────── 개선안, 다음 회차 ─────────
 
@@ -2479,15 +2609,15 @@ components:
           maximum: 3
           description: 몇 번째 안인지
         patchKind:
-          $ref: '#/components/schemas/PatchKind'
+          $ref: "#/components/schemas/PatchKind"
         fixCost:
-          type: [string, 'null']
+          type: [string, "null"]
           description: 구현 비용 추정
         decision:
           description: 결정. 결정 전이면 null이다.
           anyOf:
-            - $ref: '#/components/schemas/Decision'
-            - type: 'null'
+            - $ref: "#/components/schemas/Decision"
+            - type: "null"
 
     ImprovementRoundInfo:
       type: object
@@ -2515,12 +2645,12 @@ components:
       required: [run, improvements]
       properties:
         run:
-          $ref: '#/components/schemas/ImprovementRoundInfo'
+          $ref: "#/components/schemas/ImprovementRoundInfo"
         improvements:
           type: array
           description: 개선안 목록
           items:
-            $ref: '#/components/schemas/ImprovementSummary'
+            $ref: "#/components/schemas/ImprovementSummary"
 
     ImprovementApproval:
       type: object
@@ -2528,9 +2658,9 @@ components:
       required: [decision, note, decidedAt]
       properties:
         decision:
-          $ref: '#/components/schemas/Decision'
+          $ref: "#/components/schemas/Decision"
         note:
-          type: [string, 'null']
+          type: [string, "null"]
           description: 결정 사유
         decidedAt:
           type: string
@@ -2539,7 +2669,20 @@ components:
 
     ImprovementDetail:
       type: object
-      required: [improvementId, runId, optionNo, patchKind, patch, rationale, expectedEffect, fixCost, findings, approval, awaitingApproval]
+      required:
+        [
+          improvementId,
+          runId,
+          optionNo,
+          patchKind,
+          patch,
+          rationale,
+          expectedEffect,
+          fixCost,
+          findings,
+          approval,
+          awaitingApproval,
+        ]
       properties:
         improvementId:
           type: integer
@@ -2554,33 +2697,33 @@ components:
           maximum: 3
           description: 몇 번째 안인지
         patchKind:
-          $ref: '#/components/schemas/PatchKind'
+          $ref: "#/components/schemas/PatchKind"
         patch:
           type: object
           additionalProperties: true
           description: 패치 종류별 파라미터. 예를 들어 라벨 변경이면 대상 요소와 새 문구이다. 종류별 구조는 미정이다.
           examples:
-            - target: '#checkout-btn'
+            - target: "#checkout-btn"
               style: primary
         rationale:
-          type: [string, 'null']
+          type: [string, "null"]
           description: 근거
         expectedEffect:
-          type: [string, 'null']
+          type: [string, "null"]
           description: 예상 효과
         fixCost:
-          type: [string, 'null']
+          type: [string, "null"]
           description: 구현 비용 추정
         findings:
           type: array
           description: 이 개선안이 다루는 진단 목록. improvements.finding_ids에 담긴 진단 중 개선안과 같은 회차의 진단만 담는다.
           items:
-            $ref: '#/components/schemas/FindingSummary'
+            $ref: "#/components/schemas/FindingSummary"
         approval:
           description: 결정. 결정 전이면 null이다.
           anyOf:
-            - $ref: '#/components/schemas/ImprovementApproval'
-            - type: 'null'
+            - $ref: "#/components/schemas/ImprovementApproval"
+            - type: "null"
         awaitingApproval:
           type: boolean
           description: 이 회차가 다음 회차 승인을 기다리는 중이면 true
@@ -2594,9 +2737,9 @@ components:
           format: int64
           description: 결정할 개선안. 경로의 회차에서 산출한 개선안이어야 한다.
         decision:
-          $ref: '#/components/schemas/Decision'
+          $ref: "#/components/schemas/Decision"
         note:
-          type: [string, 'null']
+          type: [string, "null"]
           description: 결정 사유
 
     ApprovalCreateResponse:
@@ -2608,7 +2751,7 @@ components:
           format: int64
           description: 생성된 결정 ID
         runId:
-          type: [integer, 'null']
+          type: [integer, "null"]
           format: int64
           description: 다음 회차 ID. 승인이면 새로 만든 다음 회차의 runId, 반려면 null이다. 경로의 runId(결정한 회차)와 다른 회차이다.
 
@@ -2636,9 +2779,9 @@ components:
           type: string
           description: Task 목표
         mode:
-          $ref: '#/components/schemas/Mode'
+          $ref: "#/components/schemas/Mode"
         state:
-          $ref: '#/components/schemas/ExperimentState'
+          $ref: "#/components/schemas/ExperimentState"
 
     ComparisonBefore:
       type: object
@@ -2649,11 +2792,11 @@ components:
           format: int64
           description: 최초 회차의 runId
         metrics:
-          $ref: '#/components/schemas/RunMetrics'
+          $ref: "#/components/schemas/RunMetrics"
         screenshots:
           type: array
           items:
-            $ref: '#/components/schemas/ScreenshotRef'
+            $ref: "#/components/schemas/ScreenshotRef"
 
     ComparisonAfter:
       type: object
@@ -2667,11 +2810,11 @@ components:
           type: integer
           description: 마지막 회차가 몇 번째 회차인지
         metrics:
-          $ref: '#/components/schemas/RunMetrics'
+          $ref: "#/components/schemas/RunMetrics"
         screenshots:
           type: array
           items:
-            $ref: '#/components/schemas/ScreenshotRef'
+            $ref: "#/components/schemas/ScreenshotRef"
 
     AppliedPatch:
       type: object
@@ -2682,7 +2825,7 @@ components:
           type: integer
           description: 패치를 주입한 회차
         patchKind:
-          $ref: '#/components/schemas/PatchKind'
+          $ref: "#/components/schemas/PatchKind"
         applied:
           type: boolean
           description: 주입 성공 여부
@@ -2692,26 +2835,27 @@ components:
       required: [experiment, before, after, patches]
       properties:
         experiment:
-          $ref: '#/components/schemas/ComparisonExperiment'
+          $ref: "#/components/schemas/ComparisonExperiment"
         before:
-          $ref: '#/components/schemas/ComparisonBefore'
+          $ref: "#/components/schemas/ComparisonBefore"
         after:
           description: done인 회차가 하나뿐이면 null이다.
           anyOf:
-            - $ref: '#/components/schemas/ComparisonAfter'
-            - type: 'null'
+            - $ref: "#/components/schemas/ComparisonAfter"
+            - type: "null"
         patches:
           type: array
           description: 회차별 적용 패치 목록
           items:
-            $ref: '#/components/schemas/AppliedPatch'
+            $ref: "#/components/schemas/AppliedPatch"
 
     # ───────── 정책, 강제 중단, 감사 로그 ─────────
 
     Policy:
       type: object
       description: 전역 실행 한도. AI 모듈이 집행한다.
-      required: [maxSteps, maxSeconds, maxTokens, runConcurrency, dailyTokenBudget]
+      required:
+        [maxSteps, maxSeconds, maxTokens, runConcurrency, dailyTokenBudget]
       properties:
         maxSteps:
           type: integer
@@ -2769,10 +2913,10 @@ components:
           type: string
           description: 행위 종류
         target:
-          type: [string, 'null']
+          type: [string, "null"]
           description: 대상
         detail:
-          type: [object, 'null']
+          type: [object, "null"]
           additionalProperties: true
           description: 부가 정보
         ts:
@@ -2790,5 +2934,5 @@ components:
               type: array
               description: 감사 로그 목록
               items:
-                $ref: '#/components/schemas/AuditLog'
-        - $ref: '#/components/schemas/PageInfo'
+                $ref: "#/components/schemas/AuditLog"
+        - $ref: "#/components/schemas/PageInfo"
