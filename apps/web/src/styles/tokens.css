@@ -1,0 +1,181 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@theme inline {
+  --font-sans: var(--font-family-sans);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+:root {
+  --font-family-sans: "Avenir Next", Avenir, "Segoe UI", sans-serif;
+  --background: #f8f7fc;
+  --foreground: #1f1d3d;
+  --card: #fff;
+  --card-foreground: #1f1d3d;
+  --popover: #fff;
+  --popover-foreground: #1f1d3d;
+  --primary: #1f1d3d;
+  --primary-foreground: #fff;
+  --secondary: #eeebf8;
+  --secondary-foreground: #1f1d3d;
+  --muted: #f0eef5;
+  --muted-foreground: #74717f;
+  --accent: #e5f8f5;
+  --accent-foreground: #176e67;
+  --destructive: #d93545;
+  --border: #e3e0eb;
+  --input: #e3e0eb;
+  --ring: #35bfb5;
+  --success: #32853d;
+  --warning: #a46b00;
+  --info: #3567a8;
+  --radius: 0.75rem;
+
+  --color-global-mint: #35d4c8;
+  --color-global-navy-900: #0f172a;
+  --color-global-navy-800: #1f1d3d;
+  --color-global-green-500: #64c860;
+  --color-global-green-100: #d8f6d7;
+  --color-global-red-500: #f04545;
+  --color-global-red-100: #f6d7d8;
+  --color-global-yellow-600: #c5870c;
+  --color-global-yellow-100: #fee6b5;
+  --color-global-white: #fff;
+  --color-global-black: #000;
+  --color-global-gray-300: #bdbdbd;
+  --color-global-gray-500: #8c8c8f;
+
+  --size-viewport-desktop-width: 1440px;
+  --size-viewport-desktop-height: 1024px;
+  --size-sidebar-width: 242px;
+
+  --radius-sidebar: 50px;
+  --radius-badge: 20px;
+  --radius-card: 16px;
+  --radius-input: 12px;
+
+  --color-bg-auth:
+    radial-gradient(ellipse at 70% 38%, rgb(53 212 200 / 9%), transparent 28%),
+    radial-gradient(ellipse at 52% 42%, rgb(31 29 61 / 96%), transparent 58%),
+    linear-gradient(135deg, var(--color-global-navy-900), var(--color-global-navy-800));
+  --color-bg-app:
+    radial-gradient(ellipse at 93% 47%, rgb(203 177 255 / 58%), transparent 24%),
+    radial-gradient(ellipse at 54% 103%, rgb(175 243 224 / 45%), transparent 25%),
+    linear-gradient(115deg, #e6e3f6 0%, #efeffa 54%, #e6e2f8 100%);
+  --color-bg-sidebar: linear-gradient(145deg, rgb(255 255 255 / 78%), rgb(246 245 255 / 58%));
+  --color-bg-surface: rgb(255 255 255 / 88%);
+
+  --color-badge-success-bg: var(--color-global-green-100);
+  --color-badge-success-text: var(--color-global-green-500);
+  --color-badge-danger-bg: var(--color-global-red-100);
+  --color-badge-danger-text: var(--color-global-red-500);
+  --color-badge-warning-bg: var(--color-global-yellow-100);
+  --color-badge-warning-text: var(--color-global-yellow-600);
+
+  --effect-sidebar-blur: blur(18px);
+  --effect-sidebar-shadow: 0 14px 34px rgb(54 45 98 / 12%);
+
+  color: var(--color-global-navy-800);
+  background: var(--color-bg-app);
+  font-family: var(--font-family-sans);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+.ui-input {
+  border: 1px solid var(--color-global-gray-300);
+  border-radius: var(--radius-input);
+  background: var(--color-global-white);
+  color: var(--color-global-navy-800);
+  font: inherit;
+}
+
+.ui-input::placeholder {
+  color: var(--color-global-gray-500);
+}
+
+.ui-input:focus-visible {
+  border-color: var(--color-global-navy-800);
+  outline: 2px solid rgb(53 212 200 / 35%);
+  outline-offset: 1px;
+}
+
+.ui-button-primary {
+  min-height: 44px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: var(--radius-badge);
+  background: var(--color-global-navy-800);
+  color: var(--color-global-white);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.ui-button-primary:hover:not(:disabled) {
+  background: var(--color-global-navy-900);
+}
+
+.ui-button-primary:disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}
+
+.ui-status-badge {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  padding: 0 10px;
+  border-radius: var(--radius-badge);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ui-status-badge--running {
+  background: var(--color-badge-success-bg);
+  color: var(--color-badge-success-text);
+}
+
+.ui-status-badge--stopped {
+  background: var(--color-badge-danger-bg);
+  color: var(--color-badge-danger-text);
+}
+
+.ui-status-badge--warning {
+  background: var(--color-badge-warning-bg);
+  color: var(--color-badge-warning-text);
+}

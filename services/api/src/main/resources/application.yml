@@ -7,7 +7,15 @@ spring:
   jpa:
     hibernate.ddl-auto: update   # 골격 단계만. 스키마 확정 후 Flyway 로 (소유권: api)
     open-in-view: false
+  flyway.locations: classpath:db/migration
+  flyway.baseline-on-migrate: true
+  flyway.baseline-version: 2
 
 uxight:
   agent-base-url: ${AGENT_BASE_URL:http://localhost:8000}
   web-origin: ${WEB_ORIGIN:http://localhost:5173}
+  auth:
+    jwt-secret: ${JWT_SECRET:}
+    access-token-ttl: 1h
+    refresh-token-ttl: 14d
+    google-client-id: ${GOOGLE_CLIENT_ID:}
