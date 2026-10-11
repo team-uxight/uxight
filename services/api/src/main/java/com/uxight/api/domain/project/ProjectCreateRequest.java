@@ -8,7 +8,9 @@ import jakarta.validation.constraints.Size;
 import java.util.List;
 
 public record ProjectCreateRequest(
-    @NotBlank @Size(max = 100)
+    // 빈 값 · 공백뿐인 값 · 앞뒤 공백을 한 규칙으로 막는다 (@NotBlank 를 겹치면 공백뿐인 값에 오류가 두 개 나온다).
+    @NotNull @Size(max = 100)
+    @Pattern(regexp = "^\\S(.*\\S)?$", message = "비어 있거나 앞뒤에 공백이 있으면 안 됩니다")
     String title,
 
     @NotBlank @Size(max = 2048)
