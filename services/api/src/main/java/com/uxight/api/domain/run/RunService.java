@@ -56,7 +56,7 @@ public class RunService {
       throw ApiException.invalidField("loopMax", "mode가 loop이면 필수입니다");
     }
 
-    Project project = projectRepository.findByIdAndUserId(projectId, userId)
+    Project project = projectRepository.findByIdAndUserIdAndDeletedAtIsNull(projectId, userId)
         .orElseThrow(() -> new ApiException(ErrorCode.PROJECT_NOT_FOUND));
     List<Long> personaIds = request.personaIds().stream().distinct().toList();
     List<Persona> personas = personaRepository.findUsableByIds(userId, personaIds);
@@ -86,7 +86,7 @@ public class RunService {
           .toList();
 
       Long newRunId = runRepository.save(Run.newFirstRound(projectId, taskId, request.mode(),
-          loop ? request.loopMax() : null, project.targetUrl(), project.allowedDomains(),
+          loop ? request.loopMax() : null, project.getTargetUrl(), writeJson(project.getAllowedDomains()),
           writeJson(taskSnapshot), writeJson(MOCK_POLICY_SNAPSHOT), writeJson(personaSnapshot)));
       runRepository.updateFirstRunId(newRunId, newRunId);   // 최초 회차는 자기 자신이 실험 식별자
       return newRunId;

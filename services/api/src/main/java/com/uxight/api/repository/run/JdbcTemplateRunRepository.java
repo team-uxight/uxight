@@ -115,6 +115,13 @@ public class JdbcTemplateRunRepository implements RunRepository {
   }
 
   @Override
+  public boolean existsInProgressByProjectId(Long projectId) {
+    return Boolean.TRUE.equals(jdbcTemplate.queryForObject(
+        "SELECT EXISTS (SELECT 1 FROM runs WHERE project_id = ? AND status IN ('queued', 'accepted', 'running'))",
+        Boolean.class, projectId));
+  }
+
+  @Override
   public boolean requestCancel(Long runId) {
     return jdbcTemplate.update(
         "UPDATE runs SET cancel_requested = true WHERE run_id = ? AND status IN ('queued', 'accepted', 'running')",
