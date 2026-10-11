@@ -1,21 +1,26 @@
 spring:
   application.name: uxight-api
+  profiles.active: local   # local 프로필 = seed 적용 (application-local.yml). env SPRING_PROFILES_ACTIVE 로 덮어쓴다
   datasource:
     url: ${DB_URL:jdbc:mysql://localhost:3306/uxight}
     username: ${DB_USER:uxight}
     password: ${DB_PASSWORD:}
   jpa:
-    hibernate.ddl-auto: update   # 골격 단계만. 스키마 확정 후 Flyway 로 (소유권: api)
+    hibernate.ddl-auto: none   # 스키마는 Flyway 만 (소유권: api)
     open-in-view: false
   flyway.locations: classpath:db/migration
-  flyway.baseline-on-migrate: true
-  flyway.baseline-version: 2
 
 uxight:
   agent-base-url: ${AGENT_BASE_URL:http://localhost:8000}
   web-origin: ${WEB_ORIGIN:http://localhost:5173}
   auth:
-    jwt-secret: ${JWT_SECRET:}
-    access-token-ttl: 1h
-    refresh-token-ttl: 14d
-    google-client-id: ${GOOGLE_CLIENT_ID:}
+    jwt-secret: ${JWT_SECRET:}       # HS256 키, 32바이트 이상. 비우면 기동마다 임의 키 (로컬 · 테스트용)
+    access-token-ttl: 1h             # architecture §12 확정 (09/20)
+    refresh-token-ttl: 14d           # 설계에 값이 없다 — [확인 필요]
+    google-client-id: ${GOOGLE_CLIENT_ID:}   # Google ID 토큰의 발급 대상(aud). 비우면 Google 로그인은 항상 401
+
+# Walking Skeleton 검증용. INSERT 는 PreparedStatementCreator 라 별도 log 가 필요하지만,
+# UPDATE/SELECT 는 이 두 줄만으로 JdbcTemplate 이 SQL 과 파라미터를 자동으로 찍어준다.
+logging.level:
+  org.springframework.jdbc.core.JdbcTemplate: DEBUG
+  org.springframework.jdbc.core.StatementCreatorUtils: TRACE
