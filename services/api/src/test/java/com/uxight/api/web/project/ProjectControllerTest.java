@@ -269,16 +269,29 @@ class ProjectControllerTest {
         .andExpect(jsonPath("$.description").value("원래 설명"));
   }
 
-  @Test
-  void update_descriptionNull_clearsDescription() throws Exception {
+  @ParameterizedTest
+  @ValueSource(strings = {"", "   "})
+  void update_blankDescription_clearsDescription(String blank) throws Exception {
     Long projectId = insertOriginalProject();
 
-    update(projectId, "{\"description\":null}")
+    update(projectId, "{\"description\":\"" + blank + "\"}")
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.description").value(nullValue()))
         .andExpect(jsonPath("$.title").value("원래 제목"));
     assertThat(jdbcTemplate.queryForObject("SELECT description FROM projects WHERE project_id = ?", String.class,
         projectId)).isNull();
+  }
+
+  @Test
+  void update_nullValues_areTreatedAsNotSent() throws Exception {
+    Long projectId = insertOriginalProject();
+
+    update(projectId, "{\"title\":null,\"targetUrl\":null,\"description\":null,\"allowedDomains\":null}")
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.title").value("원래 제목"))
+        .andExpect(jsonPath("$.targetUrl").value("https://a.example.com/start"))
+        .andExpect(jsonPath("$.description").value("원래 설명"))
+        .andExpect(jsonPath("$.allowedDomains").value(contains("a.example.com", "b.example.com")));
   }
 
   @Test
@@ -331,17 +344,15 @@ class ProjectControllerTest {
 
   static Stream<Arguments> invalidUpdateRequests() {
     return Stream.of(
-        // description 외에는 null 로 지울 수 없다
-        Arguments.of("{\"title\":null}", "title"),
+        // 빈 문자열로 지울 수 있는 항목은 description 뿐이다
         Arguments.of("{\"title\":\"\"}", "title"),
         Arguments.of("{\"title\":\" 앞 공백\"}", "title"),
         Arguments.of("{\"title\":\"" + "가".repeat(101) + "\"}", "title"),
-        Arguments.of("{\"targetUrl\":null}", "targetUrl"),
+        Arguments.of("{\"targetUrl\":\"\"}", "targetUrl"),
         Arguments.of("{\"targetUrl\":\"javascript:alert(1)\"}", "targetUrl"),
         // 시작 URL 은 바꾸고 제목은 그대로 두려 해도, 한 항목이 틀리면 아무것도 바꾸지 않는다
         Arguments.of("{\"title\":\"새 제목\",\"targetUrl\":\"https://exa mple.com\"}", "targetUrl"),
         Arguments.of("{\"description\":\"" + "가".repeat(1001) + "\"}", "description"),
-        Arguments.of("{\"allowedDomains\":null}", "allowedDomains"),
         Arguments.of("{\"allowedDomains\":[\"\"]}", "allowedDomains[0]"),
         Arguments.of("{\"allowedDomains\":[\"ok.example.com\",\"https://exa mple.com\"]}", "allowedDomains[1]"));
   }

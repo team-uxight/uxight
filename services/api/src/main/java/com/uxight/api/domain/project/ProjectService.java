@@ -37,20 +37,19 @@ public class ProjectService {
   @Transactional
   public Project updateProject(Long userId, Long projectId, ProjectUpdateRequest request) {
     Project project = getProject(userId, projectId);
-    // Optional.empty()(null 을 보냄)는 Bean Validation 이 description 외에는 막았다.
     // 호스트를 읽을 수 없어 400 이 날 수 있는 두 항목을 먼저 바꾼다 (실패하면 트랜잭션이 롤백되어 아무것도 바뀌지 않는다).
     // 시작 URL 을 허용 도메인보다 먼저 바꿔야 둘을 함께 보냈을 때 새 시작 URL 의 호스트가 들어간다.
-    if (request.getTargetUrl() != null) {
-      project.changeTargetUrl(request.getTargetUrl().orElseThrow());
+    if (request.targetUrl() != null) {
+      project.changeTargetUrl(request.targetUrl());
     }
-    if (request.getAllowedDomains() != null) {
-      project.changeAllowedDomains(request.getAllowedDomains().orElseThrow());
+    if (request.allowedDomains() != null) {
+      project.changeAllowedDomains(request.allowedDomains());
     }
-    if (request.getTitle() != null) {
-      project.changeTitle(request.getTitle().orElseThrow());
+    if (request.title() != null) {
+      project.changeTitle(request.title());
     }
-    if (request.getDescription() != null) {
-      project.changeDescription(request.getDescription().orElse(null));
+    if (request.description() != null) {
+      project.changeDescription(request.description());
     }
     return project;
   }

@@ -89,8 +89,9 @@ public class Project {
     this.title = title;
   }
 
+  /** 빈 문자열(공백뿐 포함)을 보내면 설명을 지운다 — 설명이 없는 프로젝트와 같이 NULL 로 둔다. */
   public void changeDescription(String description) {
-    this.description = description;
+    this.description = description.isBlank() ? null : description;
   }
 
   /**
