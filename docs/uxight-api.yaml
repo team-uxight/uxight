@@ -2346,7 +2346,7 @@ components:
           $ref: "#/components/schemas/PersonaRunStatus"
         steps:
           type: [integer, "null"]
-          description: 총 step 수. 가드 차단과 Action 파싱 실패 step을 포함한다.
+          description: 총 step 수. 실행하지 않은 step도 포함한다(행동 로그 명세 2절).
 
     AdminRoundSummary:
       type: object
@@ -2386,7 +2386,7 @@ components:
       type: object
       description: |-
         step 하나의 로그. Spring이 steps.jsonl의 한 줄에서 화면에 필요한 키만 골라 camelCase로 바꾼 것이다.
-        step 번호는 1부터 이어지며, 가드 차단과 Action 파싱 실패로 실행하지 않은 step도 포함한다.
+        step 번호는 1부터 이어지며, 실행하지 않은 step도 포함한다(행동 로그 명세 2절).
       required:
         [
           step,
@@ -2413,9 +2413,9 @@ components:
           description: 행동 전 페이지 URL
         reasoning:
           type: [string, "null"]
-          description: Agent의 판단 근거. Action 파싱 실패 시 null이다.
+          description: Agent의 판단 근거. Action 파싱 실패, LLM 호출 실패 시 null이다.
         action:
-          description: 수행한 행동. Action 파싱 실패 시 null이다.
+          description: 수행한 행동. Action 파싱 실패, 허용되지 않은 Action, LLM 호출 실패 시 null이다.
           anyOf:
             - $ref: "#/components/schemas/StepAction"
             - type: "null"
@@ -2423,7 +2423,7 @@ components:
           $ref: "#/components/schemas/StepResult"
         blocked:
           type: boolean
-          description: 실행하지 않은 step이면 true다. 가드 차단과 Action 파싱 실패가 해당한다.
+          description: 가드 차단, Action 파싱 실패, 허용되지 않은 Action으로 실행하지 않은 step이면 true다. LLM 호출 실패는 false다.
         blockedReason:
           type: [string, "null"]
           description: 차단 사유(domain, parse_failed 등). 값은 행동 로그 명세를 따른다. blocked가 false면 null이다.
