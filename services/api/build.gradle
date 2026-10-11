@@ -18,6 +18,13 @@ dependencies {
   implementation 'org.springframework.boot:spring-boot-starter-web'
   implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
   implementation 'org.springframework.boot:spring-boot-starter-validation'
+  implementation 'org.springframework.security:spring-security-crypto'
+  implementation 'com.nimbusds:nimbus-jose-jwt:10.9.1'
+  implementation 'org.flywaydb:flyway-core'
+  implementation 'org.flywaydb:flyway-mysql'
+  compileOnly 'org.projectlombok:lombok'
+  annotationProcessor platform(org.springframework.boot.gradle.plugin.SpringBootPlugin.BOM_COORDINATES)
+  annotationProcessor 'org.projectlombok:lombok'
   runtimeOnly 'com.mysql:mysql-connector-j'
 
   testImplementation 'org.springframework.boot:spring-boot-starter-test'

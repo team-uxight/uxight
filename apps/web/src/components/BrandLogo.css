@@ -1,0 +1,86 @@
+.brand-logo {
+	display: inline-flex;
+	flex: none;
+	align-items: center;
+	gap: var(--brand-gap);
+	color: var(--color-global-black);
+}
+
+.brand-logo__mark {
+	width: var(--brand-mark-size);
+	height: var(--brand-mark-size);
+	flex: none;
+	overflow: visible;
+	fill: none;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+}
+
+.brand-logo__frame,
+.brand-logo__cross {
+	stroke: var(--color-global-mint);
+	stroke-width: 3.2;
+}
+
+.brand-logo__u {
+	stroke: var(--brand-u-color);
+	stroke-width: 3.5;
+}
+
+.brand-logo__wordmark {
+	color: var(--brand-wordmark-color);
+	font-size: var(--brand-wordmark-size);
+	font-weight: var(--brand-wordmark-weight);
+	line-height: 1;
+}
+
+.brand-logo__accent {
+	color: var(--color-global-mint);
+}
+
+.brand-logo--dark-bg {
+	--brand-u-color: var(--color-global-white);
+	--brand-wordmark-color: var(--color-global-white);
+}
+
+.brand-logo--light-bg {
+	--brand-u-color: var(--color-global-black);
+	--brand-wordmark-color: var(--color-global-black);
+}
+
+.brand-logo--hero {
+	--brand-mark-size: 76px;
+	--brand-wordmark-size: 58px;
+	--brand-wordmark-weight: 750;
+	--brand-gap: 18px;
+}
+
+.brand-logo--form {
+	--brand-mark-size: 48px;
+	--brand-wordmark-size: 42px;
+	--brand-wordmark-weight: 800;
+	--brand-gap: 8px;
+}
+
+.brand-logo--nav {
+	--brand-mark-size: 27px;
+	--brand-wordmark-size: 18px;
+	--brand-wordmark-weight: 800;
+	--brand-gap: 7px;
+}
+
+.brand-logo.brand-light {
+	margin-bottom: 58px;
+	color: var(--color-global-white);
+}
+
+.brand-logo.brand-dark {
+	justify-content: center;
+	color: var(--color-global-navy-800);
+}
+
+@media (max-width: 1080px) {
+	.brand-logo--hero {
+		--brand-wordmark-size: 48px;
+	}
+}

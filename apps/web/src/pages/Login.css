@@ -1,12 +1,12 @@
 .login-screen {
-  --ink: #211f43;
-  --mint: #80d9c9;
-  --panel: #fff;
+  --ink: var(--color-global-navy-800);
+  --mint: var(--color-global-mint);
+  --panel: var(--color-bg-surface);
   position: fixed;
   inset: 0;
   overflow: auto;
   color: var(--ink);
-  background: radial-gradient(ellipse at 53% 44%, #4b2d80 0%, #39265f 39%, #211e40 82%);
+  background: var(--color-bg-auth);
   font-family: "Avenir Next", Avenir, "Segoe UI", sans-serif;
 }
 
@@ -32,65 +32,12 @@
   min-width: 0;
   min-height: 100vh;
   padding: 48px 40px 48px 8.3vw;
-  color: #fff;
+  color: var(--color-global-white);
   animation: login-reveal 650ms ease-out both;
 }
 
 .intro-content {
   width: min(100%, 540px);
-}
-
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 18px;
-}
-
-.brand-mark {
-  flex: none;
-  width: 76px;
-  height: 76px;
-  overflow: visible;
-  fill: none;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.brand-mark-frame {
-  stroke: var(--mint);
-  stroke-width: 3.2;
-}
-
-.brand-mark-u {
-  stroke: #fff;
-  stroke-width: 3.5;
-}
-
-.brand-mark-cross {
-  stroke: var(--mint);
-  stroke-width: 3.5;
-}
-
-.brand-name {
-  font-size: 58px;
-  font-weight: 750;
-  line-height: 1;
-}
-
-.brand-light {
-  margin-bottom: 58px;
-  color: #fff;
-}
-
-.brand-light .brand-mark,
-.brand-light .brand-name span,
-.brand-dark .brand-mark,
-.brand-dark .brand-name span {
-  color: var(--mint);
-}
-
-.brand-dark .brand-mark-u {
-  stroke: var(--ink);
 }
 
 .login-intro h2 {
@@ -103,7 +50,7 @@
 .login-intro p {
   max-width: 520px;
   margin: 0;
-  color: #c4c0d2;
+  color: rgb(255 255 255 / 72%);
   font-size: 16px;
   line-height: 1.55;
 }
@@ -140,25 +87,17 @@
   line-height: 1.25;
 }
 
-.brand-dark {
-  justify-content: center;
-  gap: 8px;
-  color: var(--ink);
-}
-
-.brand-dark .brand-mark {
-  width: 48px;
-  height: 48px;
-}
-
-.brand-dark .brand-name {
-  font-size: 42px;
-  font-weight: 800;
-}
-
 .login-error {
   margin: -32px 0 20px;
-  color: #b42335;
+  color: var(--color-global-red-500);
+  font-size: 13px;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.login-success {
+  margin: -32px 0 20px;
+  color: var(--color-global-navy-800);
   font-size: 13px;
   line-height: 1.4;
   text-align: center;
@@ -175,10 +114,10 @@
   width: 100%;
   height: 62px;
   padding: 0 30px;
-  border: 1.5px solid #211f43;
-  border-radius: 999px;
+  border: 1px solid var(--color-global-gray-300);
+  border-radius: var(--radius-input);
   outline: none;
-  background: #fff;
+  background: var(--color-global-white);
   color: var(--ink);
   font: inherit;
   font-size: 15px;
@@ -186,13 +125,13 @@
 }
 
 .login-form input::placeholder {
-  color: #77747f;
+  color: var(--color-global-gray-500);
   opacity: 1;
 }
 
 .login-form input:focus-visible {
-  border-color: #4c3784;
-  box-shadow: 0 0 0 3px rgb(128 217 201 / 32%);
+  border-color: var(--color-global-mint);
+  box-shadow: 0 0 0 3px rgb(53 212 200 / 24%);
 }
 
 .password-field {
@@ -215,7 +154,7 @@
   place-items: center;
   border: 0;
   background: transparent;
-  color: #77747f;
+  color: var(--color-global-gray-500);
   cursor: pointer;
 }
 
@@ -245,7 +184,7 @@
 }
 
 .forgot-link {
-  color: #555263;
+  color: var(--color-global-gray-500);
   font-size: 13px;
 }
 
@@ -256,7 +195,7 @@
   border: 0;
   border-radius: 999px;
   background: var(--ink);
-  color: #fff;
+  color: var(--color-global-white);
   font: inherit;
   font-size: 15px;
   font-weight: 700;
@@ -266,7 +205,7 @@
 
 .login-submit:hover:not(:disabled) {
   transform: translateY(-1px);
-  background: #332d5e;
+  background: var(--color-global-navy-900);
 }
 
 .login-submit:disabled {
@@ -279,7 +218,7 @@
   align-items: center;
   gap: 12px;
   margin: 28px 0 24px;
-  color: #a6a4ad;
+  color: var(--color-global-gray-500);
   font-size: 13px;
 }
 
@@ -287,42 +226,34 @@
 .login-divider::after {
   height: 1px;
   flex: 1;
-  background: #dedde2;
+  background: var(--color-global-gray-300);
   content: "";
 }
 
-.google-login {
+.google-signin {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
   gap: 8px;
-  width: min(100%, 236px);
-  min-height: 48px;
-  align-self: center;
-  border: 1px solid #d5d4da;
-  border-radius: 999px;
-  background: #fff;
-  color: #34323d;
-  font: inherit;
-  font-size: 13px;
-  cursor: pointer;
-  transition: background-color 150ms ease, border-color 150ms ease;
+  width: 100%;
 }
 
-.google-login:hover {
-  border-color: #aaa7b3;
-  background: #f8f7fa;
+.google-signin-button {
+  min-height: 40px;
 }
 
-.google-mark {
-  width: 17px;
-  height: 17px;
+.google-signin-error {
+  margin: 0;
+  color: var(--color-global-red-500);
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: center;
 }
 
 .signup-prompt {
   margin: auto 0 0;
   padding-top: 48px;
-  color: #656270;
+  color: var(--color-global-gray-500);
   font-size: 13px;
   text-align: center;
 }
@@ -362,15 +293,12 @@
     padding-left: 6vw;
   }
 
-  .brand-name {
-    font-size: 48px;
-  }
 }
 
 @media (max-width: 760px) {
   .login-screen {
     min-height: 100svh;
-    background: #211e40;
+    background: var(--color-bg-auth);
   }
 
   .login-layout {

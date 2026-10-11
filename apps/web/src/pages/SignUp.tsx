@@ -1,20 +1,23 @@
 import { useState, type FormEvent } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import BrandLogo from '../components/BrandLogo';
+import GoogleSignInButton from '../components/GoogleSignInButton';
+import { API_BASE_URL, apiErrorMessage, loginWithGoogle } from '../auth';
 import './Login.css';
 import './SignUp.css';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080';
-
 export default function SignUp() {
-	const [username, setUsername] = useState('');
+	const navigate = useNavigate();
+	const [name, setName] = useState('');
 	const [email, setEmail] = useState('');
 	const [password, setPassword] = useState('');
 	const [confirmPassword, setConfirmPassword] = useState('');
 	const [showPassword, setShowPassword] = useState(false);
 	const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 	const [message, setMessage] = useState('');
+	const [loading, setLoading] = useState(false);
 
-	const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+	const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
 		event.preventDefault();
 		setMessage('');
 
@@ -23,11 +26,45 @@ export default function SignUp() {
 			return;
 		}
 
-		setMessage('Account registration is not available yet.');
+		setLoading(true);
+		try {
+			const response = await fetch(`${API_BASE_URL}/api/auth/signup`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ email, password, name }),
+			});
+
+			if (response.status !== 201) {
+				throw new Error(await apiErrorMessage(response, '회원가입에 실패했습니다.'));
+			}
+
+			const body: unknown = await response.json();
+			if (
+				typeof body !== 'object' ||
+				body === null ||
+				!('userId' in body) ||
+				typeof body.userId !== 'number'
+			) {
+				throw new Error('서버에서 올바르지 않은 회원가입 응답을 받았습니다.');
+			}
+
+			navigate('/login', { replace: true, state: { signupSuccess: true } });
+		} catch (error: unknown) {
+			setMessage(error instanceof Error ? error.message : '회원가입 중 오류가 발생했습니다.');
+		} finally {
+			setLoading(false);
+		}
 	};
 
-	const handleGoogleSignUp = () => {
-		window.location.assign(`${API_BASE_URL}/api/auth/google`);
+	const handleGoogleSignUp = async (idToken: string) => {
+		setMessage('');
+		setLoading(true);
+		try {
+			await loginWithGoogle(idToken);
+			navigate('/dashboard', { replace: true });
+		} finally {
+			setLoading(false);
+		}
 	};
 
 	return (
@@ -35,14 +72,7 @@ export default function SignUp() {
 			<section className="login-layout" aria-label="UXight sign up">
 				<div className="login-intro">
 					<div className="intro-content">
-						<div className="brand brand-light">
-							<svg className="brand-mark" viewBox="0 0 48 48" aria-hidden="true">
-								<rect className="brand-mark-frame" x="3" y="3" width="42" height="42" rx="13" />
-								<path className="brand-mark-u" d="M14 14v14a10 10 0 0 0 20 0V14" />
-								<path className="brand-mark-cross" d="m16 16 16 16M32 16 16 32" />
-							</svg>
-							<span className="brand-name"><span>UX</span>ight</span>
-						</div>
+						<BrandLogo variant="dark-bg" size="hero" className="brand-light" />
 						<h2>Ship it. But test it with 5 people first.</h2>
 						<p>Give us a URL and a task. Persona agents will walk through it and show you exactly where they got stuck.</p>
 					</div>
@@ -57,22 +87,23 @@ export default function SignUp() {
 						{message && <p className="signup-message" role="alert">{message}</p>}
 
 						<form className="signup-form" onSubmit={handleSubmit}>
-							<label className="visually-hidden" htmlFor="signup-username">Username</label>
+							<label className="visually-hidden" htmlFor="signup-name">Name</label>
 							<input
-								id="signup-username"
-								name="username"
+								className="ui-input"
+								id="signup-name"
+								name="name"
 								type="text"
-								autoComplete="username"
-								minLength={2}
-								maxLength={50}
+								autoComplete="name"
+								maxLength={100}
 								required
-								placeholder="Username"
-								value={username}
-								onChange={(event) => setUsername(event.target.value)}
+								placeholder="Name"
+								value={name}
+								onChange={(event) => setName(event.target.value)}
 							/>
 
 							<label className="visually-hidden" htmlFor="signup-email">Email</label>
 							<input
+								className="ui-input"
 								id="signup-email"
 								name="email"
 								type="email"
@@ -86,11 +117,14 @@ export default function SignUp() {
 							<div className="signup-password-field">
 								<label className="visually-hidden" htmlFor="signup-password">Password</label>
 								<input
+								className="ui-input"
 									id="signup-password"
 									name="password"
 									type={showPassword ? 'text' : 'password'}
 									autoComplete="new-password"
 									minLength={8}
+									maxLength={12}
+									pattern="(?=.*[a-z])(?=.*\d).{8,12}"
 									required
 									placeholder="Password"
 									value={password}
@@ -114,11 +148,14 @@ export default function SignUp() {
 							<div className="signup-password-field">
 								<label className="visually-hidden" htmlFor="signup-confirm-password">Re-enter password</label>
 								<input
+								className="ui-input"
 									id="signup-confirm-password"
 									name="confirmPassword"
 									type={showConfirmPassword ? 'text' : 'password'}
 									autoComplete="new-password"
 									minLength={8}
+									maxLength={12}
+									pattern="(?=.*[a-z])(?=.*\d).{8,12}"
 									required
 									placeholder="Re-enter password"
 									value={confirmPassword}
@@ -139,20 +176,18 @@ export default function SignUp() {
 								</button>
 							</div>
 
-							<button className="login-submit signup-submit" type="submit">Sign Up</button>
+							<button className="ui-button-primary login-submit signup-submit" type="submit" disabled={loading}>
+								{loading ? 'Creating account...' : 'Sign Up'}
+							</button>
 						</form>
 
 						<div className="login-divider signup-divider"><span>OR</span></div>
 
-						  <button type="button" className="google-login" onClick={handleGoogleSignUp}>
-							<svg className="google-mark" viewBox="0 0 48 48" aria-hidden="true">
-								<path fill="#4285F4" d="M43.6 24.5c0-1.4-.1-2.8-.4-4.1H24v7.8h11a9.4 9.4 0 0 1-4.1 6.2v5.1h6.6c3.9-3.6 6.1-8.8 6.1-15Z" />
-								<path fill="#34A853" d="M24 44c5.5 0 10.1-1.8 13.5-4.9l-6.6-5.1c-1.8 1.2-4.1 2-6.9 2-5.3 0-9.8-3.6-11.4-8.4H5.8v5.3A20 20 0 0 0 24 44Z" />
-								<path fill="#FBBC05" d="M12.6 27.6a12 12 0 0 1 0-7.2v-5.3H5.8a20 20 0 0 0 0 17.8l6.8-5.3Z" />
-								<path fill="#EA4335" d="M24 12c3 0 5.7 1 7.8 3l5.8-5.8A19.5 19.5 0 0 0 24 4 20 20 0 0 0 5.8 15.1l6.8 5.3C14.2 15.6 18.7 12 24 12Z" />
-							</svg>
-							Sign up with Google
-						</button>
+						<GoogleSignInButton
+							text="signup_with"
+							onCredential={handleGoogleSignUp}
+							onError={setMessage}
+						/>
 
 						<p className="signup-prompt signup-login-prompt">
 							Already have an account? <Link to="/login" className="text-link signup-link">Log In</Link>

@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Navigate, Outlet } from 'react-router-dom';
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080';
+import { API_BASE_URL, authenticatedFetch } from '../auth';
 
 type UserMe = { role: string };
 
@@ -16,7 +15,7 @@ export default function ProtectedRoute({ allowedRoles }: ProtectedRouteProps) {
   useEffect(() => {
     let active = true;
 
-    fetch(`${API_BASE_URL}/api/users/me`, { credentials: 'include' })
+    authenticatedFetch(`${API_BASE_URL}/api/users/me`)
       .then(async (res) => {
         if (!res.ok) {
           throw new Error('Session is not authenticated');
@@ -24,7 +23,6 @@ export default function ProtectedRoute({ allowedRoles }: ProtectedRouteProps) {
 
         const user = (await res.json()) as UserMe;
         if (active) {
-          localStorage.setItem('userRole', user.role);
           setUserRole(user.role);
           setAuthStatus('authenticated');
         }
