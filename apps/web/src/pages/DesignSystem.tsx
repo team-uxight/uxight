@@ -25,7 +25,7 @@ export default function DesignSystem() {
               <Sparkles aria-hidden="true" size={16} />
               UI foundations · v1
             </div>
-            <h1 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">디자인 시스템</h1>
+            <h1 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">디자인 시스템 데모 페이지</h1>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground sm:text-base">
               테마 토큰을 기반으로 재사용하는 공통 UI 컴포넌트입니다. 아래 칩과 확인 다이얼로그를 직접 조작해 볼 수 있어요.
             </p>
