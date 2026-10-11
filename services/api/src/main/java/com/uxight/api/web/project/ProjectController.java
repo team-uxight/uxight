@@ -4,6 +4,7 @@ import com.uxight.api.domain.project.ProjectCreateRequest;
 import com.uxight.api.domain.project.ProjectService;
 import com.uxight.api.web.common.AuthConst;
 import jakarta.validation.Valid;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -14,32 +15,31 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.RequestAttribute;
 
-import java.util.List;
-import java.util.Map;
-
 @RestController
 @RequestMapping("/api/projects")
 public class ProjectController {
 
   private final ProjectService projectService;
 
+  @Autowired
   public ProjectController(ProjectService projectService) {
     this.projectService = projectService;
   }
 
+  /** 대시보드 — 본인 프로젝트 목록. 없으면 빈 배열. */
   @GetMapping
-  public Map<String, List<ProjectSummary>> projects(@RequestAttribute(AuthConst.LOGIN_USER_ID) Long userId) {
-    List<ProjectSummary> projects = projectService.getProjectsByUser(userId).stream()
+  public ProjectListResponse projects(@RequestAttribute(AuthConst.LOGIN_USER_ID) Long userId) {
+    return new ProjectListResponse(projectService.getProjectsByUser(userId).stream()
         .map(ProjectSummary::from)
-        .toList();
-    return Map.of("projects", projects);
+        .toList());
   }
 
+  /** 요청한 리서처를 소유자로 저장한다. 허용 도메인은 여기서 프로젝트에 고정되고, 실험 요청 때마다 받지 않는다. */
   @PostMapping
   @ResponseStatus(HttpStatus.CREATED)
-  public Map<String, Long> createProject(@Valid @RequestBody ProjectCreateRequest request,
+  public ProjectCreateResponse createProject(@Valid @RequestBody ProjectCreateRequest request,
       @RequestAttribute(AuthConst.LOGIN_USER_ID) Long userId) {
-    return Map.of("projectId", projectService.createProject(userId, request));
+    return new ProjectCreateResponse(projectService.createProject(userId, request));
   }
 
   @GetMapping("/{projectId}")

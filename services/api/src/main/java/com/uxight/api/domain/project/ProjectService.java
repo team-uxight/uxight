@@ -1,45 +1,42 @@
 package com.uxight.api.domain.project;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.uxight.api.common.ApiException;
 import com.uxight.api.common.ErrorCode;
+import com.uxight.api.domain.user.UserRepository;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
-import java.io.UncheckedIOException;
 import java.util.List;
 
 @Service
 public class ProjectService {
 
   private final ProjectRepository projectRepository;
-  private final ObjectMapper objectMapper;
+  private final UserRepository userRepository;
 
-  public ProjectService(ProjectRepository projectRepository, ObjectMapper objectMapper) {
+  @Autowired
+  public ProjectService(ProjectRepository projectRepository, UserRepository userRepository) {
     this.projectRepository = projectRepository;
-    this.objectMapper = objectMapper;
+    this.userRepository = userRepository;
   }
 
+  @Transactional
   public Long createProject(Long userId, ProjectCreateRequest request) {
-    Project project = Project.newProject(userId, request.title(), request.targetUrl(),
-        request.description(), writeJson(request.allowedDomains()));
-    return projectRepository.save(project);
+    // 소유자는 user_id FK 만 쓰면 된다 — 사용자 행은 읽지 않는다 (LoginCheckInterceptor 가 이미 확인했다).
+    Project project = Project.create(userRepository.getReferenceById(userId), request.title(), request.targetUrl(),
+        request.description(), request.allowedDomains());
+    return projectRepository.save(project).getId();
   }
 
+  @Transactional(readOnly = true)
   public Project getProject(Long userId, Long projectId) {
     return projectRepository.findByIdAndUserId(projectId, userId)
         .orElseThrow(() -> new ApiException(ErrorCode.PROJECT_NOT_FOUND));
   }
 
+  @Transactional(readOnly = true)
   public List<Project> getProjectsByUser(Long userId) {
-    return projectRepository.findByUserId(userId);
-  }
-
-  private String writeJson(Object value) {
-    try {
-      return objectMapper.writeValueAsString(value);
-    } catch (JsonProcessingException e) {
-      throw new UncheckedIOException(e);
-    }
+    return projectRepository.findByUserIdOrderByIdDesc(userId);
   }
 }
