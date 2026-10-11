@@ -286,42 +286,27 @@ class ProjectControllerTest {
   void update_nullValues_areTreatedAsNotSent() throws Exception {
     Long projectId = insertOriginalProject();
 
-    update(projectId, "{\"title\":null,\"targetUrl\":null,\"description\":null,\"allowedDomains\":null}")
+    update(projectId, "{\"title\":null,\"description\":null}")
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.title").value("원래 제목"))
+        .andExpect(jsonPath("$.description").value("원래 설명"));
+  }
+
+  @Test
+  void update_readOnlyFields_areIgnored() throws Exception {
+    Long projectId = insertOriginalProject();
+
+    // 수정 폼이 읽기 전용 항목까지 통째로 보내도 제목 · 설명만 바뀐다
+    update(projectId, "{\"title\":\"새 제목\",\"description\":\"새 설명\",\"targetUrl\":\"https://new.example.com\","
+        + "\"allowedDomains\":[\"pay.example.com\"]}")
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.title").value("새 제목"))
+        .andExpect(jsonPath("$.description").value("새 설명"))
         .andExpect(jsonPath("$.targetUrl").value("https://a.example.com/start"))
-        .andExpect(jsonPath("$.description").value("원래 설명"))
         .andExpect(jsonPath("$.allowedDomains").value(contains("a.example.com", "b.example.com")));
-  }
-
-  @Test
-  void update_targetUrlOnly_putsNewHostFirst_andKeepsExistingDomains() throws Exception {
-    Long projectId = insertOriginalProject();
-
-    update(projectId, "{\"targetUrl\":\"https://New.example.com/x\"}")
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.targetUrl").value("https://New.example.com/x"))
-        .andExpect(jsonPath("$.allowedDomains").value(contains("new.example.com", "a.example.com", "b.example.com")));
-    assertThat(allowedDomainsOf(projectId)).containsExactly("new.example.com", "a.example.com", "b.example.com");
-  }
-
-  @Test
-  void update_targetUrlAndAllowedDomains_replacesListWithNewHostFirst() throws Exception {
-    Long projectId = insertOriginalProject();
-
-    update(projectId, "{\"targetUrl\":\"https://new.example.com\","
-        + "\"allowedDomains\":[\"https://pay.example.com/checkout\",\"NEW.example.com\"]}")
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.allowedDomains").value(contains("new.example.com", "pay.example.com")));
-  }
-
-  @Test
-  void update_allowedDomainsOnly_keepsCurrentTargetHost() throws Exception {
-    Long projectId = insertOriginalProject();
-
-    update(projectId, "{\"allowedDomains\":[]}")
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.allowedDomains").value(contains("a.example.com")));
+    assertThat(jdbcTemplate.queryForObject("SELECT target_url FROM projects WHERE project_id = ?", String.class,
+        projectId)).isEqualTo("https://a.example.com/start");
+    assertThat(allowedDomainsOf(projectId)).containsExactly("a.example.com", "b.example.com");
   }
 
   @ParameterizedTest(name = "[{index}] {1}")
@@ -335,11 +320,9 @@ class ProjectControllerTest {
         .andExpect(jsonPath("$.fieldErrors[*].field").value(contains(field)));
 
     Map<String, Object> row = jdbcTemplate.queryForMap(
-        "SELECT title, target_url, description FROM projects WHERE project_id = ?", projectId);
+        "SELECT title, description FROM projects WHERE project_id = ?", projectId);
     assertThat(row).containsEntry("title", "원래 제목")
-        .containsEntry("target_url", "https://a.example.com/start")
         .containsEntry("description", "원래 설명");
-    assertThat(allowedDomainsOf(projectId)).containsExactly("a.example.com", "b.example.com");
   }
 
   static Stream<Arguments> invalidUpdateRequests() {
@@ -348,17 +331,13 @@ class ProjectControllerTest {
         Arguments.of("{\"title\":\"\"}", "title"),
         Arguments.of("{\"title\":\" 앞 공백\"}", "title"),
         Arguments.of("{\"title\":\"" + "가".repeat(101) + "\"}", "title"),
-        Arguments.of("{\"targetUrl\":\"\"}", "targetUrl"),
-        Arguments.of("{\"targetUrl\":\"javascript:alert(1)\"}", "targetUrl"),
-        // 시작 URL 은 바꾸고 제목은 그대로 두려 해도, 한 항목이 틀리면 아무것도 바꾸지 않는다
-        Arguments.of("{\"title\":\"새 제목\",\"targetUrl\":\"https://exa mple.com\"}", "targetUrl"),
         Arguments.of("{\"description\":\"" + "가".repeat(1001) + "\"}", "description"),
-        Arguments.of("{\"allowedDomains\":[\"\"]}", "allowedDomains[0]"),
-        Arguments.of("{\"allowedDomains\":[\"ok.example.com\",\"https://exa mple.com\"]}", "allowedDomains[1]"));
+        // 설명은 맞아도 제목이 틀리면 아무것도 바꾸지 않는다
+        Arguments.of("{\"title\":\"뒤 공백 \",\"description\":\"새 설명\"}", "title"));
   }
 
   @ParameterizedTest
-  @ValueSource(strings = {"{\"title\":", "{\"allowedDomains\":\"a.com\"}", "[]"})
+  @ValueSource(strings = {"{\"title\":", "{\"title\":[\"배열\"]}", "[]"})
   void update_unreadableBody_returnsBadRequest(String json) throws Exception {
     update(insertOriginalProject(), json)
         .andExpect(status().isBadRequest())

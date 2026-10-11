@@ -33,18 +33,13 @@ public class ProjectService {
     return projectRepository.save(project).getId();
   }
 
-  /** 보낸 항목만 바꾼다. 변경은 커밋 때 dirty checking 으로 UPDATE 된다. 아무것도 보내지 않으면 그대로 돌려준다. */
+  /**
+   * 제목 · 설명 중 보낸 항목만 바꾼다. 변경은 커밋 때 dirty checking 으로 UPDATE 된다.
+   * 아무것도 보내지 않으면 그대로 돌려준다.
+   */
   @Transactional
   public Project updateProject(Long userId, Long projectId, ProjectUpdateRequest request) {
     Project project = getProject(userId, projectId);
-    // 호스트를 읽을 수 없어 400 이 날 수 있는 두 항목을 먼저 바꾼다 (실패하면 트랜잭션이 롤백되어 아무것도 바뀌지 않는다).
-    // 시작 URL 을 허용 도메인보다 먼저 바꿔야 둘을 함께 보냈을 때 새 시작 URL 의 호스트가 들어간다.
-    if (request.targetUrl() != null) {
-      project.changeTargetUrl(request.targetUrl());
-    }
-    if (request.allowedDomains() != null) {
-      project.changeAllowedDomains(request.allowedDomains());
-    }
     if (request.title() != null) {
       project.changeTitle(request.title());
     }

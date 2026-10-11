@@ -95,20 +95,6 @@ public class Project {
   }
 
   /**
-   * 새 시작 URL 의 호스트를 허용 도메인 맨 앞에 넣는다. 이전 시작 URL 의 호스트는 리서처가 넣은 값과 구분할 수 없어 남긴다.
-   * 이미 만든 회차는 시작 시점의 URL · 허용 도메인을 스냅샷으로 가지므로 영향이 없다.
-   */
-  public void changeTargetUrl(String targetUrl) {
-    this.allowedDomains = toAllowedHosts(targetUrl, allowedDomains);
-    this.targetUrl = targetUrl;
-  }
-
-  /** 목록을 통째로 바꾼다. 생성과 같이 호스트만 남기고, 현재 시작 URL 의 호스트를 맨 앞에 넣는다. */
-  public void changeAllowedDomains(List<String> allowedDomains) {
-    this.allowedDomains = toAllowedHosts(targetUrl, allowedDomains);
-  }
-
-  /**
    * 시작 URL 의 호스트를 맨 앞에 두고, 입력 순서를 지키며 중복을 지운다.
    * 주소를 넣어도 호스트만 남긴다 (https://pay.example.com/checkout → pay.example.com).
    * 도메인은 대소문자를 구분하지 않으므로 소문자로 맞춘 뒤 비교한다 (Shop.com 과 shop.com 은 같은 값).
