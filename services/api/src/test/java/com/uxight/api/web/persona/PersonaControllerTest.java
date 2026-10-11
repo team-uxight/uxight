@@ -11,10 +11,15 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jayway.jsonpath.JsonPath;
 import com.uxight.api.domain.user.JwtProvider;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -27,6 +32,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Stream;
 
 /**
  * Persona 목록(GET /api/personas) — 본인 소유 + 공용, 삭제된 것 제외. 실제 MySQL, 테스트마다 롤백.
@@ -48,6 +55,9 @@ class PersonaControllerTest {
 
   @Autowired
   private JdbcTemplate jdbcTemplate;
+
+  @Autowired
+  private ObjectMapper objectMapper;
 
   private Long userId;
   private String bearer;
@@ -144,6 +154,96 @@ class PersonaControllerTest {
           .andExpect(status().isNotFound())
           .andExpect(jsonPath("$.code").value("EXP-ERR-003"));
     }
+  }
+
+  // ───────── POST /api/personas ─────────
+
+  @Test
+  void create_savesWithRequesterAsOwner_andKeepsExtraKeys() throws Exception {
+    String body = create("{\"name\":\"쇼핑 초보\",\"profile\":{\"webSkill\":\"low\",\"device\":\"mobile\","
+        + "\"domainKnowledge\":\"low\",\"background\":\"온라인 쇼핑 경험이 적음\",\"ageGroup\":20}}")
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.*", hasSize(1)))
+        .andExpect(jsonPath("$.personaId").isNumber())
+        .andReturn().getResponse().getContentAsString();
+    long personaId = objectMapper.readTree(body).get("personaId").asLong();
+
+    Map<String, Object> row = jdbcTemplate.queryForMap(
+        "SELECT user_id, name, deleted_at, profile FROM personas WHERE persona_id = ?", personaId);
+    assertThat(row.get("user_id")).isEqualTo(userId);
+    assertThat(row.get("name")).isEqualTo("쇼핑 초보");
+    assertThat(row.get("deleted_at")).isNull();
+    assertThat(objectMapper.readValue(row.get("profile").toString(), Map.class))
+        .containsEntry("background", "온라인 쇼핑 경험이 적음")
+        .containsEntry("ageGroup", 20);   // 필수 속성 밖의 키도 그대로 저장한다
+
+    personas()
+        .andExpect(jsonPath("$.personas[?(@.personaId == %d)].isCommon", personaId).value(contains(false)));
+  }
+
+  @Test
+  void create_sameNameAndProfileTwice_createsTwoPersonas() throws Exception {
+    String json = "{\"name\":\"같은 이름\",\"profile\":" + PROFILE + "}";
+
+    create(json).andExpect(status().isCreated());
+    create(json).andExpect(status().isCreated());
+
+    assertThat(jdbcTemplate.queryForObject(
+        "SELECT COUNT(*) FROM personas WHERE user_id = ? AND name = '같은 이름'", Integer.class, userId)).isEqualTo(2);
+  }
+
+  @ParameterizedTest(name = "[{index}] {1}")
+  @MethodSource("invalidCreateRequests")
+  void create_invalidInput_returnsInvalidInput_andSavesNothing(String json, List<String> fields) throws Exception {
+    create(json)
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("GLB-ERR-002"))
+        .andExpect(jsonPath("$.fieldErrors[*].field").value(contains(fields.toArray())));
+    assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM personas WHERE user_id = ?", Integer.class, userId))
+        .isZero();
+  }
+
+  static Stream<Arguments> invalidCreateRequests() {
+    String profile = "\"profile\":" + PROFILE;
+    return Stream.of(
+        Arguments.of("{" + profile + "}", List.of("name")),
+        Arguments.of("{\"name\":\"\"," + profile + "}", List.of("name")),
+        Arguments.of("{\"name\":\"   \"," + profile + "}", List.of("name")),
+        Arguments.of("{\"name\":\" 앞 공백\"," + profile + "}", List.of("name")),
+        Arguments.of("{\"name\":\"" + "가".repeat(101) + "\"," + profile + "}", List.of("name")),
+        Arguments.of("{\"name\":\"n\"}", List.of("profile")),
+        // 필수 속성은 빠진 것을 모두 한 번에 알린다
+        Arguments.of("{\"name\":\"n\",\"profile\":{}}",
+            List.of("profile.webSkill", "profile.device", "profile.domainKnowledge", "profile.background")),
+        Arguments.of("{\"name\":\"n\",\"profile\":{\"webSkill\":\"low\",\"device\":null,\"domainKnowledge\":\"low\","
+            + "\"background\":\"  \"}}", List.of("profile.device", "profile.background")));
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"{\"name\":", "{\"name\":\"n\",\"profile\":\"문자열\"}", "{\"name\":\"n\",\"profile\":[]}"})
+  void create_unreadableBody_returnsBadRequest(String json) throws Exception {
+    create(json)
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("GLB-ERR-001"));
+  }
+
+  @Test
+  void create_withoutTokenOrByInactiveUser_returnsUnauthorized() throws Exception {
+    String json = "{\"name\":\"n\",\"profile\":" + PROFILE + "}";
+    mvc.perform(post("/api/personas").contentType(MediaType.APPLICATION_JSON).content(json))
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("AUT-ERR-001"));
+
+    jdbcTemplate.update("UPDATE users SET is_active = FALSE WHERE user_id = ?", userId);
+    create(json)
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("AUT-ERR-005"));
+  }
+
+  private ResultActions create(String json) throws Exception {
+    return mvc.perform(post("/api/personas").header(HttpHeaders.AUTHORIZATION, bearer)
+        .contentType(MediaType.APPLICATION_JSON)
+        .content(json));
   }
 
   private ResultActions personas() throws Exception {

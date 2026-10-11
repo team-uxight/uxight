@@ -1,5 +1,6 @@
 package com.uxight.api.domain.persona;
 
+import com.uxight.api.common.ApiException;
 import com.uxight.api.domain.user.User;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -17,6 +18,8 @@ import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /** 가상 사용자 정의. 리서처 소유이거나, 소유자가 없으면(user_id NULL) 관리자 소유의 공용 Persona 다. */
@@ -25,6 +28,9 @@ import java.util.Map;
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Persona {
+
+  /** 생성 시 반드시 있어야 하는 profile 속성. 임시 스키마라(GACA-66) 바뀌면 이 목록만 고친다. */
+  public static final List<String> REQUIRED_PROFILE_KEYS = List.of("webSkill", "device", "domainKnowledge", "background");
 
   @Id
   @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -50,8 +56,38 @@ public class Persona {
   @Column(insertable = false, updatable = false)
   private LocalDateTime updatedAt;
 
+  private Persona(User user, String name, Map<String, Object> profile) {
+    this.user = user;
+    this.name = name;
+    this.profile = profile;
+  }
+
+  /**
+   * 리서처 소유 Persona 를 만든다. 이름 · 속성이 같은 Persona 가 있어도 새로 만든다 — 수정 대신 삭제 후 다시 생성하기 때문이다.
+   * profile 에는 필수 속성이 모두 있어야 하고, 그 밖의 키는 그대로 저장한다.
+   */
+  public static Persona create(User owner, String name, Map<String, Object> profile) {
+    validateProfile(profile);
+    return new Persona(owner, name, profile);
+  }
+
   /** 관리자 소유의 공용 Persona 인가. 리서처는 공용 Persona 를 삭제할 수 없다. */
   public boolean isCommon() {
     return user == null;
+  }
+
+  // 빠졌거나 null · 빈 문자열인 필수 속성을 모두 모아 한 번에 알린다 (fieldErrors 의 field 는 profile.webSkill 형식).
+  // 값의 형식(등급 · 척도 · 서술형)은 미정이라 문자열이 아닌 값은 그대로 둔다.
+  private static void validateProfile(Map<String, Object> profile) {
+    Map<String, String> errors = new LinkedHashMap<>();
+    for (String key : REQUIRED_PROFILE_KEYS) {
+      Object value = profile.get(key);
+      if (value == null || (value instanceof String text && text.isBlank())) {
+        errors.put("profile." + key, "필수 속성입니다");
+      }
+    }
+    if (!errors.isEmpty()) {
+      throw ApiException.invalidFields(errors);
+    }
   }
 }
