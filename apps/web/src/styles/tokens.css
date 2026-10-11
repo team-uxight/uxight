@@ -1,4 +1,60 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@theme inline {
+  --font-sans: var(--font-family-sans);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
 :root {
+  --font-family-sans: "Avenir Next", Avenir, "Segoe UI", sans-serif;
+  --background: #f8f7fc;
+  --foreground: #1f1d3d;
+  --card: #fff;
+  --card-foreground: #1f1d3d;
+  --popover: #fff;
+  --popover-foreground: #1f1d3d;
+  --primary: #1f1d3d;
+  --primary-foreground: #fff;
+  --secondary: #eeebf8;
+  --secondary-foreground: #1f1d3d;
+  --muted: #f0eef5;
+  --muted-foreground: #74717f;
+  --accent: #e5f8f5;
+  --accent-foreground: #176e67;
+  --destructive: #d93545;
+  --border: #e3e0eb;
+  --input: #e3e0eb;
+  --ring: #35bfb5;
+  --success: #32853d;
+  --warning: #a46b00;
+  --info: #3567a8;
+  --radius: 0.75rem;
+
   --color-global-mint: #35d4c8;
   --color-global-navy-900: #0f172a;
   --color-global-navy-800: #1f1d3d;
@@ -45,7 +101,7 @@
 
   color: var(--color-global-navy-800);
   background: var(--color-bg-app);
-  font-family: "Avenir Next", Avenir, "Segoe UI", sans-serif;
+  font-family: var(--font-family-sans);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }

@@ -3,6 +3,7 @@ import Login from './pages/Login';
 import SignUp from './pages/SignUp';
 import ProtectedRoute from './components/ProtectedRoute';
 import RDashboard from './pages/R-Dashboard';
+import DesignSystem from './pages/DesignSystem';
 
   export default function App() {
     return (
@@ -11,6 +12,7 @@ import RDashboard from './pages/R-Dashboard';
           {/* 공개 라우트 (Public Routes) */}
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<SignUp />} />
+          <Route path="/design-system" element={<DesignSystem />} />
 
           <Route element={<ProtectedRoute />}>
             <Route path="/dashboard" element={<RDashboard />} />
