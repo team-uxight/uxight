@@ -20,12 +20,13 @@
 ## 2. 쓰기와 읽기 규칙
 
 - 파일은 Python만 쓴다. Spring은 이 디렉터리를 읽기 전용으로 마운트해 읽는다.
-- 실행하지 않은 step(가드 차단, Action 파싱 실패)도 한 줄로 기록한다.
+- 실행하지 않은 step(가드 차단, Action 파싱 실패, 허용되지 않은 Action, LLM 호출 실패)도 한 줄로 기록한다.
 - step 번호는 Persona 실행마다 1부터 빠짐없이 이어진다. 스크린샷 파일 이름, `run_personas.steps`, `findings.evidence`의 step 구간, max_steps 한도가 이 번호를 같이 쓴다.
 - Python은 스크린샷 파일을 먼저 쓰고, 그다음 그 step의 줄을 줄바꿈까지 한 번에 추가한다.
 - Spring은 마지막 줄이 완성되지 않았으면(줄바꿈으로 끝나지 않았거나 JSON으로 읽히지 않으면) 쓰는 중인 줄로 보고 건너뛴다.
 - Spring은 파일 경로를 run_id, persona_id, step 숫자로 직접 만든다. 로그 안의 `observation.screenshot`이나 `run_personas.log_path`를 경로로 쓰지 않는다.
 - Action 파싱은 최대 2회 재시도하며, 3회 연속 실패하면 Persona 실행을 실패(`fail`)로 처리한다.
+- max_steps 도달은 step을 추가하지 않고 `run_personas.status = 'max_steps'`로 기록한다.
 
 ## 3. Step 객체
 
@@ -41,8 +42,8 @@
 | ts | string | 기록 시각. 시간대를 포함한 ISO 8601 형식 |
 | url | string | 행동 전 페이지 URL |
 | observation | object | 관측 정보(3.2) |
-| reasoning | string/null | Agent의 판단 근거. Action 파싱 실패 시 null |
-| action | object/null | Agent의 행동(3.3). Action 파싱 실패 시 null |
+| reasoning | string/null | Agent의 판단 근거. Action 파싱 실패, LLM 호출 실패 시 null |
+| action | object/null | Agent의 행동(3.3). Action 파싱 실패, 허용되지 않은 Action, LLM 호출 실패 시 null |
 | result | object | 행동 실행 결과(3.4) |
 | blocked | object | 차단 여부와 사유(3.5) |
 | latency_ms | object | 소요 시간(3.6) |
@@ -79,16 +80,16 @@ result는 브라우저 행동의 실행 결과이며, Task 달성 여부와는 �
 | error | string/null | 오류 설명 |
 | error_code | string/null | step 실행 결과 코드 |
 
-- error_code의 목록은 AI 측이 Python Driver 구현에 맞춰 정한다. 이 값은 Spring API의 오류 코드(8.4 오류 코드 및 오류 파일 설계, 분류-ERR-번호)와 별개이며, Spring은 해석하지 않고 그대로 전달한다.
+- error_code는 행동이 정상 실행되면 null이고, 값의 목록은 3.8을 따른다. 이 값은 Spring API의 오류 코드(8.4 오류 코드 및 오류 파일 설계, 분류-ERR-번호)와 별개이며, Spring은 해석하지 않고 그대로 전달한다.
 
 ### 3.5 blocked
 
 | 필드 | 타입 | 설명 |
 | --- | --- | --- |
-| is | boolean | 실행하지 않은 step이면 true. 가드 차단과 Action 파싱 실패가 해당함 |
+| is | boolean | 가드 차단, Action 파싱 실패, 허용되지 않은 Action으로 실행하지 않은 step이면 true. LLM 호출 실패는 false |
 | reason | string/null | 차단 사유. is가 false면 null |
 
-- reason의 값: schema, domain, destructive, limit, rate, parse_failed. 각 값의 정의는 architecture.md를 따른다.
+- reason의 값: schema, domain, destructive, rate, parse_failed. 값마다 대응하는 error_code는 3.8을 따른다.
 - 차단된 행동은 브라우저에서 실행하지 않는다.
 
 ### 3.6 latency_ms, tokens
@@ -110,6 +111,27 @@ result는 브라우저 행동의 실행 결과이며, Task 달성 여부와는 �
 
 - Agent의 완료 선언은 `action.kind = 'done'`으로 알 수 있으므로, 완료 여부를 나타내는 별도 필드(agent_done)는 두지 않는다.
 
+### 3.8 error_code
+
+error_code는 AI 측이 정의하고 관리하며, 추가나 변경이 있으면 BE에 공유한다. 행동이 정상 실행되면 null이고, 값이 있으면 result.ok는 false다.
+
+| error_code                 | 구분     | 발생 조건                             | blocked.is | blocked.reason | action |
+| -------------------------- | -------- | ------------------------------------- | ---------- | -------------- | ------ |
+| PARSE_FAILED               | LLM/파싱 | Action JSON 파싱이 재시도 후에도 실패 | true       | parse_failed   | null   |
+| INVALID_ACTION             | LLM/파싱 | 허용되지 않은 Action 형식 또는 필드   | true       | schema         | null   |
+| LLM_REQUEST_FAILED         | LLM 호출 | LLM API 호출 실패                     | false      | null           | null   |
+| LLM_REQUEST_TIMEOUT        | LLM 호출 | LLM 응답 시간 초과                    | false      | null           | null   |
+| DOMAIN_BLOCKED             | 가드     | 허용되지 않은 도메인 이동             | true       | domain         | 있음   |
+| DESTRUCTIVE_ACTION_BLOCKED | 가드     | 위험하거나 파괴적인 행동              | true       | destructive    | 있음   |
+| RATE_LIMIT_EXCEEDED        | 가드     | 요청 속도 제한 초과                   | true       | rate           | 있음   |
+| ELEMENT_NOT_FOUND          | 브라우저 | 대상 요소를 찾을 수 없음              | false      | null           | 있음   |
+| ELEMENT_NOT_INTERACTABLE   | 브라우저 | 대상 요소와 상호작용할 수 없음        | false      | null           | 있음   |
+| NAVIGATION_TIMEOUT         | 브라우저 | 페이지 이동 시간 초과                 | false      | null           | 있음   |
+| BROWSER_ACTION_FAILED      | 브라우저 | 기타 브라우저 행동 실패               | false      | null           | 있음   |
+
+- 허용되지 않은 Action은 action에 기록하지 않는다. 기록하면 action.kind가 4절의 5종을 벗어난다. reasoning은 JSON이 파싱되었다면 남긴다.
+- LLM 호출 실패는 Action이 없어 실행하지 않은 step이지만, 차단이 아니므로 blocked.is는 false다.
+
 ## 4. Action 종류
 
 | kind | target | text | direction | 의미 |
@@ -124,7 +146,7 @@ result는 브라우저 행동의 실행 결과이며, Task 달성 여부와는 �
 
 ## 5. 예시
 
-각 예시는 형식 설명용이며 서로 이어진 기록이 아니다. 시간, 토큰, URL은 가상 데이터이고, error_code 값은 가칭이다. 실제 파일에서는 객체 하나가 한 줄이다(5.6).
+각 예시는 형식 설명용이며 서로 이어진 기록이 아니다. 시간, 토큰, URL은 가상 데이터다. 실제 파일에서는 객체 하나가 한 줄이다(5.6).
 
 ### 5.1 정상 행동
 
@@ -180,7 +202,7 @@ result는 브라우저 행동의 실행 결과이며, Task 달성 여부와는 �
     "ok": false,
     "url_after": "https://shop.example.com/order",
     "error": "Action blocked by domain policy",
-    "error_code": "ACTION_BLOCKED"
+    "error_code": "DOMAIN_BLOCKED"
   },
   "blocked": {"is": true, "reason": "domain"},
   "latency_ms": {"llm": 1180, "browser": 0},
@@ -370,6 +392,7 @@ Spring은 steps.jsonl을 그대로 넘기지 않고, 아래 키만 골라 camelC
 ## 8. 미결 항목
 
 - `action.success`(Agent 자체 성공 주장): done이 성공 기준 충족 선언이면 done일 때 항상 true라서 중복이므로, BE는 빼는 것을 제안한다. AI 측이 done과 success=false 조합으로 '포기'를 표현하려는 것이라면, 포기를 기록할 status를 따로 정해야 한다. 포기를 done으로 기록하면 성공률에 성공으로 집계된다.
-- error_code 목록: AI 측이 정해 공유한다. 이 문서의 ACTION_BLOCKED, PARSE_FAILED, ELEMENT_NOT_FOUND는 가칭이다.
+- error_code 목록: 3.8은 AI 측 초안이며, 구현 과정에서 바뀔 수 있다.
+- STEP_LIMIT_EXCEEDED: max_steps 도달을 별도 step 없이 종료 상태로 관리하자는 AI 제안에 BE도 동의하며, 이 문서는 그 기준으로 적었다. 확정되면 STEP_LIMIT_EXCEEDED와 blocked.reason의 limit을 쓰지 않는 것으로 마무리한다.
 - latency_ms, tokens의 측정 실패 표현(null 허용 여부): AI 측이 정한다. 프론트엔드에 넘기지 않으므로 BE와는 무관하다.
 - 마스킹 범위: BE는 기존 범위(비밀번호 계열 입력값과 그 영역) 유지를 제안한다. 일반 입력값까지 넓혀야 한다면 AI 측이 대상 범위를 구체적으로 정한다.
