@@ -20,7 +20,12 @@ public class ApiException extends RuntimeException {
 
   /** Bean Validation 으로 표현하기 어려운 필드 간 검증 (예: mode=loop 이면 loopMax 필수). */
   public static ApiException invalidField(String field, String message) {
-    return new ApiException(ErrorCode.INVALID_INPUT, Map.of(field, message));
+    return invalidFields(Map.of(field, message));
+  }
+
+  /** 여러 필드를 한 번에 알린다. 순서를 지키려면 LinkedHashMap 을 넘긴다. */
+  public static ApiException invalidFields(Map<String, String> fieldErrors) {
+    return new ApiException(ErrorCode.INVALID_INPUT, fieldErrors);
   }
 
   public ErrorCode errorCode() {

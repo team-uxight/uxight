@@ -79,9 +79,9 @@ public class RunService {
       );
       List<Map<String, Object>> personaSnapshot = personas.stream()
           .map(persona -> Map.<String, Object>of(
-              "persona_id", persona.personaId(),
-              "name", persona.name(),
-              "profile", readJson(persona.profile())
+              "persona_id", persona.getId(),
+              "name", persona.getName(),
+              "profile", persona.getProfile()
           ))
           .toList();
 
@@ -132,14 +132,6 @@ public class RunService {
   }
 
   // Jackson 2 의 checked 예외를 unchecked 로 감싼다 — GlobalExceptionHandler 에서 500 이 된다.
-  private Object readJson(String json) {
-    try {
-      return objectMapper.readValue(json, Object.class);
-    } catch (JsonProcessingException e) {
-      throw new UncheckedIOException(e);
-    }
-  }
-
   private String writeJson(Object value) {
     try {
       return objectMapper.writeValueAsString(value);
