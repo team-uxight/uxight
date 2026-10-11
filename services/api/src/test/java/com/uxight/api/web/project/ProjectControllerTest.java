@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.empty;
 import static org.hamcrest.Matchers.hasKey;
+import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -229,6 +230,32 @@ class ProjectControllerTest {
         .andExpect(jsonPath("$.code").value("AUT-ERR-005"));
   }
 
+  // ───────── GET /api/projects/{projectId} ─────────
+
+  @Test
+  void detail_returnsProjectDetailFields() throws Exception {
+    Long projectId = insertOriginalProject();
+
+    mvc.perform(get("/api/projects/{projectId}", projectId).header(HttpHeaders.AUTHORIZATION, bearer))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.*", hasSize(5)))   // ProjectDetail 5필드만 — 소유자 · 시각 · 삭제 표시는 싣지 않는다
+        .andExpect(jsonPath("$.projectId").value(projectId))
+        .andExpect(jsonPath("$.title").value("원래 제목"))
+        .andExpect(jsonPath("$.targetUrl").value("https://a.example.com/start"))
+        .andExpect(jsonPath("$.description").value("원래 설명"))
+        .andExpect(jsonPath("$.allowedDomains").value(contains("a.example.com", "b.example.com")));
+  }
+
+  @Test
+  void detail_withoutDescription_returnsNullDescription() throws Exception {
+    Long projectId = insertProject(userId, "설명 없음", "https://a.example.com", null);
+
+    mvc.perform(get("/api/projects/{projectId}", projectId).header(HttpHeaders.AUTHORIZATION, bearer))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$", hasKey("description")))   // 키는 있고 값이 null (명세 required)
+        .andExpect(jsonPath("$.description").value(nullValue()));
+  }
+
   @Test
   void detail_ofOthersProject_returnsNotFound() throws Exception {
     Long othersProject = insertProject(insertUser("other@uxight.com"), "남의 프로젝트", "https://c.example.com", null);
@@ -236,6 +263,35 @@ class ProjectControllerTest {
     mvc.perform(get("/api/projects/{projectId}", othersProject).header(HttpHeaders.AUTHORIZATION, bearer))
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.code").value("PRJ-ERR-001"));
+  }
+
+  @Test
+  void detail_ofMissingProject_returnsNotFound() throws Exception {
+    mvc.perform(get("/api/projects/{projectId}", Long.MAX_VALUE).header(HttpHeaders.AUTHORIZATION, bearer))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("PRJ-ERR-001"))
+        .andExpect(jsonPath("$.message").value("프로젝트를 찾을 수 없습니다."));
+  }
+
+  @Test
+  void detail_withNonNumericId_returnsBadRequest() throws Exception {
+    mvc.perform(get("/api/projects/{projectId}", "abc").header(HttpHeaders.AUTHORIZATION, bearer))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("GLB-ERR-001"));
+  }
+
+  @Test
+  void detail_withoutTokenOrByInactiveUser_returnsUnauthorized() throws Exception {
+    Long projectId = insertOriginalProject();
+
+    mvc.perform(get("/api/projects/{projectId}", projectId))
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("AUT-ERR-001"));
+
+    jdbcTemplate.update("UPDATE users SET is_active = FALSE WHERE user_id = ?", userId);
+    mvc.perform(get("/api/projects/{projectId}", projectId).header(HttpHeaders.AUTHORIZATION, bearer))
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("AUT-ERR-005"));
   }
 
   // ───────── PATCH /api/projects/{projectId} ─────────
