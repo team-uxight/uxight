@@ -6,6 +6,7 @@ import org.springframework.data.repository.query.Param;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * 리서처가 쓸 수 있는 Persona = 본인 소유 + 공용(user_id NULL), 삭제 표시된 것은 제외.
@@ -13,6 +14,12 @@ import java.util.List;
  * "본인 소유 또는 공용"은 메서드 이름 규칙으로 쓰면 OR 와 AND 의 묶음이 드러나지 않아 JPQL 로 적는다.
  */
 public interface PersonaRepository extends JpaRepository<Persona, Long> {
+
+  /**
+   * 본인 소유이고 삭제되지 않은 Persona. 공용 Persona(user_id NULL)는 user.id 가 같을 수 없어 찾지 못한다 — 삭제 대상 확인용.
+   * 삭제는 행을 지우지 않으므로 JpaRepository.delete 대신 이 조회 후 Persona.delete() 로 삭제 표시한다.
+   */
+  Optional<Persona> findByIdAndUserIdAndDeletedAtIsNull(Long personaId, Long userId);
 
   /** Persona 목록 · 실험 요청 폼. persona_id 순. */
   @Query("SELECT p FROM Persona p WHERE (p.user.id = :userId OR p.user IS NULL) AND p.deletedAt IS NULL ORDER BY p.id")

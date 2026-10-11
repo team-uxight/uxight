@@ -14,6 +14,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jayway.jsonpath.JsonPath;
 import com.uxight.api.domain.user.JwtProvider;
+import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -28,6 +29,7 @@ import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
@@ -37,7 +39,7 @@ import java.util.stream.Stream;
 
 /**
  * Persona 목록(GET /api/personas) — 본인 소유 + 공용, 삭제된 것 제외. 실제 MySQL, 테스트마다 롤백.
- * 로컬 seed 의 공용 Persona 도 함께 조회되므로, 테스트가 넣은 id 로만 판정한다.
+ * DB 에 다른 공용 Persona(이전 seed 등)가 있어도 함께 조회되므로, 테스트가 넣은 id 로만 판정한다.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -58,6 +60,9 @@ class PersonaControllerTest {
 
   @Autowired
   private ObjectMapper objectMapper;
+
+  @Autowired
+  private EntityManager entityManager;
 
   private Long userId;
   private String bearer;
@@ -238,6 +243,100 @@ class PersonaControllerTest {
     create(json)
         .andExpect(status().isUnauthorized())
         .andExpect(jsonPath("$.code").value("AUT-ERR-005"));
+  }
+
+  // ───────── DELETE /api/personas/{personaId} ─────────
+
+  @Test
+  void delete_ownPersona_marksDeletedAt_keepsRow_andHidesIt() throws Exception {
+    Long own = insertPersona(userId, "내 Persona", false);
+
+    delete(own).andExpect(status().isNoContent());
+
+    // 행은 남고 삭제 시각만 기록된다 — run_personas 가 persona_id 를 참조한다
+    assertThat(jdbcTemplate.queryForObject("SELECT deleted_at IS NOT NULL FROM personas WHERE persona_id = ?",
+        Boolean.class, own)).isTrue();
+    personas().andExpect(jsonPath("$.personas[*].personaId").value(not(hasItem(own.intValue()))));
+    delete(own)   // 이미 삭제함
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("EXP-ERR-003"));
+  }
+
+  @Test
+  void delete_commonOthersOrMissingPersona_returnsNotFound_andDeletesNothing() throws Exception {
+    Long common = insertPersona(null, "공용 Persona", false);
+    Long others = insertPersona(insertUser("other@uxight.com"), "남의 Persona", false);
+
+    for (Long personaId : new Long[] {common, others, Long.MAX_VALUE}) {
+      delete(personaId)
+          .andExpect(status().isNotFound())
+          .andExpect(jsonPath("$.code").value("EXP-ERR-003"))
+          .andExpect(jsonPath("$.message").value("Persona를 찾을 수 없습니다."));
+    }
+    assertThat(jdbcTemplate.queryForObject(
+        "SELECT COUNT(*) FROM personas WHERE persona_id IN (?, ?) AND deleted_at IS NULL", Integer.class, common, others))
+        .isEqualTo(2);
+  }
+
+  @Test
+  void delete_personaUsedByInProgressExperiment_succeeds_andKeepsSnapshot() throws Exception {
+    Long own = insertPersona(userId, "실험 중", false);
+    Long projectId = insertProject();
+    String body = mvc.perform(post("/api/projects/{projectId}/runs", projectId).header(HttpHeaders.AUTHORIZATION, bearer)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"goal\":\"구매\",\"successUrl\":\"https://a.example.com/done\",\"personaIds\":[" + own
+                + "],\"mode\":\"diagnose\"}"))
+        .andExpect(status().isCreated())
+        .andReturn().getResponse().getContentAsString();
+    long runId = objectMapper.readTree(body).get("runId").asLong();
+
+    // 회차는 queued(진행 중)인 채로 Persona 를 삭제할 수 있다 — 회차는 스냅샷으로 실행된다
+    delete(own).andExpect(status().isNoContent());
+
+    assertThat(jdbcTemplate.queryForObject(
+        "SELECT JSON_UNQUOTE(JSON_EXTRACT(persona_snapshot, '$[0].name')) FROM runs WHERE run_id = ?", String.class, runId))
+        .isEqualTo("실험 중");
+    // 새 실험에는 쓸 수 없다
+    mvc.perform(post("/api/projects/{projectId}/runs", projectId).header(HttpHeaders.AUTHORIZATION, bearer)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"goal\":\"구매\",\"successUrl\":\"https://a.example.com/done\",\"personaIds\":[" + own
+                + "],\"mode\":\"diagnose\"}"))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("EXP-ERR-003"));
+  }
+
+  @Test
+  void delete_withNonNumericId_returnsBadRequest() throws Exception {
+    mvc.perform(MockMvcRequestBuilders.delete("/api/personas/{personaId}", "abc").header(HttpHeaders.AUTHORIZATION, bearer))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("GLB-ERR-001"));
+  }
+
+  @Test
+  void delete_withoutTokenOrByInactiveUser_returnsUnauthorized() throws Exception {
+    Long own = insertPersona(userId, "내 Persona", false);
+    mvc.perform(MockMvcRequestBuilders.delete("/api/personas/{personaId}", own))
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("AUT-ERR-001"));
+
+    jdbcTemplate.update("UPDATE users SET is_active = FALSE WHERE user_id = ?", userId);
+    delete(own)
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("AUT-ERR-005"));
+  }
+
+  // 삭제 표시는 커밋 때 dirty checking 으로 UPDATE 되는데 테스트 트랜잭션은 커밋하지 않는다 — JdbcTemplate 으로 보기 전에 flush 한다.
+  private ResultActions delete(Long personaId) throws Exception {
+    ResultActions result = mvc.perform(MockMvcRequestBuilders.delete("/api/personas/{personaId}", personaId)
+        .header(HttpHeaders.AUTHORIZATION, bearer));
+    entityManager.flush();
+    return result;
+  }
+
+  private Long insertProject() {
+    jdbcTemplate.update("INSERT INTO projects (user_id, title, target_url, allowed_domains) "
+        + "VALUES (?, 'p', 'https://a.example.com', JSON_ARRAY('a.example.com'))", userId);
+    return jdbcTemplate.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
   }
 
   private ResultActions create(String json) throws Exception {

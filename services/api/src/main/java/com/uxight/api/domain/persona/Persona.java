@@ -71,6 +71,14 @@ public class Persona {
     return new Persona(owner, name, profile);
   }
 
+  /**
+   * 행을 지우지 않고 삭제 시각만 기록한다 — run_personas 가 persona_id 를 참조하고, 삭제 전에 요청된 실험의 회차도
+   * AI 모듈이 스냅샷의 persona_id 로 실행 결과를 기록한다. 진행 중인 실험은 스냅샷으로 돌므로 확인하지 않는다.
+   */
+  public void delete() {
+    this.deletedAt = LocalDateTime.now();
+  }
+
   /** 관리자 소유의 공용 Persona 인가. 리서처는 공용 Persona 를 삭제할 수 없다. */
   public boolean isCommon() {
     return user == null;
