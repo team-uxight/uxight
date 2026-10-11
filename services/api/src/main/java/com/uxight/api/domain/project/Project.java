@@ -51,6 +51,8 @@ public class Project {
   @JdbcTypeCode(SqlTypes.JSON)
   private List<String> allowedDomains;   // 가드 허용 도메인 목록
 
+  private LocalDateTime deletedAt;   // 삭제 시각. null 이면 사용 중 (삭제 표시)
+
   // 두 시각은 DB 기본값(CURRENT_TIMESTAMP · ON UPDATE)이 채운다. JPA 가 null 로 덮지 않게 쓰기에서 뺀다.
   @Column(insertable = false, updatable = false)
   private LocalDateTime createdAt;
@@ -73,6 +75,14 @@ public class Project {
   public static Project create(User user, String title, String targetUrl, String description,
       List<String> allowedDomains) {
     return new Project(user, title, targetUrl, description, toAllowedHosts(targetUrl, allowedDomains));
+  }
+
+  /**
+   * 행을 지우지 않고 삭제 시각만 기록한다 — 지난 실험의 Task · 회차가 이 행을 참조한다.
+   * 진행 중인 실험이 없는지는 서비스가 프로젝트 행을 잠근 뒤 확인한다.
+   */
+  public void delete() {
+    this.deletedAt = LocalDateTime.now();
   }
 
   public void changeTitle(String title) {

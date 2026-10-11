@@ -56,7 +56,7 @@ public class RunService {
       throw ApiException.invalidField("loopMax", "mode가 loop이면 필수입니다");
     }
 
-    Project project = projectRepository.findByIdAndUserId(projectId, userId)
+    Project project = projectRepository.findByIdAndUserIdAndDeletedAtIsNull(projectId, userId)
         .orElseThrow(() -> new ApiException(ErrorCode.PROJECT_NOT_FOUND));
     List<Long> personaIds = request.personaIds().stream().distinct().toList();
     List<Persona> personas = personaRepository.findUsableByIds(userId, personaIds);

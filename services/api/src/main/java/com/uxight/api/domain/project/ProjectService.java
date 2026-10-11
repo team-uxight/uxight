@@ -2,6 +2,7 @@ package com.uxight.api.domain.project;
 
 import com.uxight.api.common.ApiException;
 import com.uxight.api.common.ErrorCode;
+import com.uxight.api.domain.run.RunRepository;
 import com.uxight.api.domain.user.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -14,11 +15,14 @@ public class ProjectService {
 
   private final ProjectRepository projectRepository;
   private final UserRepository userRepository;
+  private final RunRepository runRepository;
 
   @Autowired
-  public ProjectService(ProjectRepository projectRepository, UserRepository userRepository) {
+  public ProjectService(ProjectRepository projectRepository, UserRepository userRepository,
+      RunRepository runRepository) {
     this.projectRepository = projectRepository;
     this.userRepository = userRepository;
+    this.runRepository = runRepository;
   }
 
   @Transactional
@@ -51,14 +55,29 @@ public class ProjectService {
     return project;
   }
 
+  /**
+   * 삭제 표시만 한다. 진행 중인 실험이 있으면 409 — 실행 중인 회차의 프로젝트가 사라지면 안 된다.
+   * 프로젝트 행을 먼저 잠그므로 같은 프로젝트의 실험 요청과 차례로 처리된다. 잠근 뒤에 읽으므로 확인 직후 새 실험이
+   * 생기는 경우가 없다 (실험 요청도 같은 행을 잠근다는 전제, design-decision 5.2 · 5.3).
+   */
+  @Transactional
+  public void deleteProject(Long userId, Long projectId) {
+    Project project = projectRepository.findForUpdate(projectId, userId)
+        .orElseThrow(() -> new ApiException(ErrorCode.PROJECT_NOT_FOUND));
+    if (runRepository.existsInProgressByProjectId(projectId)) {
+      throw new ApiException(ErrorCode.EXPERIMENT_IN_PROGRESS);
+    }
+    project.delete();
+  }
+
   @Transactional(readOnly = true)
   public Project getProject(Long userId, Long projectId) {
-    return projectRepository.findByIdAndUserId(projectId, userId)
+    return projectRepository.findByIdAndUserIdAndDeletedAtIsNull(projectId, userId)
         .orElseThrow(() -> new ApiException(ErrorCode.PROJECT_NOT_FOUND));
   }
 
   @Transactional(readOnly = true)
   public List<Project> getProjectsByUser(Long userId) {
-    return projectRepository.findByUserIdOrderByIdDesc(userId);
+    return projectRepository.findByUserIdAndDeletedAtIsNullOrderByIdDesc(userId);
   }
 }

@@ -30,6 +30,7 @@ import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
@@ -376,6 +377,117 @@ class ProjectControllerTest {
   }
 
   // 수정은 커밋 때 dirty checking 으로 UPDATE 되는데 테스트 트랜잭션은 커밋하지 않는다 — JdbcTemplate 으로 DB 를 보기 전에 flush 한다.
+  // ───────── DELETE /api/projects/{projectId} ─────────
+
+  @Test
+  void delete_marksDeletedAt_keepsRow_andHidesProjectEverywhere() throws Exception {
+    Long projectId = insertOriginalProject();
+    Long kept = insertProject(userId, "남는 프로젝트", "https://k.example.com", null);
+
+    delete(projectId).andExpect(status().isNoContent());
+
+    // 행은 남고 삭제 시각만 기록된다 — 지난 실험의 Task · 회차가 참조한다
+    assertThat(jdbcTemplate.queryForObject("SELECT deleted_at IS NOT NULL FROM projects WHERE project_id = ?",
+        Boolean.class, projectId)).isTrue();
+
+    mvc.perform(get("/api/projects").header(HttpHeaders.AUTHORIZATION, bearer))
+        .andExpect(jsonPath("$.projects[*].projectId").value(contains(kept.intValue())));
+    mvc.perform(get("/api/projects/{projectId}", projectId).header(HttpHeaders.AUTHORIZATION, bearer))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("PRJ-ERR-001"));
+    update(projectId, "{\"title\":\"되살리기\"}")
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("PRJ-ERR-001"));
+    delete(projectId)
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("PRJ-ERR-001"));
+  }
+
+  @Test
+  void delete_thenExperimentRequest_returnsProjectNotFound() throws Exception {
+    Long projectId = insertOriginalProject();
+    delete(projectId).andExpect(status().isNoContent());
+
+    mvc.perform(post("/api/projects/{projectId}/runs", projectId).header(HttpHeaders.AUTHORIZATION, bearer)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"goal\":\"구매\",\"successUrl\":\"https://a.example.com/done\",\"personaIds\":[1],"
+                + "\"mode\":\"diagnose\"}"))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("PRJ-ERR-001"));
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"queued", "accepted", "running"})
+  void delete_withInProgressRun_returnsConflict_andKeepsProject(String status) throws Exception {
+    Long projectId = insertOriginalProject();
+    insertRun(projectId, "done");      // 끝난 이전 실험
+    insertRun(projectId, status);      // 진행 중인 실험
+
+    delete(projectId)
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("EXP-ERR-004"))
+        .andExpect(jsonPath("$.message").value("프로젝트에 진행 중인 실험이 있습니다."));
+    assertThat(jdbcTemplate.queryForObject("SELECT deleted_at FROM projects WHERE project_id = ?", String.class,
+        projectId)).isNull();
+  }
+
+  @Test
+  void delete_withCancelRequestedButStillRunning_returnsConflict() throws Exception {
+    Long projectId = insertOriginalProject();
+    insertRun(projectId, "running");
+    jdbcTemplate.update("UPDATE runs SET cancel_requested = TRUE WHERE project_id = ?", projectId);
+
+    delete(projectId).andExpect(status().isConflict());
+  }
+
+  @Test
+  void delete_withOnlyFinishedRuns_succeeds() throws Exception {
+    Long projectId = insertOriginalProject();
+    insertRun(projectId, "done");
+    insertRun(projectId, "failed");
+    insertRun(projectId, "cancelled");
+
+    delete(projectId).andExpect(status().isNoContent());
+  }
+
+  @Test
+  void delete_othersOrMissingProject_returnsNotFound() throws Exception {
+    Long othersProject = insertProject(insertUser("other@uxight.com"), "남의 프로젝트", "https://c.example.com", null);
+
+    delete(othersProject)
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("PRJ-ERR-001"));
+    delete(Long.MAX_VALUE)
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("PRJ-ERR-001"));
+    assertThat(jdbcTemplate.queryForObject("SELECT deleted_at FROM projects WHERE project_id = ?", String.class,
+        othersProject)).isNull();
+  }
+
+  @Test
+  void delete_withoutToken_returnsUnauthorized() throws Exception {
+    mvc.perform(MockMvcRequestBuilders.delete("/api/projects/{projectId}", insertOriginalProject()))
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("AUT-ERR-001"));
+  }
+
+  private ResultActions delete(Long projectId) throws Exception {
+    ResultActions result = mvc.perform(MockMvcRequestBuilders.delete("/api/projects/{projectId}", projectId)
+        .header(HttpHeaders.AUTHORIZATION, bearer));
+    entityManager.flush();
+    return result;
+  }
+
+  private void insertRun(Long projectId, String status) {
+    jdbcTemplate.update("INSERT INTO tasks (project_id, goal, success_rule, success_url) "
+        + "VALUES (?, '구매', 'rule', 'https://a.example.com/done')", projectId);
+    Long taskId = jdbcTemplate.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+    jdbcTemplate.update("INSERT INTO runs (project_id, task_id, mode, target_url_snapshot, allowed_domains_snapshot, "
+        + "task_snapshot, policy_snapshot, persona_snapshot, status) "
+        + "VALUES (?, ?, 'diagnose', 'https://a.example.com', JSON_ARRAY(), JSON_OBJECT(), JSON_OBJECT(), JSON_ARRAY(), ?)",
+        projectId, taskId, status);
+  }
+
   private ResultActions update(Long projectId, String json) throws Exception {
     ResultActions result = mvc.perform(patch("/api/projects/{projectId}", projectId)
         .header(HttpHeaders.AUTHORIZATION, bearer)

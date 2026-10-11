@@ -7,6 +7,7 @@ import com.uxight.api.web.common.AuthConst;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -49,6 +50,13 @@ public class ProjectController {
   public ProjectDetail updateProject(@PathVariable Long projectId, @Valid @RequestBody ProjectUpdateRequest request,
       @RequestAttribute(AuthConst.LOGIN_USER_ID) Long userId) {
     return ProjectDetail.from(projectService.updateProject(userId, projectId, request));
+  }
+
+  /** 삭제 표시만 한다. 남의 · 이미 삭제한 프로젝트는 404, 진행 중인 실험이 있으면 409 EXP-ERR-004. */
+  @DeleteMapping("/{projectId}")
+  @ResponseStatus(HttpStatus.NO_CONTENT)
+  public void deleteProject(@PathVariable Long projectId, @RequestAttribute(AuthConst.LOGIN_USER_ID) Long userId) {
+    projectService.deleteProject(userId, projectId);
   }
 
   @GetMapping("/{projectId}")
