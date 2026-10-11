@@ -7,6 +7,7 @@ import static org.hamcrest.Matchers.hasKey;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -14,6 +15,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.uxight.api.domain.user.JwtProvider;
+import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -51,6 +53,9 @@ class ProjectControllerTest {
 
   @Autowired
   private ObjectMapper objectMapper;
+
+  @Autowired
+  private EntityManager entityManager;
 
   private Long userId;
   private String bearer;
@@ -230,6 +235,161 @@ class ProjectControllerTest {
     mvc.perform(get("/api/projects/{projectId}", othersProject).header(HttpHeaders.AUTHORIZATION, bearer))
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.code").value("PRJ-ERR-001"));
+  }
+
+  // ───────── PATCH /api/projects/{projectId} ─────────
+
+  @Test
+  void update_changesOnlySentFields() throws Exception {
+    Long projectId = insertOriginalProject();
+
+    update(projectId, "{\"title\":\"새 제목\"}")
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.projectId").value(projectId))
+        .andExpect(jsonPath("$.title").value("새 제목"))
+        .andExpect(jsonPath("$.targetUrl").value("https://a.example.com/start"))
+        .andExpect(jsonPath("$.description").value("원래 설명"))
+        .andExpect(jsonPath("$.allowedDomains").value(contains("a.example.com", "b.example.com")));
+
+    Map<String, Object> row = jdbcTemplate.queryForMap(
+        "SELECT title, target_url, description FROM projects WHERE project_id = ?", projectId);
+    assertThat(row).containsEntry("title", "새 제목")
+        .containsEntry("target_url", "https://a.example.com/start")
+        .containsEntry("description", "원래 설명");
+  }
+
+  @Test
+  void update_withEmptyBody_changesNothing() throws Exception {
+    Long projectId = insertOriginalProject();
+
+    update(projectId, "{}")
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.title").value("원래 제목"))
+        .andExpect(jsonPath("$.description").value("원래 설명"));
+  }
+
+  @Test
+  void update_descriptionNull_clearsDescription() throws Exception {
+    Long projectId = insertOriginalProject();
+
+    update(projectId, "{\"description\":null}")
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.description").value(nullValue()))
+        .andExpect(jsonPath("$.title").value("원래 제목"));
+    assertThat(jdbcTemplate.queryForObject("SELECT description FROM projects WHERE project_id = ?", String.class,
+        projectId)).isNull();
+  }
+
+  @Test
+  void update_targetUrlOnly_putsNewHostFirst_andKeepsExistingDomains() throws Exception {
+    Long projectId = insertOriginalProject();
+
+    update(projectId, "{\"targetUrl\":\"https://New.example.com/x\"}")
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.targetUrl").value("https://New.example.com/x"))
+        .andExpect(jsonPath("$.allowedDomains").value(contains("new.example.com", "a.example.com", "b.example.com")));
+    assertThat(allowedDomainsOf(projectId)).containsExactly("new.example.com", "a.example.com", "b.example.com");
+  }
+
+  @Test
+  void update_targetUrlAndAllowedDomains_replacesListWithNewHostFirst() throws Exception {
+    Long projectId = insertOriginalProject();
+
+    update(projectId, "{\"targetUrl\":\"https://new.example.com\","
+        + "\"allowedDomains\":[\"https://pay.example.com/checkout\",\"NEW.example.com\"]}")
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.allowedDomains").value(contains("new.example.com", "pay.example.com")));
+  }
+
+  @Test
+  void update_allowedDomainsOnly_keepsCurrentTargetHost() throws Exception {
+    Long projectId = insertOriginalProject();
+
+    update(projectId, "{\"allowedDomains\":[]}")
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.allowedDomains").value(contains("a.example.com")));
+  }
+
+  @ParameterizedTest(name = "[{index}] {1}")
+  @MethodSource("invalidUpdateRequests")
+  void update_invalidField_returnsInvalidInput_andChangesNothing(String json, String field) throws Exception {
+    Long projectId = insertOriginalProject();
+
+    update(projectId, json)
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("GLB-ERR-002"))
+        .andExpect(jsonPath("$.fieldErrors[*].field").value(contains(field)));
+
+    Map<String, Object> row = jdbcTemplate.queryForMap(
+        "SELECT title, target_url, description FROM projects WHERE project_id = ?", projectId);
+    assertThat(row).containsEntry("title", "원래 제목")
+        .containsEntry("target_url", "https://a.example.com/start")
+        .containsEntry("description", "원래 설명");
+    assertThat(allowedDomainsOf(projectId)).containsExactly("a.example.com", "b.example.com");
+  }
+
+  static Stream<Arguments> invalidUpdateRequests() {
+    return Stream.of(
+        // description 외에는 null 로 지울 수 없다
+        Arguments.of("{\"title\":null}", "title"),
+        Arguments.of("{\"title\":\"\"}", "title"),
+        Arguments.of("{\"title\":\" 앞 공백\"}", "title"),
+        Arguments.of("{\"title\":\"" + "가".repeat(101) + "\"}", "title"),
+        Arguments.of("{\"targetUrl\":null}", "targetUrl"),
+        Arguments.of("{\"targetUrl\":\"javascript:alert(1)\"}", "targetUrl"),
+        // 시작 URL 은 바꾸고 제목은 그대로 두려 해도, 한 항목이 틀리면 아무것도 바꾸지 않는다
+        Arguments.of("{\"title\":\"새 제목\",\"targetUrl\":\"https://exa mple.com\"}", "targetUrl"),
+        Arguments.of("{\"description\":\"" + "가".repeat(1001) + "\"}", "description"),
+        Arguments.of("{\"allowedDomains\":null}", "allowedDomains"),
+        Arguments.of("{\"allowedDomains\":[\"\"]}", "allowedDomains[0]"),
+        Arguments.of("{\"allowedDomains\":[\"ok.example.com\",\"https://exa mple.com\"]}", "allowedDomains[1]"));
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"{\"title\":", "{\"allowedDomains\":\"a.com\"}", "[]"})
+  void update_unreadableBody_returnsBadRequest(String json) throws Exception {
+    update(insertOriginalProject(), json)
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("GLB-ERR-001"));
+  }
+
+  @Test
+  void update_othersOrMissingProject_returnsNotFound() throws Exception {
+    Long othersProject = insertProject(insertUser("other@uxight.com"), "남의 프로젝트", "https://c.example.com", null);
+
+    update(othersProject, "{\"title\":\"가로채기\"}")
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("PRJ-ERR-001"));
+    update(Long.MAX_VALUE, "{\"title\":\"없음\"}")
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("PRJ-ERR-001"));
+    assertThat(jdbcTemplate.queryForObject("SELECT title FROM projects WHERE project_id = ?", String.class,
+        othersProject)).isEqualTo("남의 프로젝트");
+  }
+
+  @Test
+  void update_withoutToken_returnsUnauthorized() throws Exception {
+    mvc.perform(patch("/api/projects/{projectId}", insertOriginalProject())
+            .contentType(MediaType.APPLICATION_JSON).content("{}"))
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("AUT-ERR-001"));
+  }
+
+  // 수정은 커밋 때 dirty checking 으로 UPDATE 되는데 테스트 트랜잭션은 커밋하지 않는다 — JdbcTemplate 으로 DB 를 보기 전에 flush 한다.
+  private ResultActions update(Long projectId, String json) throws Exception {
+    ResultActions result = mvc.perform(patch("/api/projects/{projectId}", projectId)
+        .header(HttpHeaders.AUTHORIZATION, bearer)
+        .contentType(MediaType.APPLICATION_JSON)
+        .content(json));
+    entityManager.flush();
+    return result;
+  }
+
+  private Long insertOriginalProject() {
+    jdbcTemplate.update("INSERT INTO projects (user_id, title, target_url, description, allowed_domains) "
+        + "VALUES (?, '원래 제목', 'https://a.example.com/start', '원래 설명', JSON_ARRAY('a.example.com', 'b.example.com'))",
+        userId);
+    return jdbcTemplate.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
   }
 
   private ResultActions create(String json) throws Exception {

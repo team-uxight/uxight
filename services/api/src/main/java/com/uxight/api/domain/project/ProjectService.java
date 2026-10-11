@@ -29,6 +29,28 @@ public class ProjectService {
     return projectRepository.save(project).getId();
   }
 
+  /** 보낸 항목만 바꾼다. 변경은 커밋 때 dirty checking 으로 UPDATE 된다. 아무것도 보내지 않으면 그대로 돌려준다. */
+  @Transactional
+  public Project updateProject(Long userId, Long projectId, ProjectUpdateRequest request) {
+    Project project = getProject(userId, projectId);
+    // Optional.empty()(null 을 보냄)는 Bean Validation 이 description 외에는 막았다.
+    // 호스트를 읽을 수 없어 400 이 날 수 있는 두 항목을 먼저 바꾼다 (실패하면 트랜잭션이 롤백되어 아무것도 바뀌지 않는다).
+    // 시작 URL 을 허용 도메인보다 먼저 바꿔야 둘을 함께 보냈을 때 새 시작 URL 의 호스트가 들어간다.
+    if (request.getTargetUrl() != null) {
+      project.changeTargetUrl(request.getTargetUrl().orElseThrow());
+    }
+    if (request.getAllowedDomains() != null) {
+      project.changeAllowedDomains(request.getAllowedDomains().orElseThrow());
+    }
+    if (request.getTitle() != null) {
+      project.changeTitle(request.getTitle().orElseThrow());
+    }
+    if (request.getDescription() != null) {
+      project.changeDescription(request.getDescription().orElse(null));
+    }
+    return project;
+  }
+
   @Transactional(readOnly = true)
   public Project getProject(Long userId, Long projectId) {
     return projectRepository.findByIdAndUserId(projectId, userId)

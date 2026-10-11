@@ -2,11 +2,13 @@ package com.uxight.api.web.project;
 
 import com.uxight.api.domain.project.ProjectCreateRequest;
 import com.uxight.api.domain.project.ProjectService;
+import com.uxight.api.domain.project.ProjectUpdateRequest;
 import com.uxight.api.web.common.AuthConst;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -40,6 +42,13 @@ public class ProjectController {
   public ProjectCreateResponse createProject(@Valid @RequestBody ProjectCreateRequest request,
       @RequestAttribute(AuthConst.LOGIN_USER_ID) Long userId) {
     return new ProjectCreateResponse(projectService.createProject(userId, request));
+  }
+
+  /** 보낸 항목만 바꾼다. 남의 프로젝트는 없는 것과 같다 (404 PRJ-ERR-001). */
+  @PatchMapping("/{projectId}")
+  public ProjectDetail updateProject(@PathVariable Long projectId, @Valid @RequestBody ProjectUpdateRequest request,
+      @RequestAttribute(AuthConst.LOGIN_USER_ID) Long userId) {
+    return ProjectDetail.from(projectService.updateProject(userId, projectId, request));
   }
 
   @GetMapping("/{projectId}")
