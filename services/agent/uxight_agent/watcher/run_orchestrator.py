@@ -26,6 +26,9 @@ CANCEL_POLL_SECONDS = 2
 DEFAULT_MAX_STEPS = 20
 DEFAULT_MAX_SECONDS = 600
 
+# 브라우저 닫기 상한(초). 시간 상한 밖이라 따로 둔다.
+BROWSER_CLOSE_TIMEOUT_SECONDS = 10
+
 # 프로세스 전역 Persona 동시 상한. 회차마다 세마포어를 만들면 회차가 늘수록 동시 브라우저 수가
 # 곱해져 RAM 상한이 무너진다 (architecture §3.1). 모든 회차의 Persona 가 이 자리를 나눠 쓴다.
 persona_slots = asyncio.Semaphore(settings.max_concurrent_personas)
@@ -67,14 +70,22 @@ class RunOrchestrator:
     def close_interrupted_runs(self) -> None:
         """agent 시작 시 한 번만 부른다 — 실행 중인 회차가 없을 때여야 한다.
 
-        이전 프로세스가 accepted · running 으로 남긴 회차를 failed 로 마감한다. 재개는 하지 않는다
+        이전 프로세스가 accepted · running 으로 남긴 회차를 failed 로 마감한다. 취소 요청된 회차는
+        cancelled 로 마감한다 (V1__init_schema.sql runs.status 주석). 재개는 하지 않는다
         (architecture §3.3). §3.3 은 같은 스캔에서 queued · accepted 를 집어 실행한다고 적었지만
         다르게 한다 — queued 는 Spring 재전송이 맡으므로 건드리지 않고, accepted 는 수락과 시작
-        사이에 멈춘 경우뿐이라 실행하지 않고 실패로 마감한다.
+        사이에 멈춘 경우뿐이라 실행하지 않고 running 과 같이 마감한다.
         """
         for run_id in run_repository.get_unfinished_run_ids():
-            logger.warning("run=%s interrupted by restart, closing as failed", run_id)
-            self._fail_run(run_id, error="interrupted")
+            if run_repository.is_cancel_requested(run_id):
+                logger.warning(
+                    "run=%s cancel requested before restart, closing as cancelled", run_id
+                )
+                self._finish_running_personas(run_id, "cancelled")
+                run_repository.cancel_unfinished(run_id)
+            else:
+                logger.warning("run=%s interrupted by restart, closing as failed", run_id)
+                self._fail_run(run_id, error="interrupted")
 
     async def run_personas(self, run_id: int, snapshot: RunSnapshot) -> None:
         # 202 로 수락한 뒤라 여기서 난 예외는 Spring 에 닿지 않는다. 어디서 예외가 나든
@@ -138,10 +149,14 @@ class RunOrchestrator:
 
     def _fail_run(self, run_id: int, error: str) -> None:
         # running 으로 남은 페르소나를 fail 로 정리한 뒤 회차를 failed 로 마감한다.
+        self._finish_running_personas(run_id, "fail")
+        run_repository.fail_unfinished(run_id, error=error)
+
+    @staticmethod
+    def _finish_running_personas(run_id: int, outcome: PersonaOutcome) -> None:
         for persona_id, status in run_persona_repository.get_statuses(run_id).items():
             if status == "running":
-                run_persona_repository.mark_finished(run_id, persona_id, "fail")
-        run_repository.fail_unfinished(run_id, error=error)
+                run_persona_repository.mark_finished(run_id, persona_id, outcome)
 
     def _finish_run(self, run_id: int) -> None:
         statuses = run_persona_repository.get_statuses(run_id)
@@ -234,6 +249,25 @@ class RunOrchestrator:
                 if acquired:
                     persona_slots.release()
 
+    @contextlib.asynccontextmanager
+    async def _open_driver(self, run_id: int, persona_id: int) -> AsyncIterator[DomDriver]:
+        """나갈 때 브라우저를 닫되 BROWSER_CLOSE_TIMEOUT_SECONDS 까지만 기다린다."""
+        driver = DomDriver()
+        try:
+            yield driver
+        finally:
+            # 닫기가 멈추면 자리를 쥔 채 결과 기록까지 막히고, 그동안 감시 태스크가 heartbeat 를
+            # 계속 써서 멈춤(stale) 표시도 뜨지 않는다. 상한을 넘으면 브라우저가 남더라도 진행한다.
+            try:
+                await asyncio.wait_for(driver.close(), BROWSER_CLOSE_TIMEOUT_SECONDS)
+            except TimeoutError:
+                logger.warning(
+                    "run=%s persona=%s browser close exceeded %ss, continuing",
+                    run_id,
+                    persona_id,
+                    BROWSER_CLOSE_TIMEOUT_SECONDS,
+                )
+
     async def _drive_persona(
         self,
         run_id: int,
@@ -248,8 +282,9 @@ class RunOrchestrator:
         step_log_writer.prepare(run_id, persona_id)
         # 어느 경로로 return하든 async with를 빠져나가며 브라우저(컨텍스트, 페이지 포함)를 폐기한다.
         # 시간 상한은 자리를 잡은 뒤 브라우저 시작부터 잰다. 넘으면 진행 중인 스텝을 끊고
-        # TimeoutError 로 빠져나간다. 브라우저 닫기는 상한이 풀린 뒤라 도중에 끊기지 않는다.
-        async with DomDriver() as driver, asyncio.timeout(max_seconds):
+        # TimeoutError 로 빠져나간다. 브라우저 닫기는 시간 상한이 풀린 뒤라 그 상한에는 끊기지 않고
+        # 닫기 상한(BROWSER_CLOSE_TIMEOUT_SECONDS)만 따른다.
+        async with self._open_driver(run_id, persona_id) as driver, asyncio.timeout(max_seconds):
             started, _ = await self._run_unless_cancelled(driver.start(target_url), cancel_event)
             if not started:
                 logger.info("run=%s persona=%s 브라우저 시작 중단", run_id, persona_id)

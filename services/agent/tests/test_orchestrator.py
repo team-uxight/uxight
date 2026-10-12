@@ -230,6 +230,31 @@ def test_browser_close_is_outside_max_seconds(fakes: SimpleNamespace) -> None:
     assert fakes.browsers.open == 0
 
 
+@pytest.mark.parametrize(
+    ("step_seconds", "outcome", "run_status"),
+    [(0, "max_steps", "done"), (HANG_SECONDS, "timeout", "failed")],
+    ids=["after-steps", "after-max-seconds"],
+)
+def test_hung_browser_close_does_not_block_result(
+    fakes: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    step_seconds: float,
+    outcome: str,
+    run_status: str,
+) -> None:
+    # 닫기가 끝나지 않는다 — 닫기 상한 뒤 진행해 결과를 기록하고 자리를 돌려준다.
+    # 시간 상한에 걸린 뒤라도 닫기 상한이 페르소나 결과(timeout)를 바꾸지 않는다.
+    monkeypatch.setattr(orchestrator_module, "BROWSER_CLOSE_TIMEOUT_SECONDS", 0.2)
+    fakes.browsers.close_seconds = HANG_SECONDS
+    snap = snapshot([persona(1, step_seconds)], max_steps=1, max_seconds=0.2)
+
+    asyncio.run(run(fakes, RUN_ID, snap))
+
+    assert fakes.personas.statuses == {1: outcome}
+    assert fakes.runs.status == run_status
+    assert free_global_slots() == 3
+
+
 @pytest.mark.parametrize("slots_held_by_other_runs", [0, 2], ids=["running", "waiting-for-slot"])
 def test_cancel_stops_all_personas_quickly(
     fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, slots_held_by_other_runs: int

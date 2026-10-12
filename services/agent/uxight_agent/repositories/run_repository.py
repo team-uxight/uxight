@@ -85,6 +85,17 @@ class RunRepository:
                 {"run_id": run_id, "error": error},
             )
 
+    def cancel_unfinished(self, run_id: int) -> None:
+        # mark_cancelled 와 달리 accepted 회차도 마감한다 — 재시작 정리에서 쓴다.
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "UPDATE runs SET status = 'cancelled', finished_at = NOW() "
+                    "WHERE run_id = :run_id AND status IN ('accepted', 'running')"
+                ),
+                {"run_id": run_id},
+            )
+
     def get_unfinished_run_ids(self) -> list[int]:
         # 수락했지만 끝나지 않은 회차. queued 는 아직 수락 전이라 넣지 않는다.
         with engine.begin() as conn:

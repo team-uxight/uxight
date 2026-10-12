@@ -1,6 +1,7 @@
 """재시작 정리 · 수락 직후 예외 (GACA-110 후속). 가짜 저장소로 DB 없이 돈다.
 
 시작 정리: accepted · running 회차는 failed, 그 running 페르소나는 fail, queued 는 그대로.
+취소 요청된 accepted · running 회차는 cancelled, 그 running 페르소나도 cancelled.
 수락 직후 예외: 회차를 accepted · running 으로 남기지 않고, 응답에 예외 문구를 싣지 않는다.
 """
 
@@ -29,9 +30,10 @@ SNAPSHOT = RunSnapshot(
 class FakeRunRepository:
     """runs 여러 행을 메모리에 둔다. 상태 전이 조건은 실제 SQL 과 같다."""
 
-    def __init__(self, statuses: dict[int, str]) -> None:
+    def __init__(self, statuses: dict[int, str], cancel_requested: set[int]) -> None:
         self.statuses = dict(statuses)
         self.errors: dict[int, str] = {}
+        self.cancel_requested = set(cancel_requested)
 
     def accept_if_queued(self, run_id: int) -> bool:
         if self.statuses.get(run_id) != "queued":
@@ -57,6 +59,13 @@ class FakeRunRepository:
             self.statuses[run_id] = "failed"
             self.errors[run_id] = error
 
+    def is_cancel_requested(self, run_id: int) -> bool:
+        return run_id in self.cancel_requested
+
+    def cancel_unfinished(self, run_id: int) -> None:
+        if self.statuses[run_id] in UNFINISHED:
+            self.statuses[run_id] = "cancelled"
+
 
 class FakeRunPersonaRepository:
     """run_personas 행을 회차별로 메모리에 둔다. running 인 행만 종료 상태로 바뀐다."""
@@ -79,8 +88,9 @@ def install(
     monkeypatch: pytest.MonkeyPatch,
     run_statuses: dict[int, str],
     persona_rows: dict[int, dict[int, str]] | None = None,
+    cancel_requested: set[int] | None = None,
 ) -> tuple[FakeRunRepository, FakeRunPersonaRepository]:
-    runs = FakeRunRepository(run_statuses)
+    runs = FakeRunRepository(run_statuses, cancel_requested or set())
     personas = FakeRunPersonaRepository(persona_rows or {})
     monkeypatch.setattr(orchestrator_module, "run_repository", runs)
     monkeypatch.setattr(orchestrator_module, "run_persona_repository", personas)
@@ -101,6 +111,24 @@ def test_startup_cleanup_fails_accepted_and_running_runs(monkeypatch: pytest.Mon
     assert runs.statuses == {1: "failed", 2: "failed", 3: "queued", 4: "done"}
     assert runs.errors == {1: "interrupted", 2: "interrupted"}
     assert personas.rows == {1: {10: "fail", 11: "max_steps"}, 4: {12: "done"}}
+
+
+def test_startup_cleanup_cancels_runs_with_cancel_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 취소 요청 뒤 재시작으로 끊긴 회차는 실패가 아니라 취소다
+    # (V1__init_schema.sql runs.status 주석).
+    runs, personas = install(
+        monkeypatch,
+        {1: "running", 2: "accepted", 3: "running", 4: "queued", 5: "done"},
+        {1: {10: "running", 11: "done"}, 3: {12: "running"}, 5: {13: "done"}},
+        cancel_requested={1, 2, 4, 5},
+    )
+
+    RunOrchestrator().close_interrupted_runs()
+
+    # 취소 요청이 없는 3 은 지금대로 failed. queued · done 은 취소 요청이 있어도 그대로.
+    assert runs.statuses == {1: "cancelled", 2: "cancelled", 3: "failed", 4: "queued", 5: "done"}
+    assert runs.errors == {3: "interrupted"}
+    assert personas.rows == {1: {10: "cancelled", 11: "done"}, 3: {12: "fail"}, 5: {13: "done"}}
 
 
 def test_app_startup_runs_cleanup_once(monkeypatch: pytest.MonkeyPatch) -> None:
