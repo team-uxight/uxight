@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: UXight REST API (FE-BE)
-  version: 0.3.0
+  version: 0.4.0
   description: |-
     UXight 프로젝트에서 프론트엔드(SPA)와 백엔드(Spring) 간 통신에 사용되는 REST API 명세이다.
     기준 문서는 '서비스 REST API 설계'(7.3)와 '오류 코드 및 오류 파일 설계'(8.4)이고, 두 문서에 없는 동작은 design-decision.md를 따른다.
@@ -34,6 +34,7 @@ tags:
   - name: 로그아웃
   - name: 대시보드
   - name: 프로젝트 관리
+  - name: Persona 관리
   - name: 실험 관리
   - name: 행동 로그 관리
   - name: 진단 관리
@@ -335,22 +336,6 @@ paths:
                 EXP-ERR-004:
                   $ref: "#/components/examples/EXP-ERR-004"
 
-  /api/personas:
-    get:
-      tags: [프로젝트 관리]
-      operationId: listPersonas
-      summary: Persona 목록 조회
-      description: 실험 요청 폼의 Persona 선택 목록이다. 본인 소유 Persona와 공용 Persona를 함께 조회한다.
-      responses:
-        "200":
-          description: 조회 성공
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PersonaListResponse"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-
   /api/projects/{projectId}/test-accounts:
     parameters:
       - $ref: "#/components/parameters/ProjectId"
@@ -440,7 +425,72 @@ paths:
                 EXP-ERR-004:
                   $ref: "#/components/examples/EXP-ERR-004"
 
-  # ───────── 6. 실험 관리 ─────────
+  # ───────── 6. Persona 관리 ─────────
+
+  /api/personas:
+    get:
+      tags: [Persona 관리]
+      operationId: listPersonas
+      summary: Persona 목록 조회
+      description: 본인 소유 Persona와 공용 Persona를 함께 조회한다. 삭제한 Persona는 제외한다. Persona 관리 화면의 목록과 실험 요청 폼의 Persona 선택 목록에 쓴다.
+      responses:
+        "200":
+          description: 조회 성공
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PersonaListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      tags: [Persona 관리]
+      operationId: createPersona
+      summary: Persona 생성
+      description: 요청한 리서처 소유의 Persona를 생성한다. 이름과 속성이 같은 Persona도 생성할 수 있다. 생성한 Persona는 수정할 수 없으며, 바꾸려면 삭제한 뒤 다시 생성한다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PersonaCreateRequest"
+      responses:
+        "201":
+          description: 생성 완료
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PersonaCreateResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/personas/{personaId}:
+    parameters:
+      - $ref: "#/components/parameters/PersonaIdPath"
+    delete:
+      tags: [Persona 관리]
+      operationId: deletePersona
+      summary: Persona 삭제
+      description: |-
+        행을 지우지 않고 삭제 표시만 한다. 삭제한 Persona는 목록 조회와 새 실험 요청에서 제외한다.
+        진행 중이거나 승인 대기 중인 실험에서 쓰는 Persona도 삭제할 수 있으며, 그 실험은 실험 요청 시점의 Persona 스냅샷으로 다음 회차까지 진행된다.
+      responses:
+        "204":
+          description: 삭제 완료
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: "EXP-ERR-003: Persona가 없거나, 본인 소유가 아니거나(공용 Persona 포함), 이미 삭제됨"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                EXP-ERR-003:
+                  $ref: "#/components/examples/EXP-ERR-003"
+
+  # ───────── 7. 실험 관리 ─────────
 
   /api/projects/{projectId}/runs:
     parameters:
@@ -473,7 +523,7 @@ paths:
         "404":
           description: |-
             - PRJ-ERR-001: 프로젝트가 없거나 본인 소유가 아님
-            - EXP-ERR-003: 선택한 Persona가 없거나, 본인 소유도 공용도 아님
+            - EXP-ERR-003: 선택한 Persona가 없거나, 본인 소유도 공용도 아니거나, 삭제됨
           content:
             application/json:
               schema:
@@ -667,7 +717,7 @@ paths:
         "404":
           $ref: "#/components/responses/ExperimentNotFound"
 
-  # ───────── 7. 행동 로그 관리 ─────────
+  # ───────── 8. 행동 로그 관리 ─────────
 
   /api/admin/runs/{runId}/personas/{personaId}/steps:
     parameters:
@@ -741,7 +791,7 @@ paths:
                 LOG-ERR-002:
                   $ref: "#/components/examples/LOG-ERR-002"
 
-  # ───────── 8. 진단 관리 ─────────
+  # ───────── 9. 진단 관리 ─────────
 
   /api/runs/{runId}/findings:
     parameters:
@@ -849,7 +899,7 @@ paths:
                 LOG-ERR-002:
                   $ref: "#/components/examples/LOG-ERR-002"
 
-  # ───────── 9. 개선안/다음 회차 관리 ─────────
+  # ───────── 10. 개선안/다음 회차 관리 ─────────
 
   /api/runs/{runId}/improvements:
     parameters:
@@ -953,7 +1003,7 @@ paths:
                 EXP-ERR-005:
                   $ref: "#/components/examples/EXP-ERR-005"
 
-  # ───────── 10. 결과 관리 ─────────
+  # ───────── 11. 결과 관리 ─────────
 
   /api/runs/{firstRunId}/comparison:
     parameters:
@@ -1039,7 +1089,7 @@ paths:
                 LOG-ERR-002:
                   $ref: "#/components/examples/LOG-ERR-002"
 
-  # ───────── 11. 계정 관리 ─────────
+  # ───────── 12. 계정 관리 ─────────
 
   /api/admin/users:
     get:
@@ -1102,7 +1152,7 @@ paths:
                 ACC-ERR-002:
                   $ref: "#/components/examples/ACC-ERR-002"
 
-  # ───────── 12. 정책 관리 ─────────
+  # ───────── 13. 정책 관리 ─────────
 
   /api/admin/policy:
     get:
@@ -1147,7 +1197,7 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
 
-  # ───────── 13. 실험 강제 중단 ─────────
+  # ───────── 14. 실험 강제 중단 ─────────
 
   /api/admin/runs/cancel-all:
     post:
@@ -1169,7 +1219,7 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
 
-  # ───────── 14. 감사 로그 관리 ─────────
+  # ───────── 15. 감사 로그 관리 ─────────
 
   /api/admin/audit-logs:
     get:
@@ -1947,16 +1997,8 @@ components:
         title:
           type: string
           maxLength: 100
-        targetUrl:
-          type: string
-          format: uri
-          maxLength: 2048
         description:
           type: [string, "null"]
-        allowedDomains:
-          type: array
-          items:
-            type: string
 
     Persona:
       type: object
@@ -1992,6 +2034,27 @@ components:
           description: 본인 소유 Persona와 공용 Persona 목록
           items:
             $ref: "#/components/schemas/Persona"
+
+    PersonaCreateRequest:
+      type: object
+      required: [name, profile]
+      properties:
+        name:
+          type: string
+          maxLength: 100
+          description: 표시 이름
+        profile:
+          type: object
+          additionalProperties: true
+          description: 속성 묶음. 형식은 Persona의 profile과 같으며, 속성별 형식과 길이 상한은 미정이다(GACA-66).
+
+    PersonaCreateResponse:
+      type: object
+      required: [personaId]
+      properties:
+        personaId:
+          type: integer
+          format: int64
 
     TestAccountCreateRequest:
       type: object
@@ -2061,7 +2124,7 @@ components:
           items:
             type: integer
             format: int64
-          description: 선택한 Persona ID 목록. 본인 소유 Persona와 공용 Persona만 선택할 수 있다.
+          description: 선택한 Persona ID 목록. 삭제되지 않은 본인 소유 Persona와 공용 Persona만 선택할 수 있다.
         mode:
           $ref: "#/components/schemas/Mode"
         loopMax:
@@ -2855,7 +2918,15 @@ components:
       type: object
       description: 전역 실행 한도. AI 모듈이 집행한다.
       required:
-        [maxSteps, maxSeconds, maxTokens, runConcurrency, dailyTokenBudget]
+        [
+          maxSteps,
+          maxSeconds,
+          maxTokens,
+          runConcurrency,
+          personaConcurrency,
+          rateLimitPerDomain,
+          dailyTokenBudget,
+        ]
       properties:
         maxSteps:
           type: integer
@@ -2869,6 +2940,12 @@ components:
         runConcurrency:
           type: integer
           description: 동시 실험(회차) 수
+        personaConcurrency:
+          type: integer
+          description: 회차 안의 동시 Persona 수
+        rateLimitPerDomain:
+          type: integer
+          description: 대상 도메인 당 요청 상한.
         dailyTokenBudget:
           type: integer
           format: int64
@@ -2885,6 +2962,10 @@ components:
         maxTokens:
           type: integer
         runConcurrency:
+          type: integer
+        personaConcurrency:
+          type: integer
+        rateLimitPerDomain:
           type: integer
         dailyTokenBudget:
           type: integer

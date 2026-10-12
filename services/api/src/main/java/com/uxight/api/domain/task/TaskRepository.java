@@ -1,6 +1,7 @@
 package com.uxight.api.domain.task;
 
-public interface TaskRepository {
+import org.springframework.data.jpa.repository.JpaRepository;
 
-  Long save(Task task);
+/** save 는 JpaRepository 가 제공한다. */
+public interface TaskRepository extends JpaRepository<Task, Long> {
 }

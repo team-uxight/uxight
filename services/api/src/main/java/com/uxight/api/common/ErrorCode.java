@@ -25,7 +25,9 @@ public enum ErrorCode {
   EXPERIMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "EXP-ERR-001", "실험을 찾을 수 없습니다."),
   PERSONA_NOT_FOUND(HttpStatus.NOT_FOUND, "EXP-ERR-003", "Persona를 찾을 수 없습니다."),
   EXPERIMENT_IN_PROGRESS(HttpStatus.CONFLICT, "EXP-ERR-004", "프로젝트에 진행 중인 실험이 있습니다."),
-  NOT_CANCELLABLE(HttpStatus.CONFLICT, "EXP-ERR-006", "취소할 수 있는 실험이 아닙니다.");
+  NOT_CANCELLABLE(HttpStatus.CONFLICT, "EXP-ERR-006", "취소할 수 있는 실험이 아닙니다."),
+  SUCCESS_RULE_FAILED(HttpStatus.BAD_GATEWAY, "EXP-ERR-007", "성공 기준 생성에 실패했습니다."),
+  SUCCESS_RULE_TIMEOUT(HttpStatus.GATEWAY_TIMEOUT, "EXP-ERR-008", "성공 기준 생성 시간이 초과되었습니다.");
 
   private final HttpStatus status;
   private final String code;

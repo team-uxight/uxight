@@ -9,9 +9,18 @@ spring:
     hibernate.ddl-auto: none   # 스키마는 Flyway 만 (소유권: api)
     open-in-view: false
   flyway.locations: classpath:db/migration
+  # 정수 칸에 소수(1.5)가 오면 잘라서(1) 받지 않고 400 GLB-ERR-001 로 거절한다 — 한도 · id 가 조용히 바뀌지 않게
+  jackson.deserialization.accept-float-as-int: false
 
 uxight:
   agent-base-url: ${AGENT_BASE_URL:http://localhost:8000}
+  internal-token: ${INTERNAL_TOKEN:}   # 내부 API(Spring ↔ AI 모듈) 공유 토큰 — X-Internal-Token 헤더로 보낸다. agent 와 같은 값이어야 한다
+  # queued 로 남은 회차 재전송 (design-decision 4.6). 기준 시간은 POST /runs 타임아웃(연결 5s + 응답 5s)보다 길게.
+  # 값은 설계 미결 — 프로젝트가 최대 (기준 시간 + 주기) 동안 점유되므로 짧게 잡는다. ISO-8601 기간 형식
+  redispatch:
+    enabled: true
+    stale-after: PT30S
+    interval: PT30S
   web-origin: ${WEB_ORIGIN:http://localhost:5173}
   auth:
     jwt-secret: ${JWT_SECRET:}       # HS256 키, 32바이트 이상. 비우면 기동마다 임의 키 (로컬 · 테스트용)
