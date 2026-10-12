@@ -71,8 +71,14 @@ public class RunController {
     // 빈 검색어는 조건 없음으로 본다 — 검색창을 비우고 보낸 요청이 아무것도 못 찾지 않게
     String trimmedKeyword = keyword == null || keyword.isBlank() ? null : keyword.strip();
     ExperimentFilter filter = new ExperimentFilter(state, trimmedKeyword, finishedFrom);
-    List<ExperimentSummary> content = runService.getRuns(userId, filter, page, size);
-    return PageResponse.of(content, page, size, runService.countRuns(userId, filter));
+    List<ExperimentSummary> content = runService.getExperiments(userId, filter, page, size);
+    return PageResponse.of(content, page, size, runService.countExperiments(userId, filter));
+  }
+
+  /** 실험의 회차 목록. 남의 · 삭제한 프로젝트의 실험이거나 최초 회차가 아닌 runId 면 404 EXP-ERR-001. */
+  @GetMapping("/api/runs/{firstRunId}/rounds")
+  public RoundListResponse rounds(@PathVariable Long firstRunId, @RequestAttribute(AuthConst.LOGIN_USER_ID) Long userId) {
+    return RoundListResponse.from(runService.getRounds(userId, firstRunId));
   }
 
   /** 실험 모니터링 · 실험 이력의 건수와 총 소요 토큰. 실험 목록과 같은 상태 계산을 쓴다. */

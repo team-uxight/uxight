@@ -4,6 +4,8 @@ import com.uxight.api.domain.run.ExperimentFilter;
 import com.uxight.api.domain.run.ExperimentQueryRepository;
 import com.uxight.api.domain.run.ExperimentStats;
 import com.uxight.api.domain.run.ExperimentSummary;
+import com.uxight.api.domain.run.RoundSummary;
+import com.uxight.api.domain.run.RunMetrics;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -13,6 +15,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 /** 실험 목록 · 건수 집계 SQL. 회차의 저장 · 변경은 RunRepository(JPA) 가 한다. */
 @Repository
@@ -85,6 +88,22 @@ public class JdbcTemplateExperimentQueryRepository implements ExperimentQueryRep
         FROM (%s) e
       """.formatted(EXPERIMENTS_SQL);
 
+  // 실험의 회차 — 본인 · 삭제하지 않은 프로젝트만(실험 목록과 같은 규칙). 몇 번째 회차인지는 runId 순번이다.
+  // 다음 회차는 이전 회차가 끝나고 승인된 뒤에만 생기므로 run_id 순서가 회차 순서와 같다.
+  // 지표는 Python 이 회차 종료 때 확정해 run_metrics 에 쓴다 — 아직 없으면 metric_run_id 가 NULL 이다.
+  private static final String ROUNDS_SQL = """
+      SELECT r.run_id, ROW_NUMBER() OVER (ORDER BY r.run_id) AS round_no, r.status, r.improvement_id,
+             r.created_at, r.finished_at,
+             m.run_id AS metric_run_id, m.success_rate, m.avg_steps, m.avg_backtracks, m.avg_seconds, m.tokens, m.cost_usd
+        FROM runs r
+        JOIN projects p ON p.project_id = r.project_id
+        LEFT JOIN run_metrics m ON m.run_id = r.run_id
+       WHERE r.first_run_id = ?
+         AND p.user_id = ?
+         AND p.deleted_at IS NULL
+       ORDER BY r.run_id
+      """;
+
   private final JdbcTemplate jdbcTemplate;
 
   @Autowired
@@ -118,6 +137,32 @@ public class JdbcTemplateExperimentQueryRepository implements ExperimentQueryRep
         rs.getLong("awaiting_approval_count"),
         rs.getLong("total_tokens"),
         thisWeekFrom), toDbTime(thisWeekFrom), userId);
+  }
+
+  @Override
+  public Optional<ExperimentSummary> findExperiment(Long userId, Long firstRunId) {
+    return jdbcTemplate.query("SELECT * FROM (" + EXPERIMENTS_SQL + ") e WHERE e.first_run_id = ?",
+            EXPERIMENT_ROW_MAPPER, userId, firstRunId)
+        .stream()
+        .findFirst();
+  }
+
+  @Override
+  public List<RoundSummary> findRounds(Long userId, Long firstRunId) {
+    return jdbcTemplate.query(ROUNDS_SQL, (rs, rowNum) -> new RoundSummary(
+        rs.getLong("run_id"),
+        rs.getInt("round_no"),
+        rs.getString("status"),
+        rs.getObject("improvement_id", Long.class),
+        rs.getObject("created_at", LocalDateTime.class),
+        rs.getObject("finished_at", LocalDateTime.class),
+        rs.getObject("metric_run_id") == null ? null : new RunMetrics(
+            rs.getBigDecimal("success_rate"),
+            rs.getBigDecimal("avg_steps"),
+            rs.getBigDecimal("avg_backtracks"),
+            rs.getBigDecimal("avg_seconds"),
+            rs.getObject("tokens", Long.class),
+            rs.getBigDecimal("cost_usd"))), firstRunId, userId);
   }
 
   private static List<Object> filterArgs(Long userId, ExperimentFilter filter) {

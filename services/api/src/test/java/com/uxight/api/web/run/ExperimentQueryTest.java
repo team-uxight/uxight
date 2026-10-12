@@ -112,7 +112,7 @@ class ExperimentQueryTest {
     assertThat(stats.get("awaitingApprovalCount").asLong()).isZero();    // 승인 기능 도입 전
     assertThat(stats.get("totalTokens").asLong()).isEqualTo(100 + 200 + 300 + 50 + 10 + 20);
     // 네 분류는 겹치지 않는다 — 중단(2건)까지 더하면 총 건수
-    assertThat(runService.countRuns(userId, new ExperimentFilter("stopped", null, null))).isEqualTo(2);
+    assertThat(runService.countExperiments(userId, new ExperimentFilter("stopped", null, null))).isEqualTo(2);
   }
 
   @Test
@@ -123,7 +123,7 @@ class ExperimentQueryTest {
     jdbcTemplate.update("UPDATE projects SET deleted_at = NOW() WHERE project_id = ?", deletedProject);
 
     assertThat(ids(ExperimentFilter.none())).containsExactly(kept);
-    assertThat(runService.countRuns(userId, ExperimentFilter.none())).isEqualTo(1);
+    assertThat(runService.countExperiments(userId, ExperimentFilter.none())).isEqualTo(1);
     JsonNode stats = stats();
     assertThat(stats.get("totalCount").asLong()).isEqualTo(1);
     assertThat(stats.get("totalTokens").asLong()).isEqualTo(10);   // 삭제한 프로젝트의 토큰도 빠진다
@@ -254,10 +254,84 @@ class ExperimentQueryTest {
         .andExpect(jsonPath("$.code").value("AUT-ERR-005"));
   }
 
-  // ───────── 목록 조건 (RunService.getRuns) ─────────
+  // ───────── GET /api/runs/{firstRunId}/rounds ─────────
 
   @Test
-  void getRuns_keyword_matchesProjectTitleOrTaskGoal_andTreatsWildcardsAsText() {
+  void rounds_listsRoundsInOrder_withAppliedImprovementAndMetrics() throws Exception {
+    Long project = insertProject(userId, "p");
+    Long first = insertExperiment(project, "done", false, null, LocalDateTime.of(2026, 10, 1, 10, 30));
+    Long second = insertNextRound(first, project, "done", null);
+    Long third = insertNextRound(first, project, "running", null);
+    jdbcTemplate.update("UPDATE runs SET improvement_id = 7, finished_at = '2026-10-02 11:00:00' WHERE run_id = ?", second);
+    jdbcTemplate.update("UPDATE runs SET improvement_id = 9 WHERE run_id = ?", third);
+    // 지표는 Python 이 회차 종료 때 확정한다 — 진행 중인 3회차는 아직 없다
+    jdbcTemplate.update("INSERT INTO run_metrics (run_id, success_rate, avg_steps, avg_backtracks, avg_seconds, tokens, "
+        + "cost_usd) VALUES (?, 66.67, 12.50, 1.00, 95.25, 3000, 0.0420)", first);
+    jdbcTemplate.update("INSERT INTO run_metrics (run_id, success_rate) VALUES (?, 100.00)", second);
+
+    mvc.perform(get("/api/runs/{firstRunId}/rounds", first).header(HttpHeaders.AUTHORIZATION, bearer))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.*", hasSize(2)))
+        .andExpect(jsonPath("$.awaitingApproval").value(false))   // 승인 기능 도입 전 — 상태 계산이 승인 대기를 내지 않는다
+        .andExpect(jsonPath("$.rounds[*].runId").value(contains(first.intValue(), second.intValue(), third.intValue())))
+        .andExpect(jsonPath("$.rounds[*].round").value(contains(1, 2, 3)))
+        .andExpect(jsonPath("$.rounds[*].status").value(contains("done", "done", "running")))
+        .andExpect(jsonPath("$.rounds[0].*", hasSize(7)))
+        .andExpect(jsonPath("$.rounds[0].appliedImprovementId").value(nullValue()))   // 최초 회차
+        .andExpect(jsonPath("$.rounds[1].appliedImprovementId").value(7))
+        .andExpect(jsonPath("$.rounds[0].createdAt").isString())
+        .andExpect(jsonPath("$.rounds[0].finishedAt").value("2026-10-01T10:30:00"))
+        .andExpect(jsonPath("$.rounds[2].finishedAt").value(nullValue()))
+        .andExpect(jsonPath("$.rounds[0].metrics.successRate").value(66.67))
+        .andExpect(jsonPath("$.rounds[0].metrics.avgSteps").value(12.5))
+        .andExpect(jsonPath("$.rounds[0].metrics.avgBacktracks").value(1.0))
+        .andExpect(jsonPath("$.rounds[0].metrics.avgSeconds").value(95.25))
+        .andExpect(jsonPath("$.rounds[0].metrics.tokens").value(3000))
+        .andExpect(jsonPath("$.rounds[0].metrics.costUsd").value(0.042))
+        .andExpect(jsonPath("$.rounds[1].metrics.successRate").value(100.0))
+        .andExpect(jsonPath("$.rounds[1].metrics.avgSteps").value(nullValue()))   // 값이 없는 지표는 null
+        .andExpect(jsonPath("$.rounds[2].metrics").value(nullValue()));          // 확정된 지표가 없음
+  }
+
+  @Test
+  void rounds_ofOthersDeletedNonFirstOrMissingExperiment_returnsNotFound() throws Exception {
+    Long mine = insertProject(userId, "p");
+    Long first = insertExperiment(mine, "done", false, null, null);
+    Long secondRound = insertNextRound(first, mine, "running", null);
+    Long others = insertExperiment(insertProject(insertUser("other@uxight.com"), "남의 것"), "done", false, null, null);
+    Long deletedProject = insertProject(userId, "삭제함");
+    Long inDeleted = insertExperiment(deletedProject, "done", false, null, null);
+    jdbcTemplate.update("UPDATE projects SET deleted_at = NOW() WHERE project_id = ?", deletedProject);
+
+    for (Long id : new Long[] {others, inDeleted, secondRound, Long.MAX_VALUE}) {
+      mvc.perform(get("/api/runs/{firstRunId}/rounds", id).header(HttpHeaders.AUTHORIZATION, bearer))
+          .andExpect(status().isNotFound())
+          .andExpect(jsonPath("$.code").value("EXP-ERR-001"));
+    }
+  }
+
+  @Test
+  void rounds_withNonNumericId_returnsBadRequest() throws Exception {
+    mvc.perform(get("/api/runs/{firstRunId}/rounds", "abc").header(HttpHeaders.AUTHORIZATION, bearer))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("GLB-ERR-001"));
+  }
+
+  @Test
+  void rounds_withoutTokenOrByInactiveUser_returnsUnauthorized() throws Exception {
+    mvc.perform(get("/api/runs/{firstRunId}/rounds", 1))
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("AUT-ERR-001"));
+    jdbcTemplate.update("UPDATE users SET is_active = FALSE WHERE user_id = ?", userId);
+    mvc.perform(get("/api/runs/{firstRunId}/rounds", 1).header(HttpHeaders.AUTHORIZATION, bearer))
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("AUT-ERR-005"));
+  }
+
+  // ───────── 목록 조건 (RunService.getExperiments) ─────────
+
+  @Test
+  void getExperiments_keyword_matchesProjectTitleOrTaskGoal_andTreatsWildcardsAsText() {
     Long shop = insertExperiment(insertProject(userId, "쇼핑몰 진단"), "done", false, null, null);
     Long sale = insertExperiment(insertProject(userId, "100% 할인 이벤트"), "done", false, null, null);
     Long other = insertExperiment(insertProject(userId, "블로그"), "done", false, null, null);
@@ -267,11 +341,11 @@ class ExperimentQueryTest {
     assertThat(ids(new ExperimentFilter(null, "쇼핑", null))).containsExactly(other, shop);   // 제목 또는 목표
     assertThat(ids(new ExperimentFilter(null, "%", null))).containsExactly(sale);            // % 는 글자로
     assertThat(ids(new ExperimentFilter(null, "없는말", null))).isEmpty();
-    assertThat(runService.countRuns(userId, new ExperimentFilter(null, "쇼핑", null))).isEqualTo(2);
+    assertThat(runService.countExperiments(userId, new ExperimentFilter(null, "쇼핑", null))).isEqualTo(2);
   }
 
   @Test
-  void getRuns_finishedFrom_keepsExperimentsWhoseLastRoundEndedAfterIt() {
+  void getExperiments_finishedFrom_keepsExperimentsWhoseLastRoundEndedAfterIt() {
     LocalDateTime weekStart = thisWeekStartInDb();
     Long project = insertProject(userId, "p");
     Long thisWeek = insertExperiment(project, "done", false, null, weekStart.plusHours(1));
@@ -295,7 +369,7 @@ class ExperimentQueryTest {
   }
 
   private List<Long> ids(ExperimentFilter filter) {
-    return runService.getRuns(userId, filter, 0, 20).stream().map(ExperimentSummary::firstRunId).toList();
+    return runService.getExperiments(userId, filter, 0, 20).stream().map(ExperimentSummary::firstRunId).toList();
   }
 
   /** API 가 돌려주는 thisWeekFrom 을 DB 시각(KST)으로 — 완료 시각을 이 기준 앞뒤로 넣는다. */

@@ -155,13 +155,24 @@ public class RunService {
   }
 
   /** 본인 실험 목록 — 최근 요청 순. 마지막 회차 기준 값이며 상태는 조회할 때 계산한다. */
-  public List<ExperimentSummary> getRuns(Long userId, ExperimentFilter filter, int page, int size) {
+  public List<ExperimentSummary> getExperiments(Long userId, ExperimentFilter filter, int page, int size) {
     validateState(filter.state());
     return experimentQueryRepository.findExperiments(userId, filter, page * size, size);
   }
 
-  /** getRuns 와 같은 조건의 전체 건수(페이지 계산용). */
-  public long countRuns(Long userId, ExperimentFilter filter) {
+  /**
+   * 실험의 회차 목록 — runId 순. 남의 실험, 삭제한 프로젝트의 실험, 최초 회차가 아닌 runId 는 404 EXP-ERR-001.
+   * 승인 대기 여부는 실험 목록과 같은 상태 계산(state)에서 읽는다 — 승인 기능을 넣을 때 그 계산 한 곳만 바꾸면 여기도 따라온다.
+   */
+  public ExperimentRounds getRounds(Long userId, Long firstRunId) {
+    ExperimentSummary experiment = experimentQueryRepository.findExperiment(userId, firstRunId)
+        .orElseThrow(() -> new ApiException(ErrorCode.EXPERIMENT_NOT_FOUND));
+    return new ExperimentRounds(experimentQueryRepository.findRounds(userId, firstRunId),
+        "awaiting_approval".equals(experiment.state()));
+  }
+
+  /** getExperiments 와 같은 조건의 전체 건수(페이지 계산용). */
+  public long countExperiments(Long userId, ExperimentFilter filter) {
     validateState(filter.state());
     return experimentQueryRepository.countExperiments(userId, filter);
   }
