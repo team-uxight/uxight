@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <!-- 인라인 <style> 주입이 막히는 페이지에서도 입력칸이 가려지는지 본다 -->
+  <meta http-equiv="Content-Security-Policy" content="style-src 'self'">
+  <title>SoM fixture</title>
+</head>
+<body>
+  <h1>SoM 드라이버 테스트 페이지</h1>
+  <a href="#next">다음 페이지</a>
+  <button type="button">확인</button>
+  <button type="button" hidden>숨은 버튼</button>
+  <form>
+    <input name="email" type="email" value="kim@example.com">
+    <input name="password" type="password" value="hunter2">
+    <input name="q" type="text" placeholder="검색">
+    <textarea name="memo">메모 원문</textarea>
+    <select name="size">
+      <option>S</option>
+      <option>M</option>
+    </select>
+    <input type="submit" value="보내기">
+  </form>
+</body>
+</html>
