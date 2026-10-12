@@ -4,7 +4,7 @@ import com.uxight.api.common.ApiException;
 import com.uxight.api.common.ErrorCode;
 import com.uxight.api.domain.persona.Persona;
 import com.uxight.api.domain.persona.PersonaRepository;
-import com.uxight.api.domain.policy.PolicyRepository;
+import com.uxight.api.domain.policy.PolicyService;
 import com.uxight.api.domain.project.Project;
 import com.uxight.api.domain.project.ProjectRepository;
 import com.uxight.api.domain.task.SuccessRuleClient;
@@ -35,7 +35,7 @@ public class RunService {
 
   private final ProjectRepository projectRepository;
   private final PersonaRepository personaRepository;
-  private final PolicyRepository policyRepository;
+  private final PolicyService policyService;
   private final TaskService taskService;
   private final RunRepository runRepository;
   private final ExperimentQueryRepository experimentQueryRepository;
@@ -45,12 +45,12 @@ public class RunService {
 
   @Autowired
   public RunService(ProjectRepository projectRepository, PersonaRepository personaRepository,
-      PolicyRepository policyRepository, TaskService taskService, RunRepository runRepository,
+      PolicyService policyService, TaskService taskService, RunRepository runRepository,
       ExperimentQueryRepository experimentQueryRepository, SuccessRuleClient successRuleClient, AgentClient agentClient,
       TransactionTemplate transactionTemplate) {
     this.projectRepository = projectRepository;
     this.personaRepository = personaRepository;
-    this.policyRepository = policyRepository;
+    this.policyService = policyService;
     this.taskService = taskService;
     this.runRepository = runRepository;
     this.experimentQueryRepository = experimentQueryRepository;
@@ -124,7 +124,7 @@ public class RunService {
 
       // 스냅샷 — 프로젝트 · 정책이 나중에 바뀌거나 Persona 가 삭제되어도 지난 회차를 재현할 수 있게 실험 요청 시점의 값을 담는다
       Run run = runRepository.save(Run.firstRound(locked, task, mode, request.loopMax(), locked.getTargetUrl(),
-          locked.getAllowedDomains(), taskSnapshot, policyRepository.getGlobal().toSnapshot(), personaSnapshot));
+          locked.getAllowedDomains(), taskSnapshot, policyService.getGlobalPolicy().toSnapshot(), personaSnapshot));
       run.markAsFirstRound();   // 커밋 때 first_run_id 를 자기 run_id 로 UPDATE
       return run.getId();
     });
