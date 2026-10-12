@@ -7,26 +7,90 @@ NAVIGATION_TIMEOUT_MS = 15_000
 ACTION_TIMEOUT_MS = 5_000
 ID_ATTRIBUTE = "data-ux-id"
 
+# 관측에서 뺄 "사람 눈에 안 보이는" 요소의 기준값 (관측 정제 L0.5, agent-safety §2.2 #4).
+# 조상까지 곱한 불투명도가 이보다 낮으면 안 보인다고 본다. 0만 막으면 0.01 같은 값으로 우회된다.
+MIN_OPACITY = 0.1
+# 글자 크기(px)가 이보다 작으면 읽을 수 없다고 본다. 정상 페이지의 각주 · 캡션도 보통 10px 이상이다.
+MIN_FONT_SIZE_PX = 6
+
 # 대상 페이지 안에서 실행되는 스크립트.
 # 보이는 상호작용 요소마다 data-ux-id를 붙이고, 요소 정보를 목록으로 돌려준다.
+# 사람 눈에 안 보이는 요소와 글은 뺀다 — 숨긴 곳에 심은 주입 문구가 모델 입력에 들어가지 않게.
 _COLLECT_ELEMENTS_JS = """
-(idAttr) => {
+({ idAttr, minOpacity, minFontSizePx }) => {
   document.querySelectorAll(`[${idAttr}]`).forEach(el => el.removeAttribute(idAttr));
+
+  // 사람 눈에 안 보이는 요소: 크기 0 · 그려지지 않음(display:none 조상 · 닫힌 details · visibility)
+  // · 작은 글자 · aria-hidden · 투명 · 화면 밖.
+  const isHidden = (el) => {
+    const rect = el.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return true;
+    if (!el.checkVisibility({ visibilityProperty: true })) return true;
+    const fontSize = parseFloat(getComputedStyle(el).fontSize);
+    if (fontSize < minFontSizePx || el.closest('[aria-hidden="true"]')) return true;
+    // opacity는 상속되지 않지만 조상 값과 곱해져 보이므로 조상까지 곱한다.
+    // fixed 조상이 있으면 스크롤해도 화면 위치가 그대로라 문서 좌표로 바꾸지 않는다.
+    let opacity = 1;
+    let fixed = false;
+    for (let node = el; node; node = node.parentElement) {
+      const style = getComputedStyle(node);
+      opacity *= parseFloat(style.opacity);
+      fixed ||= style.position === 'fixed';
+    }
+    if (opacity < minOpacity) return true;
+    // 화면 밖: 가로는 뷰포트 밖(가로 스크롤은 사람도 Agent도 거의 하지 않는다),
+    // 세로는 문서 위쪽 바깥(스크롤로도 닿지 않는다). 아래쪽은 스크롤하면 보이므로 남긴다.
+    return rect.right <= 0 || rect.left >= innerWidth || rect.bottom + (fixed ? 0 : scrollY) <= 0;
+  };
+
+  // 글 조각을 감싼 가장 가까운 블록 요소. 블록이 바뀌는 곳만 innerText처럼 띄어 붙인다.
+  const blockOf = (node) => {
+    let el = node.parentElement;
+    while (el && /^(inline|contents)/.test(getComputedStyle(el).display)) el = el.parentElement;
+    return el;
+  };
+
+  // innerText는 투명 · 화면 밖 · 작은 글자 · aria-hidden인 자식의 글까지 담으므로
+  // 글 조각마다 감싼 요소를 다시 거른다.
+  const visibleText = (el) => {
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
+    let text = '';
+    let lastBlock = null;
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (node.nodeName === 'BR') lastBlock = null; // <br>도 innerText처럼 띄운다.
+      if (node.nodeType !== Node.TEXT_NODE) continue;
+      // display:contents는 상자가 없어 크기가 0이므로 상자가 있는 조상으로 판정한다.
+      let parent = node.parentElement;
+      while (getComputedStyle(parent).display === 'contents') parent = parent.parentElement;
+      if (isHidden(parent)) continue;
+      const block = blockOf(node);
+      text += (block === lastBlock ? '' : ' ') + node.textContent;
+      lastBlock = block;
+    }
+    return text;
+  };
+
   const selector = 'a[href], button, input:not([type=hidden]), select, textarea, '
     + '[role=button], [role=link]';
   const items = [];
   let nextId = 1;
   for (const el of document.querySelectorAll(selector)) {
-    const rect = el.getBoundingClientRect();
-    const style = getComputedStyle(el);
-    if (rect.width === 0 || rect.height === 0 || style.visibility === 'hidden' || el.disabled) {
+    const tag = el.tagName.toLowerCase();
+    const hidden = isHidden(el);
+    // 체크박스 · 라디오를 숨기고 꾸민 라벨로 보여주는 흔한 UI — 사람은 보이는 라벨을 눌러 쓴다.
+    // 이때는 라벨에 ID를 붙여 라벨을 누르게 하고, 글도 숨은 요소의 속성 대신 라벨 글을 쓴다.
+    const label = hidden && tag === 'input' && ['checkbox', 'radio'].includes(el.type)
+      ? Array.from(el.labels).find((l) => visibleText(l).trim())
+      : undefined;
+    if (el.disabled || (hidden && !label)) {
       continue;
     }
-    el.setAttribute(idAttr, String(nextId));
-    const tag = el.tagName.toLowerCase();
-    // select의 innerText는 옵션 전체라서 제외한다 (옵션은 options로 따로 제공).
+    (label ?? el).setAttribute(idAttr, String(nextId));
+    // select의 글은 옵션 전체라서 제외한다 (옵션은 options로 따로 제공).
+    // textarea의 글은 입력 기본값이라 제외한다 (예전 innerText도 비어 있었다).
     const text = (
-      (tag !== 'select' && el.innerText)
+      (label && visibleText(label))
+      || (tag !== 'select' && tag !== 'textarea' && visibleText(el))
       || el.getAttribute('aria-label')
       || el.getAttribute('value')
       || ''
@@ -99,7 +163,14 @@ class DomDriver(Driver):
         for attempt in range(2):
             await page.wait_for_load_state("domcontentloaded", timeout=NAVIGATION_TIMEOUT_MS)
             try:
-                return await page.evaluate(_COLLECT_ELEMENTS_JS, ID_ATTRIBUTE)
+                return await page.evaluate(
+                    _COLLECT_ELEMENTS_JS,
+                    {
+                        "idAttr": ID_ATTRIBUTE,
+                        "minOpacity": MIN_OPACITY,
+                        "minFontSizePx": MIN_FONT_SIZE_PX,
+                    },
+                )
             except Exception as e:
                 if attempt == 1 or "Execution context was destroyed" not in str(e):
                     raise
