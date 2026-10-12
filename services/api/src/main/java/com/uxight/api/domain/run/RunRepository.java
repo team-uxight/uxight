@@ -16,12 +16,15 @@ import java.util.Optional;
  */
 public interface RunRepository extends JpaRepository<Run, Long> {
 
-  /** 본인 실험의 마지막 회차. 남의 실험은 없는 것과 같다. 다음 회차는 이전 회차가 끝난 뒤 생기므로 run_id 가 가장 큰 회차다. */
+  /**
+   * 본인 실험의 마지막 회차. 남의 실험과 삭제한 프로젝트의 실험은 없는 것과 같다(실험 목록에서도 보이지 않는다).
+   * 다음 회차는 이전 회차가 끝난 뒤 생기므로 run_id 가 가장 큰 회차다.
+   */
   default Optional<Run> findLastRound(Long firstRunId, Long userId) {
-    return findTopByFirstRunIdAndProjectUserIdOrderByIdDesc(firstRunId, userId);
+    return findTopByFirstRunIdAndProjectUserIdAndProjectDeletedAtIsNullOrderByIdDesc(firstRunId, userId);
   }
 
-  Optional<Run> findTopByFirstRunIdAndProjectUserIdOrderByIdDesc(Long firstRunId, Long userId);
+  Optional<Run> findTopByFirstRunIdAndProjectUserIdAndProjectDeletedAtIsNullOrderByIdDesc(Long firstRunId, Long userId);
 
   /**
    * 프로젝트에 진행 중(queued · accepted · running)인 회차가 있는가. 취소 요청된 회차도 실제로 멈추기 전까지는 진행 중이다.

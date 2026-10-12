@@ -15,7 +15,12 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.time.DayOfWeek;
 import java.time.Duration;
+import java.time.LocalDate;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.time.temporal.TemporalAdjusters;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -25,6 +30,7 @@ import java.util.Set;
 public class RunService {
 
   private static final Set<String> EXPERIMENT_STATES = Set.of("in_progress", "awaiting_approval", "completed", "stopped");
+  private static final ZoneId WEEK_ZONE = ZoneId.of("Asia/Seoul");   // 이번 주 계산 기준 — 서비스 사용자 시간대
 
   private final ProjectRepository projectRepository;
   private final PersonaRepository personaRepository;
@@ -148,14 +154,28 @@ public class RunService {
         .thenAccept(dispatchState -> dispatchState.ifPresent(state -> runRepository.updateDispatchState(runId, state)));
   }
 
-  public List<ExperimentSummary> getExperiments(Long userId, String state, int page, int size) {
-    validateState(state);
-    return experimentQueryRepository.findExperiments(userId, state, page * size, size);
+  /** 본인 실험 목록 — 최근 요청 순. 마지막 회차 기준 값이며 상태는 조회할 때 계산한다. */
+  public List<ExperimentSummary> getRuns(Long userId, ExperimentFilter filter, int page, int size) {
+    validateState(filter.state());
+    return experimentQueryRepository.findExperiments(userId, filter, page * size, size);
   }
 
-  public long countExperiments(Long userId, String state) {
-    validateState(state);
-    return experimentQueryRepository.countExperiments(userId, state);
+  /** getRuns 와 같은 조건의 전체 건수(페이지 계산용). */
+  public long countRuns(Long userId, ExperimentFilter filter) {
+    validateState(filter.state());
+    return experimentQueryRepository.countExperiments(userId, filter);
+  }
+
+  /**
+   * 상태별 건수와 총 소요 토큰. 실험 목록과 같은 상태 계산을 쓴다.
+   * '이번 주'는 월요일 0시(KST)부터 — 기준(시작 요일 · 시간대)은 설계 미결이다 [확인 필요].
+   */
+  public ExperimentStats getStats(Long userId) {
+    OffsetDateTime thisWeekFrom = LocalDate.now(WEEK_ZONE)
+        .with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+        .atStartOfDay(WEEK_ZONE)
+        .toOffsetDateTime();
+    return experimentQueryRepository.findStats(userId, thisWeekFrom);
   }
 
   /**
@@ -177,7 +197,7 @@ public class RunService {
 
   private void validateState(String state) {
     if (state != null && !EXPERIMENT_STATES.contains(state)) {
-      throw new ApiException(ErrorCode.BAD_REQUEST);
+      throw ApiException.invalidField("state", "in_progress, awaiting_approval, completed, stopped 중 하나여야 합니다");
     }
   }
 }
