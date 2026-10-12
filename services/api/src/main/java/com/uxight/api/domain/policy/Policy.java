@@ -56,6 +56,35 @@ public class Policy {
   private LocalDateTime updatedAt;
 
   /**
+   * 보낸 값(null 이 아닌 값) 중 지금과 다른 항목만 바꾸고, 바뀐 항목을 {항목: {before, after}} 로 돌려준다 — 감사 로그 내용이다.
+   * 키는 API 항목 이름(camelCase). 아무것도 바뀌지 않으면 빈 맵이다.
+   * 바꾼 값은 이후 요청되는 실험의 스냅샷부터 쓰인다. 단 dailyTokenBudget 은 AI 모듈이 매번 읽으므로 진행 중인 실험에도 바로 적용된다.
+   */
+  public Map<String, Map<String, Object>> update(Integer maxSteps, Integer maxSeconds, Integer maxTokens,
+      Integer runConcurrency, Integer personaConcurrency, Integer rateLimitPerDomain, Long dailyTokenBudget) {
+    Map<String, Map<String, Object>> changes = new LinkedHashMap<>();
+    this.maxSteps = change(changes, "maxSteps", this.maxSteps, maxSteps);
+    this.maxSeconds = change(changes, "maxSeconds", this.maxSeconds, maxSeconds);
+    this.maxTokens = change(changes, "maxTokens", this.maxTokens, maxTokens);
+    this.runConcurrency = change(changes, "runConcurrency", this.runConcurrency, runConcurrency);
+    this.personaConcurrency = change(changes, "personaConcurrency", this.personaConcurrency, personaConcurrency);
+    this.rateLimitPerDomain = change(changes, "rateLimitPerDomain", this.rateLimitPerDomain, rateLimitPerDomain);
+    this.dailyTokenBudget = change(changes, "dailyTokenBudget", this.dailyTokenBudget, dailyTokenBudget);
+    return changes;
+  }
+
+  private static <T> T change(Map<String, Map<String, Object>> changes, String name, T current, T requested) {
+    if (requested == null || requested.equals(current)) {
+      return current;
+    }
+    Map<String, Object> beforeAfter = new LinkedHashMap<>();   // before 가 null 일 수 있어 Map.of 를 쓰지 않는다
+    beforeAfter.put("before", current);
+    beforeAfter.put("after", requested);
+    changes.put(name, beforeAfter);
+    return requested;
+  }
+
+  /**
    * 회차의 policy_snapshot 으로 복사할 값. 키는 AI 모듈이 읽는 snake_case 다.
    * daily_token_budget 은 넣지 않는다 — 모든 회차가 나눠 쓰는 한도라 AI 모듈이 매번 policies 의 현재 값을 읽는다 (design-decision 5.5).
    * 값이 없는(null) 항목은 빼서 AI 모듈의 기본값을 쓰게 한다.

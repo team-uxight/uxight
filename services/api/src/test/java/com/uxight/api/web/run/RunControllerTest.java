@@ -391,7 +391,8 @@ class RunControllerTest {
   }
 
   @ParameterizedTest
-  @ValueSource(strings = {"{\"goal\":", "{\"goal\":\"g\",\"personaIds\":\"1\"}", "{\"goal\":\"g\",\"loopMax\":\"many\"}"})
+  @ValueSource(strings = {"{\"goal\":", "{\"goal\":\"g\",\"personaIds\":\"1\"}", "{\"goal\":\"g\",\"loopMax\":\"many\"}",
+      "{\"goal\":\"g\",\"loopMax\":2.5}", "{\"goal\":\"g\",\"personaIds\":[1.5]}"})   // 정수 칸의 소수는 잘라 받지 않는다
   void create_unreadableBody_returnsBadRequest(String json) throws Exception {
     requestJson(json)
         .andExpect(status().isBadRequest())
