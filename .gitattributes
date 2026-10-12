@@ -1,0 +1,18 @@
+# 줄 끝은 LF 로 고정한다 (10/12). Windows 에서 CRLF 로 저장해도 커밋은 LF, 받을 때도 LF.
+* text=auto eol=lf
+
+# Windows 배치 파일만 CRLF (Gradle 기본 설정과 같음)
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 바이너리 — 줄 끝 변환 · 텍스트 diff 를 하지 않는다
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.jar binary

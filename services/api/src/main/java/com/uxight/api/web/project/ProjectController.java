@@ -59,6 +59,7 @@ public class ProjectController {
     projectService.deleteProject(userId, projectId);
   }
 
+  /** 실험 요청 폼에 쓰는 프로젝트 정보. 남의 · 삭제한 프로젝트는 없는 것과 같다 (404 PRJ-ERR-001). */
   @GetMapping("/{projectId}")
   public ProjectDetail project(@PathVariable Long projectId, @RequestAttribute(AuthConst.LOGIN_USER_ID) Long userId) {
     return ProjectDetail.from(projectService.getProject(userId, projectId));
