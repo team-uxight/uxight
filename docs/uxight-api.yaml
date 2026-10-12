@@ -2918,7 +2918,15 @@ components:
       type: object
       description: 전역 실행 한도. AI 모듈이 집행한다.
       required:
-        [maxSteps, maxSeconds, maxTokens, runConcurrency, dailyTokenBudget]
+        [
+          maxSteps,
+          maxSeconds,
+          maxTokens,
+          runConcurrency,
+          personaConcurrency,
+          rateLimitPerDomain,
+          dailyTokenBudget,
+        ]
       properties:
         maxSteps:
           type: integer
@@ -2932,6 +2940,12 @@ components:
         runConcurrency:
           type: integer
           description: 동시 실험(회차) 수
+        personaConcurrency:
+          type: integer
+          description: 회차 안의 동시 Persona 수
+        rateLimitPerDomain:
+          type: integer
+          description: 대상 도메인 당 요청 상한.
         dailyTokenBudget:
           type: integer
           format: int64
@@ -2948,6 +2962,10 @@ components:
         maxTokens:
           type: integer
         runConcurrency:
+          type: integer
+        personaConcurrency:
+          type: integer
+        rateLimitPerDomain:
           type: integer
         dailyTokenBudget:
           type: integer
