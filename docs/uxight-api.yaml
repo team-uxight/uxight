@@ -2153,6 +2153,7 @@ components:
           state,
           endType,
           stale,
+          agentUnreachable,
           hasResult,
           projectTitle,
           taskGoal,
@@ -2187,6 +2188,12 @@ components:
         stale:
           type: boolean
           description: 마지막 회차의 status가 running이고 heartbeat_at 이후 임계 시간이 지났으면 true. 표시만 하며 자동으로 failed로 바꾸지 않는다.
+        agentUnreachable:
+          type: boolean
+          description: |-
+            마지막 회차의 status가 queued이고 AI 모듈에 실행 요청을 전달하지 못했으면(dispatch_state가 unreachable 또는 timeout) true.
+            프론트엔드는 '실행 서비스에 연결할 수 없음' 배너를 보여준다. Spring이 queued 회차를 주기적으로 다시 보내므로,
+            AI 모듈이 회차를 받으면(status가 accepted 이후) 다음 조회부터 false가 된다.
         hasResult:
           type: boolean
           description: 최초 회차가 done이면 true. 결과 버튼 활성화에 쓴다.

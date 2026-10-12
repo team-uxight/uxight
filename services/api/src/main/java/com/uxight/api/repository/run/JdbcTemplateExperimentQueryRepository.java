@@ -26,12 +26,14 @@ public class JdbcTemplateExperimentQueryRepository implements ExperimentQueryRep
   // DB 의 DATETIME 은 KST 로 쌓인다(compose MySQL --default-time-zone=+09:00). 시각 조건은 이 시간대로 바꿔 비교한다.
   private static final ZoneId DB_ZONE = ZoneId.of("Asia/Seoul");
 
-  // running 인데 heartbeat_at 이 이 시간보다 오래되면 stale. 임계값 미정 — [확인 필요]
+  // running 인데 heartbeat_at 이 이 시간보다 오래되면 stale — AI 모듈이 회차를 놓쳤을 수 있다는 표시만, status 는 바꾸지 않는다 (GACA-104)
   private static final int STALE_AFTER_SECONDS = 60;
 
   // 실험 = first_run_id 가 같은 회차들. 한 줄은 실험의 마지막 회차(run_id 최대) 기준이다.
   // state · end_type 계산은 이 SQL 한 곳에만 둔다 (design-decision 2.6) — 목록 · 건수 · (다음 회차 승인)이 같은 정의를 쓴다.
   // 리서처는 자기가 삭제한 프로젝트의 실험을 보지 않는다(목록 · 건수 · 토큰 합 모두). 관리자 조회는 관리자 API 에서 따로 정한다.
+  // agent_unreachable: 마지막 회차가 queued 인데 POST /runs 가 닿지 않았다(unreachable · timeout) — 웹 배너용. status 를 함께 봐야
+  //   timeout 뒤 AI 모듈이 실제로 받아 accepted 가 된 회차에 배너가 뜨지 않는다. 재전송이 닿으면 sent 가 되어 사라진다.
   // state 는 겹치지 않는 네 분류다. 진행 중은 취소 요청을 뺀 것이라 실험 요청의 409(진행 중인 실험) 범위와 다르다.
   // TODO(승인): improvements · approvals 도입 때 state 에 awaiting_approval 을 넣는다 — 마지막 회차가 done 이고
   //   취소 요청이 없으며 다음 회차 승인 가능 조건(design-decision 2.2)을 충족하는 개선안이 있으면 awaiting_approval,
@@ -52,6 +54,7 @@ public class JdbcTemplateExperimentQueryRepository implements ExperimentQueryRep
                ELSE 'cancelled'
              END AS end_type,
              COALESCE(r.status = 'running' AND r.heartbeat_at < NOW() - INTERVAL %d SECOND, false) AS stale,
+             COALESCE(r.status = 'queued' AND r.dispatch_state IN ('unreachable', 'timeout'), false) AS agent_unreachable,
              f.status = 'done' AS has_result,
              p.title AS project_title,
              t.goal AS task_goal,
