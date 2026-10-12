@@ -140,17 +140,19 @@ class RunRepositoryTest {
   }
 
   @Test
-  void requestCancel_onlyWhileInProgress() {
-    Run running = saveFirstRound(RunMode.diagnose, null);
+  void requestCancel_writesOnlyCancelRequested() {
+    // 취소할 수 있는지는 RunService 가 판정한다 — 승인 대기(done) 회차에도 기록할 수 있어야 한다
     Run done = saveFirstRound(RunMode.diagnose, null);
     entityManager.flush();
-    jdbcTemplate.update("UPDATE runs SET status = 'running' WHERE run_id = ?", running.getId());
-    jdbcTemplate.update("UPDATE runs SET status = 'done' WHERE run_id = ?", done.getId());
+    jdbcTemplate.update("UPDATE runs SET status = 'done', progress = 3 WHERE run_id = ?", done.getId());
 
-    assertThat(runRepository.requestCancel(running.getId())).isTrue();
-    assertThat(runRepository.requestCancel(done.getId())).isFalse();
-    assertThat(jdbcTemplate.queryForList("SELECT cancel_requested FROM runs WHERE run_id IN (?, ?) ORDER BY run_id",
-        Boolean.class, running.getId(), done.getId())).containsExactly(true, false);
+    assertThat(runRepository.requestCancel(done.getId())).isTrue();
+    assertThat(runRepository.requestCancel(Long.MAX_VALUE)).isFalse();
+    assertThat(jdbcTemplate.queryForMap("SELECT cancel_requested, status, progress FROM runs WHERE run_id = ?",
+        done.getId()))
+        .containsEntry("cancel_requested", true)
+        .containsEntry("status", "done")
+        .containsEntry("progress", 3);
   }
 
   @Test

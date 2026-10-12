@@ -53,13 +53,16 @@ public interface RunRepository extends JpaRepository<Run, Long> {
   @Query("UPDATE Run r SET r.dispatchState = :state WHERE r.id = :runId")
   int updateDispatchState(@Param("runId") Long runId, @Param("state") DispatchState state);
 
-  /** 진행 중인 회차에만 취소 요청을 기록한다. 읽은 뒤 회차가 끝났을 수 있어 UPDATE 의 status 조건이 최종 판정이다. 기록했으면 true. */
+  /**
+   * 회차에 취소 요청을 기록한다 — cancel_requested 한 컬럼만 한 줄 UPDATE 로 바꿔 Python 이 그사이 쓴 컬럼을 건드리지 않는다.
+   * 취소할 수 있는지(진행 중 · 승인 대기)는 RunService 가 프로젝트 행을 잠근 뒤 판정한다. 기록했으면 true.
+   */
   default boolean requestCancel(Long runId) {
-    return markCancelRequested(runId, RunStatus.IN_PROGRESS) == 1;
+    return markCancelRequested(runId) == 1;
   }
 
   @Transactional
   @Modifying(flushAutomatically = true, clearAutomatically = true)   // 영속성 컨텍스트에 옛 값이 남지 않게
-  @Query("UPDATE Run r SET r.cancelRequested = true WHERE r.id = :runId AND r.status IN :statuses")
-  int markCancelRequested(@Param("runId") Long runId, @Param("statuses") Collection<RunStatus> statuses);
+  @Query("UPDATE Run r SET r.cancelRequested = true WHERE r.id = :runId")
+  int markCancelRequested(@Param("runId") Long runId);
 }

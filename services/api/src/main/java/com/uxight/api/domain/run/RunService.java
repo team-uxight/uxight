@@ -30,6 +30,7 @@ import java.util.Set;
 public class RunService {
 
   private static final Set<String> EXPERIMENT_STATES = Set.of("in_progress", "awaiting_approval", "completed", "stopped");
+  private static final Set<String> CANCELLABLE_STATES = Set.of("in_progress", "awaiting_approval");
   private static final ZoneId WEEK_ZONE = ZoneId.of("Asia/Seoul");   // 이번 주 계산 기준 — 서비스 사용자 시간대
 
   private final ProjectRepository projectRepository;
@@ -190,20 +191,40 @@ public class RunService {
   }
 
   /**
-   * 실험 취소 요청 — 마지막 회차의 cancel_requested 만 기록한다. 실제 중단과 status 변경은 Python 이 한다.
-   * 이미 취소 요청된 실험은 상태와 관계없이 성공(멱등).
-   * TODO: 승인 대기 중인 실험의 취소는 improvements · approvals 도입 때 (design-decision 4.5).
+   * 실험 취소 요청 — 실험 단위로 받고 마지막 회차의 cancel_requested 만 기록한다 (design-decision 4.5).
+   * 진행 중 · 승인 대기인 실험만 받는다(202). 이미 취소 요청된 실험은 상태와 관계없이 202(멱등), 그 밖은 409 EXP-ERR-006.
+   * 진행 중인 회차는 Python 이 step 경계에서 확인해 멈추고 status 를 cancelled 로 기록한다 — 그때까지 프로젝트를 점유한다.
+   * 승인 대기인 실험은 실행 중인 회차가 없어 기록하는 즉시 취소가 끝나고, 더 이상 다음 회차를 승인할 수 없다.
+   * 승인 대기 분류는 상태 계산(state)에 승인 기능이 들어가면 따라온다 — 여기에는 승인 로직이 없다.
    */
   public void cancelExperiment(Long userId, Long firstRunId) {
-    Run lastRound = runRepository.findLastRound(firstRunId, userId)
+    // 소유 확인 — 남의 실험 · 삭제한 프로젝트의 실험 · 최초 회차가 아닌 runId 는 404
+    Long projectId = runRepository.findLastRound(firstRunId, userId)
+        .map(run -> run.getProject().getId())
         .orElseThrow(() -> new ApiException(ErrorCode.EXPERIMENT_NOT_FOUND));
-    if (lastRound.isCancelRequested()) {
-      return;
-    }
-    // 읽은 뒤 회차가 끝났을 수 있다 — UPDATE 의 status 조건이 최종 판정이다.
-    if (!lastRound.isInProgress() || !runRepository.requestCancel(lastRound.getId())) {
-      throw new ApiException(ErrorCode.NOT_CANCELLABLE);
-    }
+
+    transactionTemplate.executeWithoutResult(tx -> {
+      // 프로젝트 행을 잠근다 — 승인 대기 중인 실험에서 취소와 다음 회차 승인이 같은 회차를 두고 경쟁하기 때문이다.
+      // 잠그지 않으면 취소가 done 인 마지막 회차를 읽은 사이 승인이 다음 회차를 만들어, 취소는 이전 회차에 기록되고
+      // 새 회차는 취소 요청 없이 실행된다. 잠근 뒤에 마지막 회차를 다시 읽으므로 승인이 먼저면 새 회차에 기록된다.
+      projectRepository.findForUpdate(projectId, userId)
+          .orElseThrow(() -> new ApiException(ErrorCode.EXPERIMENT_NOT_FOUND));   // 그사이 프로젝트가 삭제됨
+      Run lastRound = runRepository.findLastRound(firstRunId, userId)
+          .orElseThrow(() -> new ApiException(ErrorCode.EXPERIMENT_NOT_FOUND));
+      if (lastRound.isCancelRequested()) {
+        return;   // 이미 취소 요청됨 — 상태와 관계없이 202 (멱등)
+      }
+      // 실험 모니터링과 같은 상태 계산으로 판정한다. 완료됨 · (취소 요청 없이) 실패한 실험은 취소할 수 없다.
+      String state = experimentQueryRepository.findExperiment(userId, firstRunId)
+          .map(ExperimentSummary::state)
+          .orElseThrow(() -> new ApiException(ErrorCode.EXPERIMENT_NOT_FOUND));
+      if (!CANCELLABLE_STATES.contains(state)) {
+        throw new ApiException(ErrorCode.NOT_CANCELLABLE);
+      }
+      // status 는 바꾸지 않는다 — 실제 중단 시점을 아는 AI 모듈이 cancelled 로 기록한다.
+      // 판정 뒤 회차가 done 으로 끝났어도 기록한다 — 그 실험의 종료 유형은 취소다.
+      runRepository.requestCancel(lastRound.getId());
+    });
   }
 
   private void validateState(String state) {
