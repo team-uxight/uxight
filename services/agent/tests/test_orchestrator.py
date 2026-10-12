@@ -45,6 +45,9 @@ class FakeRunRepository:
             self.error = error
         self._finish("failed")
 
+    def fail_unfinished(self, run_id: int, error: str) -> None:
+        self.mark_failed(run_id, error)  # 이 가짜의 회차는 수락 뒤 running 에서 시작한다
+
     def mark_cancelled(self, run_id: int) -> None:
         self._finish("cancelled")
 

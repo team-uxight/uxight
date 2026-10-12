@@ -36,19 +36,45 @@ decider = MockDecider()
 
 class RunOrchestrator:
     def try_accept_and_start(self, run_id: int) -> RunSnapshot | None:
-        """queued 인 회차만 수락한다. 이미 받은 회차거나 없는 회차면 None."""
+        """queued 인 회차만 수락한다.
+
+        이미 받은 회차거나 없는 회차면 None. 시작 준비에 실패한 회차도 failed 로 마감하고 None.
+        """
         if not run_repository.accept_if_queued(run_id):
             return None
-        snapshot = run_repository.get_snapshot(run_id)
-        run_repository.mark_running(run_id)
-        run_persona_repository.create_for_persona(
-            run_id,
-            {
-                persona["persona_id"]: step_log_writer.relative_path(run_id, persona["persona_id"])
-                for persona in snapshot.personas
-            },
-        )
+        try:
+            snapshot = run_repository.get_snapshot(run_id)
+            run_repository.mark_running(run_id)
+            run_persona_repository.create_for_persona(
+                run_id,
+                {
+                    persona["persona_id"]: step_log_writer.relative_path(
+                        run_id, persona["persona_id"]
+                    )
+                    for persona in snapshot.personas
+                },
+            )
+        except Exception as exc:
+            # 수락한 회차를 accepted · running 으로 남기지 않는다. 호출한 쪽은 None 을 받아
+            # failed 상태를 200 으로 응답한다. 예외 문구(SQL · DB 주소)는 로그에만 남긴다.
+            # DB 장애로 정리까지 실패하면 예외가 그대로 나가고(500), 남은 회차는 다음 기동 때
+            # close_interrupted_runs 가 정리한다.
+            logger.exception("run=%s failed to start, closing as failed", run_id)
+            self._fail_run(run_id, error=f"실행 오류로 중단: {type(exc).__name__}")
+            return None
         return snapshot
+
+    def close_interrupted_runs(self) -> None:
+        """agent 시작 시 한 번만 부른다 — 실행 중인 회차가 없을 때여야 한다.
+
+        이전 프로세스가 accepted · running 으로 남긴 회차를 failed 로 마감한다. 재개는 하지 않는다
+        (architecture §3.3). §3.3 은 같은 스캔에서 queued · accepted 를 집어 실행한다고 적었지만
+        다르게 한다 — queued 는 Spring 재전송이 맡으므로 건드리지 않고, accepted 는 수락과 시작
+        사이에 멈춘 경우뿐이라 실행하지 않고 실패로 마감한다.
+        """
+        for run_id in run_repository.get_unfinished_run_ids():
+            logger.warning("run=%s interrupted by restart, closing as failed", run_id)
+            self._fail_run(run_id, error="interrupted")
 
     async def run_personas(self, run_id: int, snapshot: RunSnapshot) -> None:
         # 202 로 수락한 뒤라 여기서 난 예외는 Spring 에 닿지 않는다. 어디서 예외가 나든
@@ -115,7 +141,7 @@ class RunOrchestrator:
         for persona_id, status in run_persona_repository.get_statuses(run_id).items():
             if status == "running":
                 run_persona_repository.mark_finished(run_id, persona_id, "fail")
-        run_repository.mark_failed(run_id, error=error)
+        run_repository.fail_unfinished(run_id, error=error)
 
     def _finish_run(self, run_id: int) -> None:
         statuses = run_persona_repository.get_statuses(run_id)

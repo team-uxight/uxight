@@ -74,6 +74,26 @@ class RunRepository:
                 {"run_id": run_id, "error": error},
             )
 
+    def fail_unfinished(self, run_id: int, error: str) -> None:
+        # mark_failed 와 달리 accepted 회차도 마감한다 — 수락 뒤 시작 전에 멈춘 회차가 있다.
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "UPDATE runs SET status = 'failed', error = :error, finished_at = NOW() "
+                    "WHERE run_id = :run_id AND status IN ('accepted', 'running')"
+                ),
+                {"run_id": run_id, "error": error},
+            )
+
+    def get_unfinished_run_ids(self) -> list[int]:
+        # 수락했지만 끝나지 않은 회차. queued 는 아직 수락 전이라 넣지 않는다.
+        with engine.begin() as conn:
+            return list(
+                conn.execute(
+                    text("SELECT run_id FROM runs WHERE status IN ('accepted', 'running')")
+                ).scalars()
+            )
+
     def mark_cancelled(self, run_id: int) -> None:
         with engine.begin() as conn:
             conn.execute(
