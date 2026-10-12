@@ -3,6 +3,7 @@ package com.uxight.api.client;
 import com.uxight.api.domain.run.AgentClient;
 import com.uxight.api.domain.run.DispatchState;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -21,10 +22,15 @@ import java.util.concurrent.CompletableFuture;
 @Slf4j
 public class RestAgentClient implements AgentClient {
 
+  /** 내부 API 공유 토큰 헤더. AI 모듈은 자기 환경 변수 값과 다르면 401 을 응답한다 (design-decision 9). */
+  public static final String INTERNAL_TOKEN_HEADER = "X-Internal-Token";
+
   private final String agentBaseUrl;
   private final RestClient restClient;
 
-  public RestAgentClient(@Value("${uxight.agent-base-url}") String agentBaseUrl) {
+  @Autowired
+  public RestAgentClient(@Value("${uxight.agent-base-url}") String agentBaseUrl,
+      @Value("${uxight.internal-token}") String internalToken) {
     this.agentBaseUrl = agentBaseUrl;
 
     SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
@@ -34,6 +40,7 @@ public class RestAgentClient implements AgentClient {
     this.restClient = RestClient.builder()
         .baseUrl(agentBaseUrl)
         .requestFactory(requestFactory)
+        .defaultHeader(INTERNAL_TOKEN_HEADER, internalToken)   // 토큰 값은 로그에 남기지 않는다
         .build();
   }
 

@@ -2,6 +2,8 @@ package com.uxight.api.web.run;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -9,9 +11,14 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.uxight.api.domain.run.AgentClient;
+import com.uxight.api.common.ApiException;
+import com.uxight.api.common.ErrorCode;
+import com.uxight.api.domain.project.ProjectService;
 import com.uxight.api.domain.run.DispatchState;
+import com.uxight.api.domain.task.SuccessRuleClient;
 import com.uxight.api.domain.user.JwtProvider;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
@@ -61,6 +68,12 @@ class RunControllerTest {
   @MockitoBean
   private AgentClient agentClient;
 
+  @MockitoBean
+  private SuccessRuleClient successRuleClient;
+
+  @Autowired
+  private ProjectService projectService;
+
   private Long userId;
   private String bearer;
   private Long projectId;
@@ -78,6 +91,7 @@ class RunControllerTest {
     jdbcTemplate.update("INSERT INTO personas (user_id, name, profile) VALUES (?, '초보', ?)", userId, PROFILE);
     personaId = jdbcTemplate.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
     when(agentClient.dispatch(anyLong())).thenReturn(CompletableFuture.completedFuture(Optional.of(DispatchState.sent)));
+    when(successRuleClient.createSuccessRule(anyString(), anyString(), anyString())).thenReturn("결제 완료 화면에 도달");
   }
 
   @Test
@@ -102,7 +116,7 @@ class RunControllerTest {
         .containsEntry("target_url_snapshot", "https://shop.example.com/start")
         .containsEntry("ad", 2L)
         .containsEntry("goal", "구매")
-        .containsEntry("rule", "mock success rule")
+        .containsEntry("rule", "결제 완료 화면에 도달")
         .containsEntry("skill", "low");
     assertThat(run.get("loop_max")).isNull();
     assertThat(run.get("snap_task_id")).hasToString(run.get("task_id").toString());
@@ -114,6 +128,89 @@ class RunControllerTest {
         .containsEntry("success_url", "https://shop.example.com/done")
         .containsEntry("is_one_shot", false);
     verify(agentClient).dispatch(runId);
+  }
+
+  @Test
+  void create_passesTaskToSuccessRuleAgent_andSnapshotsGlobalPolicyWithoutDailyBudget() throws Exception {
+    long runId = createAndGetRunId("diagnose", null);
+
+    verify(successRuleClient).createSuccessRule("https://shop.example.com/start", "구매", "https://shop.example.com/done");
+    String policy = jdbcTemplate.queryForObject("SELECT policy_snapshot FROM runs WHERE run_id = ?", String.class, runId);
+    Map<String, Object> snapshot = objectMapper.readValue(policy, new TypeReference<>() {});
+    // V4 전역 정책 값 — daily_token_budget 은 스냅샷에 넣지 않고, 비어 있는 model_map 도 뺀다
+    assertThat(snapshot).containsOnlyKeys("max_steps", "max_seconds", "max_tokens", "run_concurrency",
+            "persona_concurrency", "rate_limit_per_domain")
+        .containsEntry("max_steps", 10)
+        .containsEntry("persona_concurrency", 2);
+  }
+
+  @Test
+  void create_withExperimentInProgress_returnsConflict_withoutCallingLlm() throws Exception {
+    createAndGetRunId("diagnose", null);   // queued 회차 = 진행 중
+
+    request("diagnose", null)
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("EXP-ERR-004"));
+    // 잠금 없는 사전 확인에서 거절 — 성공 기준 생성 Agent 는 첫 요청 때 한 번만 불렸다
+    verify(successRuleClient).createSuccessRule(anyString(), anyString(), anyString());
+    assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM runs WHERE project_id = ?", Integer.class, projectId))
+        .isEqualTo(1);
+  }
+
+  @Test
+  void create_afterPreviousExperimentFinished_isAllowed() throws Exception {
+    long first = createAndGetRunId("diagnose", null);
+    jdbcTemplate.update("UPDATE runs SET status = 'done' WHERE run_id = ?", first);
+
+    createAndGetRunId("diagnose", null);
+  }
+
+  @Test
+  void create_withUnknownPersona_returnsNotFound_withoutCallingLlm() throws Exception {
+    mvc.perform(post("/api/projects/{projectId}/runs", projectId).header(HttpHeaders.AUTHORIZATION, bearer)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("{\"goal\":\"구매\",\"successUrl\":\"https://shop.example.com/done\",\"personaIds\":["
+                + Long.MAX_VALUE + "],\"mode\":\"diagnose\"}"))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("EXP-ERR-003"));
+    verify(successRuleClient, never()).createSuccessRule(anyString(), anyString(), anyString());
+  }
+
+  @Test
+  void create_whenSuccessRuleAgentFails_returnsBadGateway_andSavesNothing() throws Exception {
+    when(successRuleClient.createSuccessRule(anyString(), anyString(), anyString()))
+        .thenThrow(new ApiException(ErrorCode.SUCCESS_RULE_FAILED));
+
+    request("diagnose", null)
+        .andExpect(status().isBadGateway())
+        .andExpect(jsonPath("$.code").value("EXP-ERR-007"))
+        .andExpect(jsonPath("$.message").value("성공 기준 생성에 실패했습니다."));
+    assertNothingSaved();
+  }
+
+  @Test
+  void create_whenSuccessRuleAgentTimesOut_returnsGatewayTimeout_andSavesNothing() throws Exception {
+    when(successRuleClient.createSuccessRule(anyString(), anyString(), anyString()))
+        .thenThrow(new ApiException(ErrorCode.SUCCESS_RULE_TIMEOUT));
+
+    request("diagnose", null)
+        .andExpect(status().isGatewayTimeout())
+        .andExpect(jsonPath("$.code").value("EXP-ERR-008"));
+    assertNothingSaved();
+  }
+
+  @Test
+  void create_whenProjectDeletedDuringLlmCall_returnsNotFound_andSavesNothing() throws Exception {
+    // 성공 기준을 기다리는 동안 리서처가 프로젝트를 지웠다 — 잠근 뒤 다시 읽어 알아챈다
+    when(successRuleClient.createSuccessRule(anyString(), anyString(), anyString())).thenAnswer(invocation -> {
+      projectService.deleteProject(userId, projectId);
+      return "rule";
+    });
+
+    request("diagnose", null)
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("PRJ-ERR-001"));
+    assertNothingSaved();
   }
 
   @Test
@@ -195,6 +292,14 @@ class RunControllerTest {
     return mvc.perform(post("/api/projects/{projectId}/runs", projectId).header(HttpHeaders.AUTHORIZATION, bearer)
         .contentType(MediaType.APPLICATION_JSON)
         .content(json));
+  }
+
+  private void assertNothingSaved() {
+    assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM tasks WHERE project_id = ?", Integer.class, projectId))
+        .isZero();
+    assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM runs WHERE project_id = ?", Integer.class, projectId))
+        .isZero();
+    verify(agentClient, never()).dispatch(anyLong());
   }
 
   private ResultActions cancel(long firstRunId) throws Exception {

@@ -30,6 +30,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:-}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       AGENT_BASE_URL: http://agent:8000
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN:-}   # 내부 API 공유 토큰 (X-Internal-Token) — agent 와 같은 값
       WEB_ORIGIN: http://localhost:5173
       TZ: Asia/Seoul                     # JVM 기본 시간대 — LocalDateTime.now() 를 MySQL(+09:00) 과 같은 시계로
     ports: ["127.0.0.1:8080:8080"]
@@ -44,6 +45,7 @@ services:
       LLM_API_KEY: ${LLM_API_KEY}
       LLM_MODEL: ${LLM_MODEL}
       DB_URL: mysql+pymysql://${MYSQL_USER:-uxight}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE:-uxight}
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN:-}   # 내부 API 공유 토큰 (X-Internal-Token) — api 와 같은 값
       LOG_DIR: /app/data/runs            # step 로그 → 아래 data/ 볼륨. 절대 경로 (DB log_path 는 이 기준 상대 경로)
       HOME: /tmp                         # read_only 컨테이너에서 Chromium 이 쓸 HOME (tmpfs)
       TZ: Asia/Seoul                     # step 로그 시각을 호스트 실행과 같은 KST 로

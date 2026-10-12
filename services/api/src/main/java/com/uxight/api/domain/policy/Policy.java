@@ -13,6 +13,7 @@ import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -53,4 +54,27 @@ public class Policy {
 
   @Column(insertable = false, updatable = false)
   private LocalDateTime updatedAt;
+
+  /**
+   * 회차의 policy_snapshot 으로 복사할 값. 키는 AI 모듈이 읽는 snake_case 다.
+   * daily_token_budget 은 넣지 않는다 — 모든 회차가 나눠 쓰는 한도라 AI 모듈이 매번 policies 의 현재 값을 읽는다 (design-decision 5.5).
+   * 값이 없는(null) 항목은 빼서 AI 모듈의 기본값을 쓰게 한다.
+   */
+  public Map<String, Object> toSnapshot() {
+    Map<String, Object> snapshot = new LinkedHashMap<>();
+    putIfPresent(snapshot, "max_steps", maxSteps);
+    putIfPresent(snapshot, "max_seconds", maxSeconds);
+    putIfPresent(snapshot, "max_tokens", maxTokens);
+    putIfPresent(snapshot, "run_concurrency", runConcurrency);
+    putIfPresent(snapshot, "persona_concurrency", personaConcurrency);
+    putIfPresent(snapshot, "rate_limit_per_domain", rateLimitPerDomain);
+    putIfPresent(snapshot, "model_map", modelMap);
+    return snapshot;
+  }
+
+  private static void putIfPresent(Map<String, Object> snapshot, String key, Object value) {
+    if (value != null) {
+      snapshot.put(key, value);
+    }
+  }
 }
