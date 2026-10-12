@@ -125,6 +125,14 @@ class RunRepository:
                 {"run_id": run_id},
             )
 
+    def touch_heartbeat(self, run_id: int) -> None:
+        # Watcher 감시 주기마다 갱신한다. Spring 은 이 값이 임계보다 오래되면 stale 로 보여준다.
+        with engine.begin() as conn:
+            conn.execute(
+                text("UPDATE runs SET heartbeat_at = NOW() WHERE run_id = :run_id"),
+                {"run_id": run_id},
+            )
+
     def is_cancel_requested(self, run_id: int) -> bool:
         with engine.begin() as conn:
             return conn.execute(

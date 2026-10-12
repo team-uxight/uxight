@@ -1,9 +1,11 @@
 import asyncio
+import contextlib
 import logging
-from collections.abc import Awaitable
+from collections.abc import AsyncIterator, Awaitable
 from dataclasses import asdict
 from typing import Literal, TypeVar
 
+from ..db import settings
 from ..driver.dom_driver import DomDriver
 from ..persona.persona_agent import MockDecider, PersonaAgent, StepResult
 from ..repositories.run_persona_repository import PersonaOutcome, run_persona_repository
@@ -14,8 +16,19 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
-# 감시 태스크가 cancel_requested를 확인하는 간격. 취소 요청 후 10초 안에 취소되도록 짧게 둔다.
+# 감시 태스크가 cancel_requested를 확인하고 heartbeat_at을 갱신하는 간격.
+# 취소 요청 후 10초 안에 취소되도록 짧게 둔다.
 CANCEL_POLL_SECONDS = 2
+
+# policy_snapshot 에 값이 없을 때 쓰는 기본값. Spring 은 null 인 정책 항목을 스냅샷에서 빼고
+# AI 모듈의 기본값을 쓰게 한다 (Policy.toSnapshot).
+# step 상한 20 — agent-safety §2 한도 · decisions T5. 시간 상한 10분 — architecture §3.3.
+DEFAULT_MAX_STEPS = 20
+DEFAULT_MAX_SECONDS = 600
+
+# 프로세스 전역 Persona 동시 상한. 회차마다 세마포어를 만들면 회차가 늘수록 동시 브라우저 수가
+# 곱해져 RAM 상한이 무너진다 (architecture §3.1). 모든 회차의 Persona 가 이 자리를 나눠 쓴다.
+persona_slots = asyncio.Semaphore(settings.max_concurrent_personas)
 
 # Walking Skeleton: 실제 LLM 대신 규칙 기반 대역을 쓴다. 상태가 없어 페르소나끼리 공유한다.
 decider = MockDecider()
@@ -38,12 +51,25 @@ class RunOrchestrator:
         return snapshot
 
     async def run_personas(self, run_id: int, snapshot: RunSnapshot) -> None:
+        # 202 로 수락한 뒤라 여기서 난 예외는 Spring 에 닿지 않는다. 어디서 예외가 나든
+        # 회차와 페르소나를 running 으로 남기지 않고 실패로 마감한다.
+        try:
+            await self._run_all_personas(run_id, snapshot)
+        except Exception as exc:
+            # 자세한 내용은 로그에만 남긴다 — 예외 문구에는 SQL · DB 주소가 섞일 수 있다.
+            logger.exception("run=%s failed, closing as failed", run_id)
+            self._fail_run(run_id, error=f"실행 오류로 중단: {type(exc).__name__}")
+
+    async def _run_all_personas(self, run_id: int, snapshot: RunSnapshot) -> None:
         target_url = snapshot.target_url
         task = snapshot.task
         personas = snapshot.personas
-        max_steps = snapshot.policy["max_steps"]
-        # 요청된 페르소나 수만큼 세마포어를 두고 병렬 수행한다.
-        semaphore = asyncio.Semaphore(len(personas))
+        policy = snapshot.policy
+        max_steps = policy.get("max_steps") or DEFAULT_MAX_STEPS
+        max_seconds = policy.get("max_seconds") or DEFAULT_MAX_SECONDS
+        # 회차 안 동시 수. 전역 자리(persona_slots)도 함께 잡으므로 실제 상한은 둘 중 작은 값이다.
+        # 값이 없으면 회차 안 제한 없이 전역 상한만 따른다.
+        run_slots = asyncio.Semaphore(policy.get("persona_concurrency") or len(personas))
         # 런 단위 취소 신호. 감시 태스크나 스텝 종료 후 확인에서 취소 요청을 발견하면
         # 이 신호를 켜고, 신호가 켜지면 아직 끝나지 않은 페르소나가 모두 멈춘다.
         cancel_event = asyncio.Event()
@@ -54,7 +80,14 @@ class RunOrchestrator:
             results = await asyncio.gather(
                 *(
                     self._run_single_persona(
-                        run_id, target_url, task, persona, max_steps, semaphore, cancel_event
+                        run_id,
+                        target_url,
+                        task,
+                        persona,
+                        max_steps,
+                        max_seconds,
+                        run_slots,
+                        cancel_event,
                     )
                     for persona in personas
                 ),
@@ -62,6 +95,7 @@ class RunOrchestrator:
             )
         finally:
             watcher.cancel()
+        unfinished = []
         for persona, result in zip(personas, results, strict=True):
             if isinstance(result, BaseException):
                 logger.error(
@@ -70,7 +104,18 @@ class RunOrchestrator:
                     persona["persona_id"],
                     exc_info=result,
                 )
+                unfinished.append(persona["persona_id"])
+        if unfinished:
+            # 종료 처리(DB 기록)가 실패한 페르소나는 running 으로 남아 있을 수 있다.
+            raise RuntimeError(f"persona finish failed: {unfinished}")
         self._finish_run(run_id)
+
+    def _fail_run(self, run_id: int, error: str) -> None:
+        # running 으로 남은 페르소나를 fail 로 정리한 뒤 회차를 failed 로 마감한다.
+        for persona_id, status in run_persona_repository.get_statuses(run_id).items():
+            if status == "running":
+                run_persona_repository.mark_finished(run_id, persona_id, "fail")
+        run_repository.mark_failed(run_id, error=error)
 
     def _finish_run(self, run_id: int) -> None:
         statuses = run_persona_repository.get_statuses(run_id)
@@ -109,20 +154,21 @@ class RunOrchestrator:
         task: dict,
         persona: dict,
         max_steps: int,
-        semaphore: asyncio.Semaphore,
+        max_seconds: float,
+        run_slots: asyncio.Semaphore,
         cancel_event: asyncio.Event,
     ) -> None:
         persona_id = persona["persona_id"]
         outcome: PersonaOutcome
-        async with semaphore:
-            if cancel_event.is_set():
+        async with self._persona_slot(run_slots, cancel_event) as acquired:
+            if not acquired or cancel_event.is_set():
                 # 시작 전에 취소된 런 - 브라우저를 띄우지 않고 바로 취소 처리한다.
                 logger.info("run=%s persona=%s 시작 전 취소 (브라우저 없음)", run_id, persona_id)
                 outcome = "cancelled"
             else:
                 try:
                     outcome = await self._drive_persona(
-                        run_id, target_url, task, persona, max_steps, cancel_event
+                        run_id, target_url, task, persona, max_steps, max_seconds, cancel_event
                     )
                     if outcome == "cancelled":
                         # _drive_persona는 async with를 빠져나온 뒤 반환하므로
@@ -132,6 +178,11 @@ class RunOrchestrator:
                             run_id,
                             persona_id,
                         )
+                except TimeoutError:
+                    logger.info(
+                        "run=%s persona=%s exceeded max_seconds=%s", run_id, persona_id, max_seconds
+                    )
+                    outcome = "timeout"
                 except Exception:
                     # 브라우저 실행 실패, 시작 URL 접근 실패 등
                     # - 페르소나를 running에 남기지 않는다.
@@ -142,6 +193,21 @@ class RunOrchestrator:
         run_persona_repository.mark_finished(run_id, persona_id, outcome)
         run_repository.refresh_progress(run_id)
 
+    @contextlib.asynccontextmanager
+    async def _persona_slot(
+        self, run_slots: asyncio.Semaphore, cancel_event: asyncio.Event
+    ) -> AsyncIterator[bool]:
+        """회차 자리 → 전역 자리 순으로 잡는다. 전역 자리를 기다리다 취소되면 False."""
+        async with run_slots:
+            # 전역 자리는 다른 회차의 페르소나가 시간 상한까지 쥐고 있을 수 있다.
+            # 기다리는 동안에도 취소 신호를 받아야 취소 요청 후 10초 안에 멈춘다.
+            acquired, _ = await self._run_unless_cancelled(persona_slots.acquire(), cancel_event)
+            try:
+                yield acquired
+            finally:
+                if acquired:
+                    persona_slots.release()
+
     async def _drive_persona(
         self,
         run_id: int,
@@ -149,12 +215,15 @@ class RunOrchestrator:
         task: dict,
         persona: dict,
         max_steps: int,
+        max_seconds: float,
         cancel_event: asyncio.Event,
     ) -> Literal["done", "max_steps", "cancelled"]:
         persona_id = persona["persona_id"]
         step_log_writer.prepare(run_id, persona_id)
         # 어느 경로로 return하든 async with를 빠져나가며 브라우저(컨텍스트, 페이지 포함)를 폐기한다.
-        async with DomDriver() as driver:
+        # 시간 상한은 자리를 잡은 뒤 브라우저 시작부터 잰다. 넘으면 진행 중인 스텝을 끊고
+        # TimeoutError 로 빠져나간다. 브라우저 닫기는 상한이 풀린 뒤라 도중에 끊기지 않는다.
+        async with DomDriver() as driver, asyncio.timeout(max_seconds):
             started, _ = await self._run_unless_cancelled(driver.start(target_url), cancel_event)
             if not started:
                 logger.info("run=%s persona=%s 브라우저 시작 중단", run_id, persona_id)
@@ -205,15 +274,18 @@ class RunOrchestrator:
         # 한 스텝(페이지 로드 대기, 이후 LLM 호출 등)이 10초를 넘을 수 있어서,
         # 스텝이 끝날 때만 확인해서는 10초 안에 취소된다고 보장할 수 없다.
         # 짧은 간격으로 따로 확인해 진행 중인 스텝을 중단시킨다.
+        # 같은 주기로 heartbeat_at 을 갱신한다 — 스텝이 길어도 살아 있음 신호가 끊기지 않는다.
+        # 첫 확인은 기다리지 않고 바로 한다. 실행 전에 취소된 회차는 브라우저를 띄우기 전에 멈춘다.
         while not cancel_event.is_set():
-            await asyncio.sleep(CANCEL_POLL_SECONDS)
             try:
                 if run_repository.is_cancel_requested(run_id):
                     logger.info("run=%s 취소 요청 감지", run_id)
                     cancel_event.set()
+                run_repository.touch_heartbeat(run_id)
             except Exception:
                 # 일시적인 DB 오류로 감시가 멈추지 않도록 기록만 하고 다음 주기에 다시 확인한다.
-                logger.exception("run=%s 취소 요청 확인 실패", run_id)
+                logger.exception("run=%s cancel check or heartbeat failed", run_id)
+            await asyncio.sleep(CANCEL_POLL_SECONDS)
 
     @staticmethod
     async def _run_unless_cancelled(
