@@ -9,6 +9,8 @@ spring:
     hibernate.ddl-auto: none   # 스키마는 Flyway 만 (소유권: api)
     open-in-view: false
   flyway.locations: classpath:db/migration
+  # 정수 칸에 소수(1.5)가 오면 잘라서(1) 받지 않고 400 GLB-ERR-001 로 거절한다 — 한도 · id 가 조용히 바뀌지 않게
+  jackson.deserialization.accept-float-as-int: false
 
 uxight:
   agent-base-url: ${AGENT_BASE_URL:http://localhost:8000}

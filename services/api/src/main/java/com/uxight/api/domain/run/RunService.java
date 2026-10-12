@@ -2,6 +2,8 @@ package com.uxight.api.domain.run;
 
 import com.uxight.api.common.ApiException;
 import com.uxight.api.common.ErrorCode;
+import com.uxight.api.domain.audit.AuditLog;
+import com.uxight.api.domain.audit.AuditLogRepository;
 import com.uxight.api.domain.persona.Persona;
 import com.uxight.api.domain.persona.PersonaRepository;
 import com.uxight.api.domain.policy.PolicyService;
@@ -31,6 +33,7 @@ public class RunService {
 
   private static final Set<String> EXPERIMENT_STATES = Set.of("in_progress", "awaiting_approval", "completed", "stopped");
   private static final Set<String> CANCELLABLE_STATES = Set.of("in_progress", "awaiting_approval");
+  static final String AUDIT_ACTION_CANCEL_ALL = "run.cancel_all";
   private static final ZoneId WEEK_ZONE = ZoneId.of("Asia/Seoul");   // 이번 주 계산 기준 — 서비스 사용자 시간대
 
   private final ProjectRepository projectRepository;
@@ -42,12 +45,13 @@ public class RunService {
   private final SuccessRuleClient successRuleClient;
   private final AgentClient agentClient;
   private final TransactionTemplate transactionTemplate;
+  private final AuditLogRepository auditLogRepository;
 
   @Autowired
   public RunService(ProjectRepository projectRepository, PersonaRepository personaRepository,
       PolicyService policyService, TaskService taskService, RunRepository runRepository,
       ExperimentQueryRepository experimentQueryRepository, SuccessRuleClient successRuleClient, AgentClient agentClient,
-      TransactionTemplate transactionTemplate) {
+      AuditLogRepository auditLogRepository, TransactionTemplate transactionTemplate) {
     this.projectRepository = projectRepository;
     this.personaRepository = personaRepository;
     this.policyService = policyService;
@@ -57,6 +61,7 @@ public class RunService {
     this.successRuleClient = successRuleClient;
     this.agentClient = agentClient;
     this.transactionTemplate = transactionTemplate;
+    this.auditLogRepository = auditLogRepository;
   }
 
   /**
@@ -224,6 +229,27 @@ public class RunService {
       // status 는 바꾸지 않는다 — 실제 중단 시점을 아는 AI 모듈이 cancelled 로 기록한다.
       // 판정 뒤 회차가 done 으로 끝났어도 기록한다 — 그 실험의 종료 유형은 취소다.
       runRepository.requestCancel(lastRound.getId());
+    });
+  }
+
+  /**
+   * 전체 실험 중단(kill switch) — 모든 프로젝트의 진행 중(queued · accepted · running)이고 아직 취소 요청이 없는 회차에
+   * cancel_requested 를 기록하고, 그 수를 돌려준다 (design-decision 4.5). 승인 대기 중인 실험은 실행 자원을 쓰지 않아 빠진다.
+   * 프로젝트마다 진행 중인 실험은 하나이고 그 실험의 진행 중인 회차는 마지막 회차 하나뿐이라, 기록한 회차 수 = 중단한 실험 수다.
+   * 이후는 실험 취소와 같다 — AI 모듈이 실행 전 · step 경계에서 확인해 멈추고 status 를 cancelled 로 기록한다.
+   * 지금 진행 중인 회차만 대상이다. 새 실험 요청을 막는 스위치는 아니다.
+   * 조작은 감사 로그(run.cancel_all)에 남긴다 — 대상이 없어도 남긴다(관리자가 눌렀다는 기록).
+   */
+  public int cancelAll(Long adminId) {
+    return transactionTemplate.execute(tx -> {
+      List<Long> runIds = runRepository.lockInProgressRunIdsWithoutCancelRequest();
+      if (!runIds.isEmpty()) {
+        runRepository.markCancelRequested(runIds);
+      }
+      auditLogRepository.save(AuditLog.byUser(adminId, AUDIT_ACTION_CANCEL_ALL, "runs",
+          Map.of("cancelledCount", runIds.size(), "runIds", runIds)));
+      log.info("cancel-all by user {}: {} run(s) {}", adminId, runIds.size(), runIds);
+      return runIds.size();
     });
   }
 

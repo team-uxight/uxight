@@ -54,6 +54,20 @@ public interface RunRepository extends JpaRepository<Run, Long> {
   int updateDispatchState(@Param("runId") Long runId, @Param("state") DispatchState state);
 
   /**
+   * 전체 중단 대상 — 모든 프로젝트에서 진행 중(queued · accepted · running)이고 아직 취소 요청이 없는 회차의 run_id.
+   * 행을 잠근다(FOR UPDATE): 이어서 기록할 때까지 Python 이 status 를 바꾸지 못해, 기록한 회차와 감사 로그의 목록이 같다.
+   * 승인 대기 중인 실험(마지막 회차 done)은 실행 자원을 쓰지 않으므로 status 조건에서 빠진다. 트랜잭션 안에서만 쓴다.
+   */
+  @Query(value = "SELECT run_id FROM runs WHERE status IN ('queued', 'accepted', 'running') AND cancel_requested = FALSE "
+      + "ORDER BY run_id FOR UPDATE", nativeQuery = true)
+  List<Long> lockInProgressRunIdsWithoutCancelRequest();
+
+  @Transactional
+  @Modifying(flushAutomatically = true, clearAutomatically = true)   // 영속성 컨텍스트에 옛 값이 남지 않게
+  @Query("UPDATE Run r SET r.cancelRequested = true WHERE r.id IN :runIds")
+  int markCancelRequested(@Param("runIds") Collection<Long> runIds);
+
+  /**
    * 회차에 취소 요청을 기록한다 — cancel_requested 한 컬럼만 한 줄 UPDATE 로 바꿔 Python 이 그사이 쓴 컬럼을 건드리지 않는다.
    * 취소할 수 있는지(진행 중 · 승인 대기)는 RunService 가 프로젝트 행을 잠근 뒤 판정한다. 기록했으면 true.
    */
