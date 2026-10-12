@@ -165,9 +165,4 @@ public class Run {
   public void markAsFirstRound() {
     this.firstRun = this;
   }
-
-  /** 진행 중(queued · accepted · running)인가. 읽은 뒤 Python 이 바꿀 수 있으므로 최종 판정은 조건부 UPDATE 로 한다. */
-  public boolean isInProgress() {
-    return status.isInProgress();
-  }
 }

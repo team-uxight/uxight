@@ -7,6 +7,7 @@ import static org.mockito.Mockito.when;
 
 import com.uxight.api.common.ApiException;
 import com.uxight.api.common.ErrorCode;
+import com.uxight.api.domain.project.ProjectRepository;
 import com.uxight.api.domain.task.SuccessRuleClient;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -15,11 +16,14 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.transaction.support.TransactionTemplate;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.TimeUnit;
 
@@ -36,6 +40,12 @@ class RunConcurrencyTest {
 
   @Autowired
   private JdbcTemplate jdbcTemplate;
+
+  @Autowired
+  private ProjectRepository projectRepository;
+
+  @Autowired
+  private TransactionTemplate transactionTemplate;
 
   @MockitoBean
   private SuccessRuleClient successRuleClient;
@@ -73,6 +83,31 @@ class RunConcurrencyTest {
   }
 
   @Test
+  void cancel_waitsForProjectLock_thenRecordsOnLastRound() throws Exception {
+    when(successRuleClient.createSuccessRule(anyString(), anyString(), anyString())).thenReturn("rule");
+    Long firstRunId = runService.createExperiment(userId, projectId, new ExperimentCreateRequest(
+        "구매", "https://a.example.com/done", List.of(personaId), "diagnose", null));
+
+    // 다음 회차 승인 대역: 프로젝트 행을 잠근 채 잠시 붙잡는다 — 취소는 그동안 기다렸다가 잠금이 풀린 뒤 마지막 회차를 다시 읽는다
+    CountDownLatch locked = new CountDownLatch(1);
+    CompletableFuture<Void> holder = CompletableFuture.runAsync(() -> transactionTemplate.executeWithoutResult(tx -> {
+      projectRepository.findForUpdate(projectId, userId).orElseThrow();
+      locked.countDown();
+      sleep(Duration.ofMillis(1500));
+    }));
+    assertThat(locked.await(10, TimeUnit.SECONDS)).isTrue();
+
+    long start = System.nanoTime();
+    runService.cancelExperiment(userId, firstRunId);
+    Duration waited = Duration.ofNanos(System.nanoTime() - start);
+    holder.get(10, TimeUnit.SECONDS);
+
+    assertThat(waited).isGreaterThan(Duration.ofMillis(1000));   // 잠금이 풀릴 때까지 기다렸다
+    assertThat(jdbcTemplate.queryForObject("SELECT cancel_requested FROM runs WHERE run_id = ?", Boolean.class,
+        firstRunId)).isTrue();
+  }
+
+  @Test
   void concurrentRequests_createOnlyOneExperiment() throws Exception {
     // 두 요청이 모두 성공 기준 생성(트랜잭션 밖)까지 온 뒤에야 함께 다음 단계로 간다
     CyclicBarrier bothPassedPreCheck = new CyclicBarrier(2);
@@ -104,5 +139,14 @@ class RunConcurrencyTest {
         .isEqualTo(1);
     assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM tasks WHERE project_id = ?", Integer.class, projectId))
         .isEqualTo(1);   // 거절된 쪽의 Task 는 롤백됐다
+  }
+
+  private static void sleep(Duration duration) {
+    try {
+      Thread.sleep(duration);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException(e);
+    }
   }
 }

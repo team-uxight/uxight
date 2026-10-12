@@ -16,8 +16,4 @@ public enum RunStatus {
 
   /** 진행 중 = 프로젝트의 실험 자리를 점유한다 (design-decision 5.2). 취소 요청된 회차도 실제로 멈추기 전까지는 진행 중이다. */
   public static final Set<RunStatus> IN_PROGRESS = Set.of(queued, accepted, running);
-
-  public boolean isInProgress() {
-    return IN_PROGRESS.contains(this);
-  }
 }

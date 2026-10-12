@@ -257,31 +257,105 @@ class RunControllerTest {
         .andExpect(jsonPath("$.content[0].personaCount").value(1));
   }
 
-  @Test
-  void cancel_inProgress_recordsRequest_andIsIdempotent() throws Exception {
+  @ParameterizedTest
+  @ValueSource(strings = {"queued", "accepted", "running"})
+  void cancel_inProgress_recordsRequest_onLastRound_andIsIdempotent(String runStatus) throws Exception {
     long runId = createAndGetRunId("diagnose", null);
+    setLastRoundStatus(runId, runStatus);
 
     cancel(runId).andExpect(status().isAccepted());
     cancel(runId).andExpect(status().isAccepted());   // 이미 취소 요청됨 — 멱등
 
     assertThat(jdbcTemplate.queryForMap("SELECT cancel_requested, status FROM runs WHERE run_id = ?", runId))
         .containsEntry("cancel_requested", true)
-        .containsEntry("status", "queued");   // status 는 Python 이 바꾼다
+        .containsEntry("status", runStatus);   // status 는 AI 모듈이 실제로 멈출 때 cancelled 로 바꾼다
+    // 실험은 중단(취소 진행 중)으로 보이고, 회차가 멈추기 전까지 프로젝트를 점유한다
+    mvc.perform(get("/api/runs").header(HttpHeaders.AUTHORIZATION, bearer))
+        .andExpect(jsonPath("$.content[0].state").value("stopped"))
+        .andExpect(jsonPath("$.content[0].endType").value("cancelling"));
+    request("diagnose", null).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("EXP-ERR-004"));
   }
 
   @Test
-  void cancel_finishedOrOthersExperiment_isRejected() throws Exception {
+  void cancel_recordsOnLastRoundOfMultiRoundExperiment() throws Exception {
+    long first = createAndGetRunId("loop", 3);
+    setLastRoundStatus(first, "done");
+    // 다음 회차(승인 뒤 Spring 이 만든다 — 아직 기능 전이라 SQL 로 만든다)
+    jdbcTemplate.update("INSERT INTO runs (project_id, task_id, mode, loop_max, parent_run_id, first_run_id, "
+        + "target_url_snapshot, allowed_domains_snapshot, task_snapshot, policy_snapshot, persona_snapshot, status) "
+        + "SELECT project_id, task_id, mode, loop_max, run_id, run_id, target_url_snapshot, allowed_domains_snapshot, "
+        + "task_snapshot, policy_snapshot, persona_snapshot, 'running' FROM runs WHERE run_id = ?", first);
+    Long second = jdbcTemplate.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+
+    cancel(first).andExpect(status().isAccepted());
+
+    assertThat(jdbcTemplate.queryForList("SELECT cancel_requested FROM runs WHERE run_id IN (?, ?) ORDER BY run_id",
+        Boolean.class, first, second)).containsExactly(false, true);
+  }
+
+  @ParameterizedTest(name = "{0} → 409")
+  @ValueSource(strings = {"done", "failed", "cancelled"})
+  void cancel_completedOrStoppedWithoutRequest_isConflict(String runStatus) throws Exception {
     long runId = createAndGetRunId("diagnose", null);
-    jdbcTemplate.update("UPDATE runs SET status = 'done' WHERE run_id = ?", runId);
-    entityManager.clear();
+    setLastRoundStatus(runId, runStatus);
 
     cancel(runId)
         .andExpect(status().isConflict())
-        .andExpect(jsonPath("$.code").value("EXP-ERR-006"));
+        .andExpect(jsonPath("$.code").value("EXP-ERR-006"))
+        .andExpect(jsonPath("$.message").value("취소할 수 있는 실험이 아닙니다."));
+    assertThat(jdbcTemplate.queryForObject("SELECT cancel_requested FROM runs WHERE run_id = ?", Boolean.class, runId))
+        .isFalse();
+  }
+
+  @Test
+  void cancel_alreadyRequestedThenFailed_isStillAccepted() throws Exception {
+    long runId = createAndGetRunId("diagnose", null);
+    jdbcTemplate.update("UPDATE runs SET cancel_requested = TRUE, status = 'failed' WHERE run_id = ?", runId);
+    entityManager.clear();
+
+    cancel(runId).andExpect(status().isAccepted());   // 이미 취소 요청이 있으면 상태와 관계없이 202
+  }
+
+  @Test
+  void cancel_othersOrNonFirstRoundOrMissing_returnsNotFound() throws Exception {
+    long runId = createAndGetRunId("loop", 3);
+    jdbcTemplate.update("INSERT INTO runs (project_id, task_id, mode, loop_max, parent_run_id, first_run_id, "
+        + "target_url_snapshot, allowed_domains_snapshot, task_snapshot, policy_snapshot, persona_snapshot, status) "
+        + "SELECT project_id, task_id, mode, loop_max, run_id, run_id, target_url_snapshot, allowed_domains_snapshot, "
+        + "task_snapshot, policy_snapshot, persona_snapshot, 'queued' FROM runs WHERE run_id = ?", runId);
+    Long secondRound = jdbcTemplate.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+
     mvc.perform(post("/api/runs/{firstRunId}/cancel", runId)
             .header(HttpHeaders.AUTHORIZATION, "Bearer " + jwtProvider.createAccessToken(otherUser())))
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.code").value("EXP-ERR-001"));
+    for (Long id : new Long[] {secondRound, Long.MAX_VALUE}) {
+      cancel(id).andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("EXP-ERR-001"));
+    }
+  }
+
+  @Test
+  void cancel_withNonNumericId_returnsBadRequest() throws Exception {
+    mvc.perform(post("/api/runs/{firstRunId}/cancel", "abc").header(HttpHeaders.AUTHORIZATION, bearer))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("GLB-ERR-001"));
+  }
+
+  @Test
+  void cancel_withoutTokenOrByInactiveUser_returnsUnauthorized() throws Exception {
+    mvc.perform(post("/api/runs/{firstRunId}/cancel", 1))
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("AUT-ERR-001"));
+    jdbcTemplate.update("UPDATE users SET is_active = FALSE WHERE user_id = ?", userId);
+    mvc.perform(post("/api/runs/{firstRunId}/cancel", 1).header(HttpHeaders.AUTHORIZATION, bearer))
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("AUT-ERR-005"));
+  }
+
+  /** Python 이 회차 status 를 바꾼 것을 흉내 낸다. 영속성 컨텍스트에 남은 옛 값을 비운다. */
+  private void setLastRoundStatus(long runId, String runStatus) {
+    jdbcTemplate.update("UPDATE runs SET status = ? WHERE run_id = ?", runStatus, runId);
+    entityManager.clear();
   }
 
   // ───────── 요청 검증 · 실패 응답 ─────────
