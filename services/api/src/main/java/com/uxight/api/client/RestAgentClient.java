@@ -1,7 +1,9 @@
 package com.uxight.api.client;
 
 import com.uxight.api.domain.run.AgentClient;
+import com.uxight.api.domain.run.DispatchState;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -20,10 +22,15 @@ import java.util.concurrent.CompletableFuture;
 @Slf4j
 public class RestAgentClient implements AgentClient {
 
+  /** 내부 API 공유 토큰 헤더. AI 모듈은 자기 환경 변수 값과 다르면 401 을 응답한다 (design-decision 9). */
+  public static final String INTERNAL_TOKEN_HEADER = "X-Internal-Token";
+
   private final String agentBaseUrl;
   private final RestClient restClient;
 
-  public RestAgentClient(@Value("${uxight.agent-base-url}") String agentBaseUrl) {
+  @Autowired
+  public RestAgentClient(@Value("${uxight.agent-base-url}") String agentBaseUrl,
+      @Value("${uxight.internal-token}") String internalToken) {
     this.agentBaseUrl = agentBaseUrl;
 
     SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
@@ -33,17 +40,18 @@ public class RestAgentClient implements AgentClient {
     this.restClient = RestClient.builder()
         .baseUrl(agentBaseUrl)
         .requestFactory(requestFactory)
+        .defaultHeader(INTERNAL_TOKEN_HEADER, internalToken)   // 토큰 값은 로그에 남기지 않는다
         .build();
   }
 
   // 요청 스레드 밖에서 돈다 — 실험 요청은 Python 응답을 기다리지 않는다.
   @Async
   @Override
-  public CompletableFuture<Optional<String>> dispatch(Long runId) {
+  public CompletableFuture<Optional<DispatchState>> dispatch(Long runId) {
     return CompletableFuture.completedFuture(send(runId));
   }
 
-  private Optional<String> send(Long runId) {
+  private Optional<DispatchState> send(Long runId) {
     // 스냅샷은 runs 행에 있으므로 run_id 만 보낸다 (내부 API 1). 내부 API JSON 은 snake_case.
     Map<String, Object> requestBody = Map.of("run_id", runId);
 
@@ -58,17 +66,17 @@ public class RestAgentClient implements AgentClient {
 
       log.info("Python responded {} for run_id={}", response.getStatusCode(), runId);
       if (response.getStatusCode().value() == 202) {
-        return Optional.of("sent");
+        return Optional.of(DispatchState.sent);
       }
       // 200: 이미 받은 회차에 대한 멱등 응답 — 최초 수락 때 이미 "sent"로 기록되어 있으므로 건드리지 않는다.
       return Optional.empty();
     } catch (ResourceAccessException e) {
       boolean isTimeout = e.getCause() instanceof SocketTimeoutException;
       log.warn("Python {} for run_id={}: {}", isTimeout ? "timeout" : "unreachable", runId, e.getMessage());
-      return Optional.of(isTimeout ? "timeout" : "unreachable");
+      return Optional.of(isTimeout ? DispatchState.timeout : DispatchState.unreachable);
     } catch (Exception e) {
       log.warn("Unexpected error dispatching run_id={}: {}", runId, e.getMessage());
-      return Optional.of("unreachable");
+      return Optional.of(DispatchState.unreachable);
     }
   }
 }

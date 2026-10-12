@@ -1,25 +1,17 @@
 package com.uxight.api.repository.run;
 
+import com.uxight.api.domain.run.ExperimentQueryRepository;
 import com.uxight.api.domain.run.ExperimentSummary;
-import com.uxight.api.domain.run.Run;
-import com.uxight.api.domain.run.RunRepository;
-import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.support.GeneratedKeyHolder;
-import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Repository;
 
-import java.sql.PreparedStatement;
-import java.sql.Statement;
-import java.sql.Types;
 import java.util.List;
-import java.util.Optional;
 
+/** 실험 목록 · 건수 집계 SQL. 회차의 저장 · 변경은 RunRepository(JPA) 가 한다. */
 @Repository
-@Slf4j
-public class JdbcTemplateRunRepository implements RunRepository {
+public class JdbcTemplateExperimentQueryRepository implements ExperimentQueryRepository {
 
-  private static final RunRowMapper ROW_MAPPER = new RunRowMapper();
   private static final ExperimentSummaryRowMapper EXPERIMENT_ROW_MAPPER = new ExperimentSummaryRowMapper();
 
   // running 인데 heartbeat_at 이 이 시간보다 오래되면 stale. 임계값 미정 — [확인 필요]
@@ -60,72 +52,9 @@ public class JdbcTemplateRunRepository implements RunRepository {
 
   private final JdbcTemplate jdbcTemplate;
 
-  public JdbcTemplateRunRepository(JdbcTemplate jdbcTemplate) {
+  @Autowired
+  public JdbcTemplateExperimentQueryRepository(JdbcTemplate jdbcTemplate) {
     this.jdbcTemplate = jdbcTemplate;
-  }
-
-  @Override
-  public Long save(Run run) {
-    // PreparedStatementCreator 람다라 JdbcTemplate이 SQL을 자동으로 못 찍어줘서 직접 남긴다.
-    String sql = "INSERT INTO runs (project_id, task_id, mode, loop_max, target_url_snapshot, "
-        + "allowed_domains_snapshot, task_snapshot, policy_snapshot, persona_snapshot, cancel_requested, status) "
-        + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-    log.info("runs INSERT: {} [projectId={}, taskId={}, mode={}, status={}]",
-        sql, run.projectId(), run.taskId(), run.mode(), run.status());
-
-    KeyHolder keyHolder = new GeneratedKeyHolder();
-
-    jdbcTemplate.update(connection -> {
-      PreparedStatement ps = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS);
-      ps.setLong(1, run.projectId());
-      ps.setLong(2, run.taskId());
-      ps.setString(3, run.mode());
-      ps.setObject(4, run.loopMax(), Types.INTEGER);
-      ps.setString(5, run.targetUrlSnapshot());
-      ps.setString(6, run.allowedDomainsSnapshot());
-      ps.setString(7, run.taskSnapshot());
-      ps.setString(8, run.policySnapshot());
-      ps.setString(9, run.personaSnapshot());
-      ps.setBoolean(10, run.cancelRequested());
-      ps.setString(11, run.status());
-      return ps;
-    }, keyHolder);
-
-    return keyHolder.getKey().longValue();
-  }
-
-  @Override
-  public void updateFirstRunId(Long runId, Long firstRunId) {
-    jdbcTemplate.update("UPDATE runs SET first_run_id = ? WHERE run_id = ?", firstRunId, runId);
-  }
-
-  @Override
-  public void updateDispatchState(Long runId, String dispatchState) {
-    jdbcTemplate.update("UPDATE runs SET dispatch_state = ? WHERE run_id = ?", dispatchState, runId);
-  }
-
-  @Override
-  public Optional<Run> findLastRound(Long firstRunId, Long userId) {
-    return jdbcTemplate.query(
-        "SELECT r.* FROM runs r JOIN projects p ON r.project_id = p.project_id "
-        + "WHERE r.first_run_id = ? AND p.user_id = ? ORDER BY r.run_id DESC LIMIT 1",
-        ROW_MAPPER, firstRunId, userId)
-        .stream()
-        .findFirst();
-  }
-
-  @Override
-  public boolean existsInProgressByProjectId(Long projectId) {
-    return Boolean.TRUE.equals(jdbcTemplate.queryForObject(
-        "SELECT EXISTS (SELECT 1 FROM runs WHERE project_id = ? AND status IN ('queued', 'accepted', 'running'))",
-        Boolean.class, projectId));
-  }
-
-  @Override
-  public boolean requestCancel(Long runId) {
-    return jdbcTemplate.update(
-        "UPDATE runs SET cancel_requested = true WHERE run_id = ? AND status IN ('queued', 'accepted', 'running')",
-        runId) == 1;
   }
 
   @Override
