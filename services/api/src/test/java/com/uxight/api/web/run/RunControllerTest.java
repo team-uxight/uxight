@@ -1,6 +1,8 @@
 package com.uxight.api.web.run;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.hasSize;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
@@ -23,6 +25,10 @@ import com.uxight.api.domain.user.JwtProvider;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -37,6 +43,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.stream.Stream;
 
 /**
  * 실험 요청 · 목록 · 취소(Run 엔티티 전환 회귀). 실제 MySQL, 테스트마다 롤백.
@@ -277,9 +284,88 @@ class RunControllerTest {
         .andExpect(jsonPath("$.code").value("EXP-ERR-001"));
   }
 
+  // ───────── 요청 검증 · 실패 응답 ─────────
+
+  @ParameterizedTest(name = "[{index}] {1}")
+  @MethodSource("invalidCreateRequests")
+  void create_invalidInput_returnsInvalidInput_beforeCallingLlm(String json, String field) throws Exception {
+    requestJson(json.replace("{P}", personaId.toString()))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("GLB-ERR-002"))
+        .andExpect(jsonPath("$.fieldErrors[*].field").value(contains(field)));
+    verify(successRuleClient, never()).createSuccessRule(anyString(), anyString(), anyString());
+    assertNothingSaved();
+  }
+
+  static Stream<Arguments> invalidCreateRequests() {
+    String url = "\"successUrl\":\"https://shop.example.com/done\"";
+    String personas = "\"personaIds\":[{P}]";
+    String mode = "\"mode\":\"diagnose\"";
+    return Stream.of(
+        Arguments.of("{" + url + "," + personas + "," + mode + "}", "goal"),
+        Arguments.of("{\"goal\":\"   \"," + url + "," + personas + "," + mode + "}", "goal"),
+        Arguments.of("{\"goal\":\"" + "가".repeat(201) + "\"," + url + "," + personas + "," + mode + "}", "goal"),
+        Arguments.of("{\"goal\":\"g\"," + personas + "," + mode + "}", "successUrl"),
+        Arguments.of("{\"goal\":\"g\",\"successUrl\":\"javascript:alert(1)\"," + personas + "," + mode + "}", "successUrl"),
+        Arguments.of("{\"goal\":\"g\"," + url + "," + mode + "}", "personaIds"),
+        Arguments.of("{\"goal\":\"g\"," + url + ",\"personaIds\":[]," + mode + "}", "personaIds"),
+        Arguments.of("{\"goal\":\"g\"," + url + ",\"personaIds\":[null]," + mode + "}", "personaIds[0]"),
+        Arguments.of("{\"goal\":\"g\"," + url + ",\"personaIds\":[{P},{P}]," + mode + "}", "personaIds"),   // uniqueItems
+        Arguments.of("{\"goal\":\"g\"," + url + "," + personas + "}", "mode"),
+        Arguments.of("{\"goal\":\"g\"," + url + "," + personas + ",\"mode\":\"fast\"}", "mode"),
+        Arguments.of("{\"goal\":\"g\"," + url + "," + personas + ",\"mode\":\"loop\",\"loopMax\":0}", "loopMax"));
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"{\"goal\":", "{\"goal\":\"g\",\"personaIds\":\"1\"}", "{\"goal\":\"g\",\"loopMax\":\"many\"}"})
+  void create_unreadableBody_returnsBadRequest(String json) throws Exception {
+    requestJson(json)
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("GLB-ERR-001"));
+  }
+
+  @Test
+  void create_onOthersDeletedOrMissingProject_returnsNotFound() throws Exception {
+    jdbcTemplate.update("INSERT INTO projects (user_id, title, target_url, allowed_domains) "
+        + "VALUES (?, '남의 것', 'https://a.example.com', JSON_ARRAY('a.example.com'))", otherUser());
+    Long others = jdbcTemplate.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+    jdbcTemplate.update("INSERT INTO projects (user_id, title, target_url, allowed_domains, deleted_at) "
+        + "VALUES (?, '삭제함', 'https://a.example.com', JSON_ARRAY('a.example.com'), NOW())", userId);
+    Long deleted = jdbcTemplate.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+
+    for (Long id : new Long[] {others, deleted, Long.MAX_VALUE}) {
+      mvc.perform(post("/api/projects/{projectId}/runs", id).header(HttpHeaders.AUTHORIZATION, bearer)
+              .contentType(MediaType.APPLICATION_JSON)
+              .content("{\"goal\":\"구매\",\"successUrl\":\"https://a.example.com/done\",\"personaIds\":[" + personaId
+                  + "],\"mode\":\"diagnose\"}"))
+          .andExpect(status().isNotFound())
+          .andExpect(jsonPath("$.code").value("PRJ-ERR-001"));
+    }
+    verify(successRuleClient, never()).createSuccessRule(anyString(), anyString(), anyString());
+  }
+
+  @Test
+  void create_withoutTokenOrByInactiveUser_returnsUnauthorized() throws Exception {
+    mvc.perform(post("/api/projects/{projectId}/runs", projectId).contentType(MediaType.APPLICATION_JSON).content("{}"))
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("AUT-ERR-001"));
+
+    jdbcTemplate.update("UPDATE users SET is_active = FALSE WHERE user_id = ?", userId);
+    request("diagnose", null)
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("AUT-ERR-005"));
+  }
+
+  private ResultActions requestJson(String json) throws Exception {
+    return mvc.perform(post("/api/projects/{projectId}/runs", projectId).header(HttpHeaders.AUTHORIZATION, bearer)
+        .contentType(MediaType.APPLICATION_JSON)
+        .content(json));
+  }
+
   private long createAndGetRunId(String mode, Integer loopMax) throws Exception {
     String body = request(mode, loopMax)
         .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.*", hasSize(1)))   // ExperimentCreateResponse(runId) 만
         .andExpect(jsonPath("$.runId").isNumber())
         .andReturn().getResponse().getContentAsString();
     entityManager.flush();   // first_run_id UPDATE 는 커밋(여기서는 flush) 때 나간다

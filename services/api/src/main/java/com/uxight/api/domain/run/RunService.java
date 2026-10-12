@@ -67,11 +67,14 @@ public class RunService {
     if (mode == RunMode.loop && request.loopMax() == null) {
       throw ApiException.invalidField("loopMax", "mode가 loop이면 필수입니다");
     }
+    List<Long> personaIds = request.personaIds();
+    if (personaIds.stream().distinct().count() != personaIds.size()) {   // 명세 uniqueItems
+      throw ApiException.invalidField("personaIds", "같은 Persona를 두 번 선택할 수 없습니다");
+    }
 
     // 1. 잠금 없이 확인
     Project project = projectRepository.findByIdAndUserIdAndDeletedAtIsNull(projectId, userId)
         .orElseThrow(() -> new ApiException(ErrorCode.PROJECT_NOT_FOUND));
-    List<Long> personaIds = request.personaIds().stream().distinct().toList();
     List<Persona> personas = personaRepository.findUsableByIds(userId, personaIds);
     if (personas.size() != personaIds.size()) {
       throw new ApiException(ErrorCode.PERSONA_NOT_FOUND);
