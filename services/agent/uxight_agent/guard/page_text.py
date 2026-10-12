@@ -39,21 +39,24 @@ INSTRUCTION_PATTERNS: dict[str, re.Pattern[str]] = {
 def mark_instructions(text: str) -> tuple[str, list[str]]:
     """페이지 글에서 지시문 패턴을 찾아 (표시한 글, 걸린 패턴 이름 목록)을 돌려준다.
 
-    걸린 부분만 MARK_START · MARK_END 로 감싸고 나머지는 그대로 둔다. 안 걸리면 (원문, []).
-    찾기 전에 글을 다듬고, 돌려주는 글도 다듬은 글이다.
-    - 전각 · 호환 문자는 NFKC 로 바꾼다 ("시스템：" → "시스템:"). "①" → "1" 처럼 글이 바뀔 수 있다.
+    걸린 부분만 MARK_START · MARK_END 로 감싸고 원문 글자는 그대로 둔다. 안 걸리면 (원문, []).
+    패턴은 원문이 아니라 다듬은 글(_search_text)에서 찾는다.
+    - 전각 · 호환 문자는 NFKC 로 바꾼다 ("시스템：" → "시스템:").
     - 제로폭 · soft hyphen · 방향 제어 같은 보이지 않는 서식 문자(Cf)는 지운다.
-    - 원문의 [[ · ]] 는 하나로 줄여 표시를 흉내 내지 못하게 한다.
-      그래서 이미 표시한 글에 다시 쓰면 표시가 망가진다 — 원문에 한 번만 쓴다.
+    원문의 [[ · ]] 는 하나로 줄여 표시를 흉내 내지 못하게 한다 (_collapse_marks).
+    그래서 이미 표시한 글에 다시 쓰면 표시가 망가진다 — 원문에 한 번만 쓴다.
     """
-    text = unicodedata.normalize("NFKC", text)
-    text = "".join(char for char in text if unicodedata.category(char) != "Cf")
-    text = re.sub(r"\]\]+", "]", re.sub(r"\[\[+", "[", text))
+    text = _collapse_marks(text)
+    search, origin = _search_text(text)
 
     spans: list[tuple[int, int]] = []
     hits: list[str] = []
     for name, pattern in INSTRUCTION_PATTERNS.items():
-        found = [match.span() for match in pattern.finditer(text)]
+        found = [
+            (origin[match.start()][0], origin[match.end() - 1][1])
+            for match in pattern.finditer(search)
+            if match.group()  # 빈 매치는 감쌀 글이 없다.
+        ]
         if found:
             hits.append(name)
             spans += found
@@ -73,3 +76,54 @@ def mark_instructions(text: str) -> tuple[str, list[str]]:
         last = end
     parts.append(text[last:])
     return "".join(parts), hits
+
+
+def _collapse_marks(text: str) -> str:
+    """[[ · ]] 처럼 이어진 같은 괄호를 하나로 줄인다.
+
+    찾기용 글과 같은 기준으로 괄호를 본다 — 전각 괄호("［")도 괄호이고, 괄호 사이에 낀
+    서식 문자("[\u200b[")는 없는 글자로 보고 함께 지운다.
+    """
+    kept: list[str] = []
+    bracket = ""  # 마지막으로 남긴 괄호 (그 뒤로 서식 문자만 왔을 때)
+    between: list[str] = []  # 그 괄호 뒤에 온 서식 문자
+    for char in text:
+        normalized = _normalize(char)
+        if bracket and normalized == bracket:
+            between = []
+        elif bracket and not normalized:
+            between.append(char)
+        else:
+            kept += [*between, char]
+            between = []
+            bracket = normalized if normalized in ("[", "]") else ""
+    return "".join(kept + between)
+
+
+def _normalize(text: str) -> str:
+    """NFKC 로 바꾸고 서식 문자(Cf)를 지운다."""
+    return "".join(
+        c for c in unicodedata.normalize("NFKC", text) if unicodedata.category(c) != "Cf"
+    )
+
+
+def _search_text(text: str) -> tuple[str, list[tuple[int, int]]]:
+    """패턴을 찾을 다듬은 글과, 그 글자마다 원문 범위 (시작, 끝)를 돌려준다.
+
+    보통은 글자 하나씩 다듬어 원문 글자 위치를 그대로 잇는다. 첫가끝 자모 · 결합 문자처럼
+    NFKC 가 앞뒤 글자를 합치는 낱말(공백 사이 조각)은 글자 하나씩 다듬으면 결과가 달라지므로
+    낱말째 다듬고 낱말 전체를 원문 범위로 삼는다 — 그래서 표시가 낱말 끝까지 넓어질 수 있다.
+    NFKC 는 공백을 넘어 글자를 합치지 않으므로 낱말마다 다듬어 이은 글은 통째로 다듬은 글과 같다.
+    """
+    search: list[str] = []
+    origin: list[tuple[int, int]] = []
+    for word in re.finditer(r"\s+|\S+", text):
+        whole = _normalize(word.group())
+        each = [_normalize(char) for char in word.group()]
+        if "".join(each) == whole:
+            for index, normalized in enumerate(each, word.start()):
+                origin += [(index, index + 1)] * len(normalized)
+        else:
+            origin += [word.span()] * len(whole)
+        search.append(whole)
+    return "".join(search), origin

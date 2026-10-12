@@ -1,3 +1,6 @@
+import json
+import re
+
 from playwright.async_api import Browser, Page, Playwright, async_playwright
 
 from ..schemas import Action
@@ -12,12 +15,14 @@ ID_ATTRIBUTE = "data-ux-id"
 MIN_OPACITY = 0.1
 # 글자 크기(px)가 이보다 작으면 읽을 수 없다고 본다. 정상 페이지의 각주 · 캡션도 보통 10px 이상이다.
 MIN_FONT_SIZE_PX = 6
+# 요소 줄에 넣는 글 · 속성 값 하나의 최대 길이.
+MAX_VALUE_LENGTH = 100
 
 # 대상 페이지 안에서 실행되는 스크립트.
 # 보이는 상호작용 요소마다 data-ux-id를 붙이고, 요소 정보를 목록으로 돌려준다.
 # 사람 눈에 안 보이는 요소와 글은 뺀다 — 숨긴 곳에 심은 주입 문구가 모델 입력에 들어가지 않게.
 _COLLECT_ELEMENTS_JS = """
-({ idAttr, minOpacity, minFontSizePx }) => {
+({ idAttr, minOpacity, minFontSizePx, maxValueLength }) => {
   document.querySelectorAll(`[${idAttr}]`).forEach(el => el.removeAttribute(idAttr));
 
   // 사람 눈에 안 보이는 요소: 크기 0 · 그려지지 않음(display:none 조상 · 닫힌 details · visibility)
@@ -59,6 +64,8 @@ _COLLECT_ELEMENTS_JS = """
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
       if (node.nodeName === 'BR') lastBlock = null; // <br>도 innerText처럼 띄운다.
       if (node.nodeType !== Node.TEXT_NODE) continue;
+      // textarea 안의 글 노드는 입력값이다 (React는 입력할 때마다 맞춰 둔다). 새지 않게 뺀다.
+      if (node.parentNode.localName === 'textarea') continue; // XHTML은 nodeName이 소문자다.
       // display:contents는 상자가 없어 크기가 0이므로 상자가 있는 조상으로 판정한다.
       let parent = node.parentElement;
       while (getComputedStyle(parent).display === 'contents') parent = parent.parentElement;
@@ -86,15 +93,21 @@ _COLLECT_ELEMENTS_JS = """
       continue;
     }
     (label ?? el).setAttribute(idAttr, String(nextId));
+    // 입력칸의 value는 입력값(비밀번호 포함)이라 관측 어디에도 넣지 않는다 (agent-safety §1.2).
+    // React처럼 입력값을 value 속성에 맞춰 두는 페이지도 있어 속성도 읽지 않는다.
+    // 값이 곧 버튼 글자인 submit · button · reset과, 사용자가 입력할 수 없는 페이지 값인
+    // checkbox · radio만 쓴다 (라디오끼리 구별할 글이 value뿐인 경우가 많다).
+    const pageValue = tag === 'input'
+      && ['submit', 'button', 'reset', 'checkbox', 'radio'].includes(el.type)
+      && el.getAttribute('value');
     // select의 글은 옵션 전체라서 제외한다 (옵션은 options로 따로 제공).
-    // textarea의 글은 입력 기본값이라 제외한다 (예전 innerText도 비어 있었다).
     const text = (
       (label && visibleText(label))
-      || (tag !== 'select' && tag !== 'textarea' && visibleText(el))
+      || (tag !== 'select' && visibleText(el))
       || el.getAttribute('aria-label')
-      || el.getAttribute('value')
+      || pageValue
       || ''
-    ).trim().replace(/\\s+/g, ' ').slice(0, 100);
+    ).trim().replace(/\\s+/g, ' ').slice(0, maxValueLength);
     items.push({
       id: nextId,
       tag,
@@ -169,6 +182,7 @@ class DomDriver(Driver):
                         "idAttr": ID_ATTRIBUTE,
                         "minOpacity": MIN_OPACITY,
                         "minFontSizePx": MIN_FONT_SIZE_PX,
+                        "maxValueLength": MAX_VALUE_LENGTH,
                     },
                 )
             except Exception as e:
@@ -219,12 +233,24 @@ class DomDriver(Driver):
     @staticmethod
     def _format_element(item: dict) -> str:
         # 예: [3] <input type="text" name="q" placeholder="검색"> ""
-        attrs = " ".join(
-            f'{key}="{item[key]}"'
+        # 페이지가 정한 값은 모두 _quote를 거친다 — 줄바꿈 · 따옴표로 가짜 요소 줄을 만들지 못하게.
+        attrs = "".join(
+            f" {key}={_quote(item[key])}"
             for key in ("type", "name", "placeholder", "href")
             if item.get(key)
         )
-        line = f'[{item["id"]}] <{item["tag"]}{" " + attrs if attrs else ""}> "{item["text"]}"'
+        # 태그 이름도 페이지가 정한다 — HTML 파서는 U+2028 · NBSP 같은 글자를 태그 이름에 넣는다.
+        tag = re.sub(r"[^a-z0-9-]", "", item["tag"])
+        line = f"[{item['id']}] <{tag}{attrs}> {_quote(item['text'])}"
         if item.get("options"):
-            line += " options=" + ", ".join(o["value"] for o in item["options"])
+            line += " options=" + ", ".join(_quote(o["value"]) for o in item["options"])
         return line
+
+
+def _quote(value: str) -> str:
+    """요소 줄에 넣을 값을 정리해 따옴표로 감싼다.
+
+    글(text)과 같은 방식으로 공백 · 줄바꿈을 한 칸으로 줄이고 MAX_VALUE_LENGTH 자로 자른다.
+    따옴표 · 역슬래시는 JSON 문자열처럼 이스케이프해 값이 따옴표 밖으로 나오지 못하게 한다.
+    """
+    return json.dumps(" ".join(value.split())[:MAX_VALUE_LENGTH], ensure_ascii=False)
