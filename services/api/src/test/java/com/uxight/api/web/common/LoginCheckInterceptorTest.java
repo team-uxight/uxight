@@ -79,16 +79,16 @@ class LoginCheckInterceptorTest {
   void adminPath_allowsAdmin() throws Exception {
     Long adminId = insertUser("admin-test@uxight.com", "admin", true);
 
-    adminMock("Bearer " + jwtProvider.createAccessToken(adminId))
+    adminApi("Bearer " + jwtProvider.createAccessToken(adminId))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.userId").value(adminId));
+        .andExpect(jsonPath("$.maxSteps").isNumber());   // 관리자 API(전역 정책 조회)에 닿았다
   }
 
   @Test
   void adminPath_rejectsResearcher() throws Exception {
     Long researcherId = insertUser("researcher@uxight.com", "researcher", true);
 
-    adminMock("Bearer " + jwtProvider.createAccessToken(researcherId))
+    adminApi("Bearer " + jwtProvider.createAccessToken(researcherId))
         .andExpect(status().isForbidden())
         .andExpect(jsonPath("$.code").value("AUT-ERR-006"))
         .andExpect(jsonPath("$.message").value("권한이 없습니다."));
@@ -96,14 +96,14 @@ class LoginCheckInterceptorTest {
 
   @Test
   void adminPath_withoutToken_isUnauthorizedBeforeRoleCheck() throws Exception {
-    expectUnauthorized(mvc.perform(get("/api/admin/mock")));
+    expectUnauthorized(mvc.perform(get("/api/admin/policy")));
   }
 
   @Test
   void adminPath_inactiveAdmin_isUnauthorized() throws Exception {
     Long adminId = insertUser("inactive-admin@uxight.com", "admin", false);
 
-    adminMock("Bearer " + jwtProvider.createAccessToken(adminId))
+    adminApi("Bearer " + jwtProvider.createAccessToken(adminId))
         .andExpect(status().isUnauthorized())
         .andExpect(jsonPath("$.code").value("AUT-ERR-005"));
   }
@@ -112,8 +112,8 @@ class LoginCheckInterceptorTest {
     return mvc.perform(get("/api/users/me").header(HttpHeaders.AUTHORIZATION, authorization));
   }
 
-  private ResultActions adminMock(String authorization) throws Exception {
-    return mvc.perform(get("/api/admin/mock").header(HttpHeaders.AUTHORIZATION, authorization));
+  private ResultActions adminApi(String authorization) throws Exception {
+    return mvc.perform(get("/api/admin/policy").header(HttpHeaders.AUTHORIZATION, authorization));
   }
 
   private void expectUnauthorized(ResultActions result) throws Exception {
