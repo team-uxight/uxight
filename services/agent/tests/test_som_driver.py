@@ -14,10 +14,11 @@ from uxight_agent.schemas import Action
 FIXTURES = Path(__file__).parent / "fixtures"
 PAGE_URL = (FIXTURES / "som_page.html").as_uri()
 DIALOG_URL = (FIXTURES / "som_dialog.html").as_uri()
+ZOOM_URL = (FIXTURES / "som_zoom.html").as_uri()
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 TYPED_QUERY = "졸업 요건"
 
-# 찍는 순간의 덧그림 상태: 번호 박스 · 박스 안 번호 · 블러 막 위치 · 입력칸 위치와 값.
+# 찍는 순간의 덧그림 상태: 번호 박스 · 번호 딱지 · 불투명 막 위치 · 입력칸 위치와 값.
 _CAPTURE_STATE_JS = """
 (markAttr) => {
   const rectOf = el => {
@@ -26,13 +27,16 @@ _CAPTURE_STATE_JS = """
   };
   const root = document.querySelector(`[${markAttr}=""]`);
   const boxes = Array.from(document.querySelectorAll(`[${markAttr}=box]`));
+  // 계산된 배경색이 알파 없는 rgb() 면 불투명하다.
   const masks = Array.from(document.querySelectorAll(`[${markAttr}=mask]`))
-    .filter(m => getComputedStyle(m).backdropFilter.includes('blur'));
+    .filter(m => getComputedStyle(m).backgroundColor.startsWith('rgb('));
   const fields = Array.from(document.querySelectorAll('input, textarea'));
   return {
     in_top_layer: root !== null && root.matches(':popover-open'),
     box_count: boxes.length,
     labels: boxes.map(box => Number(box.textContent)),
+    box_rects: boxes.map(rectOf),
+    label_rects: boxes.map(box => rectOf(box.firstElementChild)),
     mask_rects: masks.map(rectOf),
     field_rects: Object.fromEntries(fields.map(el => [el.name || el.type, rectOf(el)])),
     values: Object.fromEntries(fields.map(el => [el.name || el.type, el.value])),
@@ -96,7 +100,7 @@ def test_input_values_masked_at_capture() -> None:
     # fixture 는 CSP(style-src 'self')로 인라인 <style> 주입을 막는다.
     _, captured = asyncio.run(_observe_with_spy(PAGE_URL, type_query=True))
 
-    # 값이 들어 있는 채로 찍히지만, 그 순간 입력칸마다 같은 자리에 블러 막이 덮여 있다.
+    # 값이 들어 있는 채로 찍히지만, 그 순간 입력칸마다 같은 자리에 불투명 막이 덮여 있다.
     assert captured["values"]["email"] == "kim@example.com"
     assert captured["values"]["q"] == TYPED_QUERY
     for name in ("email", "password", "q", "memo"):
@@ -105,10 +109,62 @@ def test_input_values_masked_at_capture() -> None:
     assert captured["field_rects"]["submit"] not in captured["mask_rects"]
 
 
+async def _field_shot(value: str) -> bytes:
+    """zoom fixture 입력칸에 value 를 넣고 SomDriver 로 찍되, 입력칸 사각형만 잘라 온다."""
+    async with SomDriver() as driver:
+        await driver.start(ZOOM_URL)
+        first = await driver.observe()
+        # 실제 행동 경로(fill)로 넣어, 찍을 때 입력칸에 포커스와 커서가 있다.
+        result = await driver.act(
+            Action(kind="type", element_id=_element_id(first, "secret"), value=value)
+        )
+        assert result.ok, result.error
+
+        page = driver._page
+        real_screenshot = page.screenshot
+
+        async def clipped_screenshot(**kwargs) -> bytes:
+            clip = await page.locator("[name=secret]").bounding_box()
+            return await real_screenshot(clip=clip, **kwargs)
+
+        page.screenshot = clipped_screenshot
+        observation = await driver.observe()
+        return observation.screenshot
+
+
+def test_typed_value_not_in_screenshot() -> None:
+    # 글자 32px · body zoom 1.5 — 블러로는 읽히던 크기다.
+    shots = [asyncio.run(_field_shot(value)) for value in ("hunter2", "XXXXXXX")]
+
+    # 값이 한 픽셀이라도 이미지에 남으면 두 장이 달라진다.
+    assert shots[0] == shots[1]
+
+
+def test_label_outside_above_box() -> None:
+    _, captured = asyncio.run(_observe_with_spy(PAGE_URL, type_query=False))
+
+    # 딱지는 박스 왼쪽 위 모서리 바로 위. 안쪽이면 짧은 링크의 첫 글자를 덮는다.
+    for box, label in zip(captured["box_rects"], captured["label_rects"], strict=True):
+        assert label[0] == box[0]
+        assert label[1] + label[3] == box[1]
+
+
+def test_label_inside_box_at_page_top() -> None:
+    _, captured = asyncio.run(_observe_with_spy(ZOOM_URL, type_query=False))
+
+    # 맨 위 링크는 위에 자리가 없어 박스 안쪽에, 그 아래 입력칸은 박스 바깥 위에 단다.
+    link_box, field_box = captured["box_rects"]
+    link_label, field_label = captured["label_rects"]
+    # 링크 위쪽 여백이 딱지 높이보다 작다 = 위에 자리가 없다.
+    assert link_box[1] < link_label[3]
+    assert link_label[1] >= link_box[1]
+    assert field_label[1] + field_label[3] == field_box[1]
+
+
 def test_marks_drawn_above_modal_dialog() -> None:
     observation, captured = asyncio.run(_observe_with_spy(DIALOG_URL, type_query=False))
 
-    # 모달도 top layer 라, 덧그림이 그 위(top layer)에 있어야 번호와 블러가 보인다.
+    # 모달도 top layer 라, 덧그림이 그 위(top layer)에 있어야 번호와 막이 보인다.
     assert captured["in_top_layer"]
     assert captured["box_count"] == len(observation.element_map)
     assert captured["field_rects"]["password"] in captured["mask_rects"]
