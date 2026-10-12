@@ -10,15 +10,18 @@ import com.uxight.api.domain.project.ProjectRepository;
 import com.uxight.api.domain.task.SuccessRuleClient;
 import com.uxight.api.domain.task.Task;
 import com.uxight.api.domain.task.TaskService;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 @Service
+@Slf4j
 public class RunService {
 
   private static final Set<String> EXPERIMENT_STATES = Set.of("in_progress", "awaiting_approval", "completed", "stopped");
@@ -116,11 +119,30 @@ public class RunService {
       return run.getId();
     });
 
-    // 4. fire-and-forget: Python 응답을 기다리지 않고 돌아간다. dispatch_state 는 응답이 오면 비동기 스레드에서 기록된다.
+    // 4. POST /runs — Python 응답을 기다리지 않고 돌아간다. 닿지 않았으면 redispatchStaleQueuedRuns 가 다시 보낸다.
     //    status 는 바꾸지 않는다 — 응답을 못 받았어도 Python 이 이미 접수했을 수 있다.
+    dispatch(runId);
+    return runId;
+  }
+
+  /**
+   * queued 로 staleAfter 넘게 남은 회차에 POST /runs 를 다시 보낸다 (design-decision 4.6). 다시 보낸 회차 수를 돌려준다.
+   * AI 모듈은 살아 있는데 요청이 닿지 않았거나, Spring 이 커밋 직후 죽어 호출하지 못한 회차가 프로젝트를 계속 점유하지 않게 한다.
+   * POST /runs 는 멱등이라 이미 받은 회차에 다시 보내도 200 만 돌아온다. 취소 요청된 회차도 보낸다 — AI 모듈이 접수해야 취소가 끝난다.
+   */
+  public int redispatchStaleQueuedRuns(Duration staleAfter) {
+    List<Long> runIds = runRepository.findQueuedRunIdsOlderThan(staleAfter.toSeconds());
+    if (!runIds.isEmpty()) {
+      log.info("redispatch {} queued run(s) older than {}: {}", runIds.size(), staleAfter, runIds);
+    }
+    runIds.forEach(this::dispatch);
+    return runIds.size();
+  }
+
+  // fire-and-forget: 응답을 기다리지 않는다. 결과는 비동기 스레드에서 dispatch_state 에만 기록한다(200 이면 그대로 둔다).
+  private void dispatch(Long runId) {
     agentClient.dispatch(runId)
         .thenAccept(dispatchState -> dispatchState.ifPresent(state -> runRepository.updateDispatchState(runId, state)));
-    return runId;
   }
 
   public List<ExperimentSummary> getExperiments(Long userId, String state, int page, int size) {

@@ -7,6 +7,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -31,6 +32,14 @@ public interface RunRepository extends JpaRepository<Run, Long> {
   }
 
   boolean existsByProjectIdAndStatusIn(Long projectId, Collection<RunStatus> statuses);
+
+  /**
+   * queued 로 seconds 초 넘게 남은 회차의 run_id. 재전송 대상이다 (design-decision 4.6). 취소 요청된 회차도 포함한다.
+   * 시각 비교는 DB 시계(NOW())로만 한다 — created_at 은 DB 기본값이라 JVM 시계와 섞으면 시간대에 따라 어긋난다.
+   */
+  @Query(value = "SELECT run_id FROM runs WHERE status = 'queued' AND created_at < NOW() - INTERVAL :seconds SECOND "
+      + "ORDER BY run_id", nativeQuery = true)
+  List<Long> findQueuedRunIdsOlderThan(@Param("seconds") long seconds);
 
   /**
    * POST /runs 결과만 한 줄 UPDATE 로 기록한다 — 행을 읽어 고쳐 쓰지 않으므로 Python 이 그사이 바꾼 컬럼을 건드리지 않는다.
