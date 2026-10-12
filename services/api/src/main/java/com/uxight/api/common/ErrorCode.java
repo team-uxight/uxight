@@ -27,7 +27,11 @@ public enum ErrorCode {
   EXPERIMENT_IN_PROGRESS(HttpStatus.CONFLICT, "EXP-ERR-004", "프로젝트에 진행 중인 실험이 있습니다."),
   NOT_CANCELLABLE(HttpStatus.CONFLICT, "EXP-ERR-006", "취소할 수 있는 실험이 아닙니다."),
   SUCCESS_RULE_FAILED(HttpStatus.BAD_GATEWAY, "EXP-ERR-007", "성공 기준 생성에 실패했습니다."),
-  SUCCESS_RULE_TIMEOUT(HttpStatus.GATEWAY_TIMEOUT, "EXP-ERR-008", "성공 기준 생성 시간이 초과되었습니다.");
+  SUCCESS_RULE_TIMEOUT(HttpStatus.GATEWAY_TIMEOUT, "EXP-ERR-008", "성공 기준 생성 시간이 초과되었습니다."),
+
+  // HTTP 응답이 없는 오류 — 실험 요청 · 다음 회차 승인에 이미 201 을 응답한 뒤 생긴다. 예외로 던지지 않고 로그와
+  // runs.dispatch_state 에만 남긴다(오류 파일은 추후). 전달하지 못한 회차는 재전송 스케줄러가 다시 보낸다 (8.4.1).
+  AGENT_DISPATCH_FAILED(null, "INT-ERR-004", "AI 모듈에 회차 실행 요청을 전달하지 못했습니다.");
 
   private final HttpStatus status;
   private final String code;
@@ -39,6 +43,7 @@ public enum ErrorCode {
     this.message = message;
   }
 
+  /** HTTP 로 응답하는 오류만 값이 있다. INT-ERR-004 처럼 응답 없이 기록만 하는 오류는 null. */
   public HttpStatus status() {
     return status;
   }

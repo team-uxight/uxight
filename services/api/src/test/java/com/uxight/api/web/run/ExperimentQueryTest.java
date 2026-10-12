@@ -33,7 +33,9 @@ import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 실험 건수(GET /api/runs/stats)와 목록 조건(검색어 · 완료 시각). 상태 계산은 목록과 건수가 같은 SQL 을 쓴다.
@@ -164,7 +166,7 @@ class ExperimentQueryTest {
         .andExpect(jsonPath("$.totalPages").value(1))
         .andExpect(jsonPath("$.content[*].firstRunId").value(contains(cancelling.intValue(), multi.intValue())))
         // 2회차 실험 — 마지막 회차 기준 값
-        .andExpect(jsonPath("$.content[1].*", hasSize(15)))
+        .andExpect(jsonPath("$.content[1].*", hasSize(16)))
         .andExpect(jsonPath("$.content[1].runId").value(last))
         .andExpect(jsonPath("$.content[1].round").value(2))
         .andExpect(jsonPath("$.content[1].status").value("running"))
@@ -252,6 +254,37 @@ class ExperimentQueryTest {
     mvc.perform(get("/api/runs").header(HttpHeaders.AUTHORIZATION, bearer))
         .andExpect(status().isUnauthorized())
         .andExpect(jsonPath("$.code").value("AUT-ERR-005"));
+  }
+
+  @Test
+  void list_agentUnreachable_onlyForQueuedLastRoundThatWasNotDelivered() throws Exception {
+    Long project = insertProject(userId, "p");
+    Long unreachable = insertExperimentWithDispatch(project, "queued", "unreachable");
+    Long timedOut = insertExperimentWithDispatch(project, "queued", "timeout");
+    Long notYetSent = insertExperimentWithDispatch(project, "queued", null);         // 아직 보내기 전
+    Long delivered = insertExperimentWithDispatch(project, "queued", "sent");        // 닿았고 접수 대기
+    Long acceptedAfterTimeout = insertExperimentWithDispatch(project, "accepted", "timeout");   // 받았다 — 배너 아님
+    Long runningAfterUnreachable = insertExperimentWithDispatch(project, "running", "unreachable");
+
+    String body = mvc.perform(get("/api/runs").header(HttpHeaders.AUTHORIZATION, bearer).param("size", "10"))
+        .andExpect(status().isOk())
+        .andReturn().getResponse().getContentAsString();
+    Map<Long, Boolean> flags = new HashMap<>();
+    objectMapper.readTree(body).get("content")
+        .forEach(e -> flags.put(e.get("firstRunId").asLong(), e.get("agentUnreachable").asBoolean()));
+
+    assertThat(flags).containsEntry(unreachable, true)
+        .containsEntry(timedOut, true)
+        .containsEntry(notYetSent, false)
+        .containsEntry(delivered, false)
+        .containsEntry(acceptedAfterTimeout, false)
+        .containsEntry(runningAfterUnreachable, false);
+  }
+
+  private Long insertExperimentWithDispatch(Long projectId, String status, String dispatchState) {
+    Long runId = insertExperiment(projectId, status, false, null, null);
+    jdbcTemplate.update("UPDATE runs SET dispatch_state = ? WHERE run_id = ?", dispatchState, runId);
+    return runId;
   }
 
   // ───────── GET /api/runs/{firstRunId}/rounds ─────────
