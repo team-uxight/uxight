@@ -20,6 +20,8 @@ from uxight_agent.watcher.step_log_writer import StepLogWriter
 RUN_ID = 1
 # 실제 감시 간격(2초)을 줄인 값. 취소 계약 10초 = 감시 5주기라, 테스트는 10주기 안에 멈추는지 본다.
 POLL_SECONDS = 0.1
+# 실제 초를 테스트 초로 줄이는 비율 — 감시 간격을 줄인 만큼. 다른 상수도 이 비율로 줄여 계약을 본다.
+SCALE = POLL_SECONDS / orchestrator_module.CANCEL_POLL_SECONDS
 HANG_SECONDS = 60  # 끝나지 않는 스텝 (LLM 응답이 오지 않는 상황)
 
 
@@ -314,6 +316,36 @@ def test_cancel_stops_all_personas_quickly(
     assert fakes.browsers.open == 0
     assert fakes.browsers.started == 2 - slots_held_by_other_runs
     assert free_global_slots() == 2 - slots_held_by_other_runs
+
+
+def test_cancel_with_hung_browser_close_finishes_within_10_seconds(
+    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 닫기가 끝나지 않아도 취소 요청부터 종료 기록까지 10초 안 — 감시 한 주기 + 닫기 상한.
+    # 실제 닫기 상한을 감시 간격과 같은 비율로 줄인다. 상한이 10초 계약을 넘기면 실패한다.
+    close_timeout = orchestrator_module.BROWSER_CLOSE_TIMEOUT_SECONDS * SCALE
+    monkeypatch.setattr(orchestrator_module, "BROWSER_CLOSE_TIMEOUT_SECONDS", close_timeout)
+    fakes.browsers.close_seconds = HANG_SECONDS
+    snap = snapshot(
+        [persona(1, HANG_SECONDS), persona(2, HANG_SECONDS)],
+        max_steps=3,
+        max_seconds=HANG_SECONDS,
+    )
+
+    async def cancel_midway() -> float:
+        task = asyncio.create_task(run(fakes, RUN_ID, snap))
+        await asyncio.sleep(POLL_SECONDS * 2)
+        fakes.runs.cancel_requested = True
+        requested_at = time.monotonic()
+        await task
+        return time.monotonic() - requested_at
+
+    elapsed = asyncio.run(cancel_midway())
+
+    assert elapsed < 10 * SCALE
+    assert fakes.personas.statuses == {1: "cancelled", 2: "cancelled"}
+    assert fakes.runs.status == "cancelled"
+    assert free_global_slots() == 3
 
 
 def test_missing_policy_values_fall_back_to_defaults(

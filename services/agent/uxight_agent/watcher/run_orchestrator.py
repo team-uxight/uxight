@@ -27,7 +27,8 @@ DEFAULT_MAX_STEPS = 20
 DEFAULT_MAX_SECONDS = 600
 
 # 브라우저 닫기 상한(초). 시간 상한 밖이라 따로 둔다.
-BROWSER_CLOSE_TIMEOUT_SECONDS = 10
+# 닫기가 멈춰도 취소 요청 후 10초 안에 종료를 기록한다 — 감시 2초 + 닫기 5초 < 10초.
+BROWSER_CLOSE_TIMEOUT_SECONDS = 5
 
 # 프로세스 전역 Persona 동시 상한. 회차마다 세마포어를 만들면 회차가 늘수록 동시 브라우저 수가
 # 곱해져 RAM 상한이 무너진다 (architecture §3.1). 모든 회차의 Persona 가 이 자리를 나눠 쓴다.
