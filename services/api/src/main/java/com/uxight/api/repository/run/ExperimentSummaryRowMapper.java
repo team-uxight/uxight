@@ -18,6 +18,7 @@ public class ExperimentSummaryRowMapper implements RowMapper<ExperimentSummary> 
         rs.getString("state"),
         rs.getString("end_type"),
         rs.getBoolean("stale"),
+        rs.getBoolean("agent_unreachable"),
         rs.getBoolean("has_result"),
         rs.getString("project_title"),
         rs.getString("task_goal"),
