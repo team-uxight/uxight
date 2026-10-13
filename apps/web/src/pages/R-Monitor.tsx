@@ -1,25 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useLocation, useOutletContext } from 'react-router-dom';
-import { API_BASE_URL, apiErrorMessage, authenticatedFetch } from '../auth';
+import { useLocation, useNavigate, useOutletContext } from 'react-router-dom';
+import { apiErrorMessage, authenticatedFetch, API_BASE_URL } from '../auth';
+import { fetchExperimentStats, fetchExperiments, type Experiment, type ExperimentStats } from './experiments';
 
 type MonitorFilter = '전체' | '진행 중' | '완료' | '중단' | '실패';
-type Experiment = {
-	firstRunId: number;
-	runId: number;
-	round: number;
-	status: string;
-	state: 'in_progress' | 'awaiting_approval' | 'completed' | 'stopped';
-	endType: string | null;
-	stale: boolean;
-	hasResult: boolean;
-	projectTitle: string;
-	taskGoal: string;
-	mode: string;
-	progress: number | null;
-	personaCount: number;
-	elapsedSeconds: number;
-	createdAt: string;
-};
 type LocationState = {
 	createdRunId?: number;
 };
@@ -27,46 +11,7 @@ type LayoutContext = {
 	query: string;
 };
 
-const pageSize = 20;
 const activeStatuses = new Set(['queued', 'accepted', 'running']);
-
-function isExperiment(value: unknown): value is Experiment {
-	return typeof value === 'object' &&
-		value !== null &&
-		'firstRunId' in value && typeof value.firstRunId === 'number' &&
-		'runId' in value && typeof value.runId === 'number' &&
-		'round' in value && typeof value.round === 'number' &&
-		'status' in value && typeof value.status === 'string' &&
-		'state' in value && ['in_progress', 'awaiting_approval', 'completed', 'stopped'].includes(String(value.state)) &&
-		'endType' in value && (typeof value.endType === 'string' || value.endType === null) &&
-		'stale' in value && typeof value.stale === 'boolean' &&
-		'hasResult' in value && typeof value.hasResult === 'boolean' &&
-		'projectTitle' in value && typeof value.projectTitle === 'string' &&
-		'taskGoal' in value && typeof value.taskGoal === 'string' &&
-		'mode' in value && typeof value.mode === 'string' &&
-		'progress' in value && (typeof value.progress === 'number' || value.progress === null) &&
-		'personaCount' in value && typeof value.personaCount === 'number' &&
-		'elapsedSeconds' in value && typeof value.elapsedSeconds === 'number' &&
-		'createdAt' in value && typeof value.createdAt === 'string';
-}
-
-async function fetchExperiments(): Promise<Experiment[]> {
-	const response = await authenticatedFetch(`${API_BASE_URL}/api/runs?page=0&size=${pageSize}`);
-	if (!response.ok) {
-		throw new Error(await apiErrorMessage(response, '실험 목록을 불러오지 못했습니다.'));
-	}
-	const body: unknown = await response.json();
-	if (
-		typeof body !== 'object' ||
-		body === null ||
-		!('content' in body) ||
-		!Array.isArray(body.content) ||
-		!body.content.every(isExperiment)
-	) {
-		throw new Error('서버에서 올바르지 않은 실험 목록을 받지 못했습니다.');
-	}
-	return body.content;
-}
 
 function displayStatus(experiment: Experiment): string {
 	if (experiment.state === 'completed') return '완료';
@@ -91,11 +36,14 @@ function formatDate(value: string): string {
 
 export default function RMonitor() {
 	const location = useLocation();
+	const navigate = useNavigate();
 	const { query } = useOutletContext<LayoutContext>();
 	const [filter, setFilter] = useState<MonitorFilter>('전체');
 	const [experiments, setExperiments] = useState<Experiment[]>([]);
 	const [isLoading, setIsLoading] = useState(true);
 	const [error, setError] = useState('');
+	const [stats, setStats] = useState<ExperimentStats | null>(null);
+	const [statsError, setStatsError] = useState('');
 	const [cancelingId, setCancelingId] = useState<number | null>(null);
 	const [expandedRunId, setExpandedRunId] = useState<number | null>(null);
 	const [notice, setNotice] = useState('');
@@ -109,6 +57,15 @@ export default function RMonitor() {
 			setError(loadError instanceof Error ? loadError.message : '실험 목록을 불러오지 못했습니다.');
 		} finally {
 			setIsLoading(false);
+		}
+	}, []);
+
+	const refreshStats = useCallback(async () => {
+		try {
+			setStats(await fetchExperimentStats());
+			setStatsError('');
+		} catch (loadError: unknown) {
+			setStatsError(loadError instanceof Error ? loadError.message : '실험 통계를 불러오지 못했습니다.');
 		}
 	}, []);
 
@@ -135,12 +92,32 @@ export default function RMonitor() {
 	}, []);
 
 	useEffect(() => {
+		let active = true;
+		fetchExperimentStats()
+			.then((data) => {
+				if (active) {
+					setStats(data);
+					setStatsError('');
+				}
+			})
+			.catch((loadError: unknown) => {
+				if (active) {
+					setStatsError(loadError instanceof Error ? loadError.message : '실험 통계를 불러오지 못했습니다.');
+				}
+			});
+		return () => {
+			active = false;
+		};
+	}, []);
+
+	useEffect(() => {
 		if (!experiments.some((experiment) => activeStatuses.has(experiment.status))) return;
 		const intervalId = window.setInterval(() => {
 			void refreshExperiments();
+			void refreshStats();
 		}, 3000);
 		return () => window.clearInterval(intervalId);
-	}, [experiments, refreshExperiments]);
+	}, [experiments, refreshExperiments, refreshStats]);
 
 	const cancelExperiment = async (firstRunId: number) => {
 		setCancelingId(firstRunId);
@@ -153,7 +130,7 @@ export default function RMonitor() {
 				throw new Error(await apiErrorMessage(response, '실험 취소 요청에 실패했습니다.'));
 			}
 			setNotice(`실험 #${firstRunId}의 취소를 요청했습니다.`);
-			await refreshExperiments();
+			await Promise.all([refreshExperiments(), refreshStats()]);
 		} catch (cancelError: unknown) {
 			setError(cancelError instanceof Error ? cancelError.message : '실험 취소 요청에 실패했습니다.');
 		} finally {
@@ -170,6 +147,11 @@ export default function RMonitor() {
 					.includes(query.toLowerCase()),
 			),
 		[experiments, filter, query],
+	);
+
+	const hasUnreachable = useMemo(
+		() => experiments.some((experiment) => experiment.agentUnreachable),
+		[experiments],
 	);
 
 	return (
@@ -189,8 +171,22 @@ export default function RMonitor() {
 				</div>
 				<span className="rd-demo-label">실제 실험 데이터</span>
 			</div>
+			{statsError && <div className="rd-notice" role="status">{statsError}</div>}
+			<div className="rd-monitor-stats" aria-label="실험 통계">
+				<div><span>전체 실험</span><strong>{stats ? formatCount(stats.totalCount) : '—'}</strong></div>
+				<div><span>진행 중</span><strong>{stats ? formatCount(stats.inProgressCount) : '—'}</strong></div>
+				<div><span>전체 완료</span><strong>{stats ? formatCount(stats.completedCount) : '—'}</strong></div>
+				<div><span>승인 대기</span><strong>{stats ? formatCount(stats.awaitingApprovalCount) : '—'}</strong></div>
+				<div><span>이번 주 완료</span><strong>{stats ? formatCount(stats.completedThisWeekCount) : '—'}</strong></div>
+				<div><span>누적 토큰</span><strong>{stats ? formatCount(stats.totalTokens) : '—'}</strong></div>
+			</div>
 			{notice && <div className="rd-notice" role="status">{notice}</div>}
 			{error && <div className="rd-notice" role="alert"><span>{error}</span></div>}
+			{hasUnreachable && (
+				<div className="rd-notice rd-notice--warning" role="status">
+					<span>AI 모듈에 연결하지 못해 재시도 중인 실험이 있습니다. 백엔드에서 30초마다 자동으로 재전송합니다.</span>
+				</div>
+			)}
 			<div className="rd-monitor-toolbar">
 				<div className="rd-monitor-tabs" role="tablist" aria-label="실험 상태 필터">
 					{(['전체', '진행 중', '완료', '중단', '실패'] as const).map((item) => (
@@ -216,9 +212,10 @@ export default function RMonitor() {
 						const status = displayStatus(experiment);
 						const canCancel = experiment.state === 'in_progress' && activeStatuses.has(experiment.status);
 						const isExpanded = expandedRunId === experiment.firstRunId;
-						const progress = experiment.progress === null
+						// API 의 progress 는 종료된 Persona 수이므로 퍼센트로 환산한다.
+						const progress = experiment.progress === null || experiment.personaCount <= 0
 							? null
-							: Math.min(100, Math.max(0, experiment.progress));
+							: Math.min(100, Math.max(0, Math.round((experiment.progress / experiment.personaCount) * 100)));
 						return (
 							<article className={`rd-run-row${isExpanded ? ' is-expanded' : ''}`} key={experiment.firstRunId}>
 								<button
@@ -233,6 +230,9 @@ export default function RMonitor() {
 									</svg>
 								</button>
 								<span className={`rd-run-status rd-run-status--${displayStatusClass(status)}`}>{status}</span>
+								{experiment.agentUnreachable && (
+									<span className="rd-run-unreachable-badge">AI 연결 재시도 중</span>
+								)}
 								<span className="rd-run-id">#{experiment.firstRunId} · {experiment.round}회차</span>
 								<div className="rd-run-description">
 									<strong>{experiment.taskGoal}</strong>
@@ -251,12 +251,18 @@ export default function RMonitor() {
 										</button>
 									)
 									: (
-										<span className="rd-run-action" aria-label={`진행률 ${progress ?? 0}%`}>
+										<span className="rd-run-action rd-run-action--progress" aria-label={`진행률 ${progress ?? 0}%`}>
 											{progress === null ? '—' : `${progress}%`}
 										</span>
 									)}
 								{isExpanded && (
 									<div className="rd-run-details">
+										{experiment.agentUnreachable && (
+											<div className="rd-run-unreachable-banner" role="status">
+												<strong>AI 모듈에 연결하지 못해 재시도 중</strong>
+												<span>실행 서비스에 일시적으로 연결할 수 없어 30초마다 재전송을 시도하고 있습니다.</span>
+											</div>
+										)}
 										<div className="rd-run-progress-card">
 											<div className="rd-run-progress-heading">
 												<span>진행률</span>
@@ -287,18 +293,20 @@ export default function RMonitor() {
 										</div>
 										<div className="rd-run-detail-foot">
 											<span>
-												{experiment.stale
-													? '진행 상태가 오래 갱신되지 않았습니다.'
-													: experiment.hasResult
-														? '실험 결과가 등록되어 있습니다.'
-														: '실험 결과를 기다리는 중입니다.'}
+												{experiment.agentUnreachable
+													? 'AI 모듈에 연결하지 못해 재시도 중입니다. (30초마다 자동 재전송)'
+													: experiment.stale
+														? '진행 상태가 오래 갱신되지 않았습니다.'
+														: experiment.hasResult
+															? '실험 결과가 등록되어 있습니다.'
+															: '실험 결과를 기다리는 중입니다.'}
 											</span>
 											<div className="rd-run-detail-actions">
 												<button
 													type="button"
 													className="rd-live-monitor-button"
 													aria-label={`실험 ${experiment.firstRunId} 실시간 모니터링`}
-													onClick={() => setNotice('AI 브라우저 실시간 모니터링은 백엔드 화면 연동 후 제공될 예정입니다.')}
+													onClick={() => navigate(`/monitor/${experiment.firstRunId}`)}
 												>
 													<svg viewBox="0 0 24 24" aria-hidden="true">
 														<path d="M7 17 17 7M8 7h9v9" />
@@ -345,4 +353,8 @@ function formatElapsed(seconds: number): string {
 	const minutes = Math.floor(safeSeconds / 60);
 	const remainingSeconds = safeSeconds % 60;
 	return minutes > 0 ? `${minutes}분 ${remainingSeconds}초` : `${remainingSeconds}초`;
+}
+
+function formatCount(value: number): string {
+	return new Intl.NumberFormat('ko-KR').format(value);
 }

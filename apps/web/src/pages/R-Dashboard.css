@@ -269,6 +269,12 @@
 	font-size: 13px;
 }
 
+.rd-notice.rd-notice--warning {
+	border-color: rgb(224 138 31 / 30%);
+	background: rgb(255 248 238 / 90%);
+	color: #8c5813;
+}
+
 .rd-notice button {
 	border: 0;
 	background: transparent;
@@ -465,11 +471,6 @@
 
 .rd-project-footer .rd-project-delete-button:hover {
 	background: #fbebeb;
-}
-
-.rd-project-footer .rd-config-button {
-	background: #fff;
-	box-shadow: 0 2px 8px rgb(40 36 71 / 9%);
 }
 
 .rd-empty-state {
@@ -784,6 +785,33 @@
 	margin: 0 auto;
 }
 
+.rd-monitor-stats {
+	display: grid;
+	grid-template-columns: repeat(6, minmax(0, 1fr));
+	gap: 12px;
+	margin-bottom: 18px;
+}
+
+.rd-monitor-stats > div {
+	display: grid;
+	gap: 8px;
+	padding: 16px;
+	border: 1px solid rgb(255 255 255 / 70%);
+	border-radius: 16px;
+	background: rgb(255 255 255 / 58%);
+	box-shadow: 0 5px 14px rgb(48 44 82 / 6%);
+}
+
+.rd-monitor-stats span {
+	color: #6a677b;
+	font-size: 12px;
+}
+
+.rd-monitor-stats strong {
+	color: #39364f;
+	font-size: 20px;
+}
+
 .rd-monitor-heading {
 	align-items: center;
 	margin-bottom: 18px;
@@ -905,7 +933,7 @@
 
 .rd-run-row {
 	display: grid;
-	grid-template-columns: 24px auto auto minmax(0, 1fr) 36px;
+	grid-template-columns: 24px auto auto minmax(0, 1fr) 40px;
 	align-items: center;
 	gap: 12px;
 	min-height: 68px;
@@ -991,6 +1019,38 @@
 
 .rd-run-description span {
 	color: #777486;
+	font-size: 10px;
+}
+
+.rd-run-unreachable-badge {
+	padding: 4px 8px;
+	border-radius: 999px;
+	background: #fff4e5;
+	color: #b26a00;
+	font-size: 10px;
+	font-weight: 750;
+	white-space: nowrap;
+}
+
+.rd-run-unreachable-banner {
+	display: flex;
+	grid-column: 1 / -1;
+	flex-direction: column;
+	gap: 4px;
+	padding: 10px 14px;
+	border: 1px solid #fed7aa;
+	border-radius: 12px;
+	background: #fffaf0;
+	color: #9a4908;
+}
+
+.rd-run-unreachable-banner strong {
+	font-size: 11px;
+	font-weight: 700;
+}
+
+.rd-run-unreachable-banner span {
+	color: #a4581c;
 	font-size: 10px;
 }
 
@@ -1126,6 +1186,14 @@
 	font-size: 15px;
 	cursor: pointer;
 	box-shadow: 0 2px 7px rgb(45 41 76 / 8%);
+}
+
+.rd-run-action--progress {
+	width: 40px;
+	height: 40px;
+	font-size: 11px;
+	font-weight: 600;
+	cursor: default;
 }
 
 .rd-run-action:hover {
@@ -2385,6 +2453,10 @@
 		border-radius: 18px;
 	}
 
+	.rd-monitor-stats {
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+	}
+
 	.rd-save-confirmation {
 		align-items: flex-start;
 		flex-direction: column;
@@ -2395,7 +2467,7 @@
 	}
 
 	.rd-run-row {
-		grid-template-columns: 20px auto minmax(0, 1fr) 34px;
+		grid-template-columns: 20px auto minmax(0, 1fr) 40px;
 		gap: 8px;
 		border-radius: 18px;
 	}
