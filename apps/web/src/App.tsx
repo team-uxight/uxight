@@ -6,6 +6,7 @@ import ResearcherLayout from './components/ResearcherLayout';
 import RDashboard from './pages/R-Dashboard';
 import RRunSetting from './pages/R-RunSetting';
 import RMonitor from './pages/R-Monitor';
+import RMonitorLive from './pages/R-MonitorLive';
 import RDiagnosis from './pages/R-Diagnosis';
 import RFixes from './pages/R-Fixes';
 import RReports from './pages/R-Reports';
@@ -25,6 +26,7 @@ export default function App() {
             <Route path="/dashboard" element={<RDashboard />} />
             <Route path="/run-setting" element={<RRunSetting />} />
             <Route path="/monitor" element={<RMonitor />} />
+            <Route path="/monitor/:runId" element={<RMonitorLive />} />
             <Route path="/diagnosis" element={<RDiagnosis />} />
             <Route path="/fixes" element={<RFixes />} />
             <Route path="/reports" element={<RReports />} />
