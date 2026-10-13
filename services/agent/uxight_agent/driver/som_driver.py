@@ -43,6 +43,9 @@ _DRAW_MARKS_JS = """
   };
   // 막을 박스보다 먼저 넣어야 번호가 막 위에 그려진다.
   for (const el of document.querySelectorAll(maskSelector)) {
+    // 안 보이는 칸(visibility hidden · opacity 0)은 값도 안 보여 가릴 것이 없다.
+    // 막을 그리면 덧그림이 top layer 라 그 자리 아래의 보이는 내용을 덮는다.
+    if (!el.checkVisibility({ visibilityProperty: true, opacityProperty: true })) continue;
     cover(el, 'mask', 'background:#9e9e9e;');
   }
   for (const el of document.querySelectorAll(`[${idAttr}]`)) {

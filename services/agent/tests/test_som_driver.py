@@ -15,6 +15,7 @@ FIXTURES = Path(__file__).parent / "fixtures"
 PAGE_URL = (FIXTURES / "som_page.html").as_uri()
 DIALOG_URL = (FIXTURES / "som_dialog.html").as_uri()
 ZOOM_URL = (FIXTURES / "som_zoom.html").as_uri()
+HIDDEN_URL = (FIXTURES / "som_hidden.html").as_uri()
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 TYPED_QUERY = "졸업 요건"
 
@@ -107,6 +108,16 @@ def test_input_values_masked_at_capture() -> None:
         assert captured["field_rects"][name] in captured["mask_rects"], name
     # 버튼 계열 input 은 값이 버튼 글자라 가리지 않는다.
     assert captured["field_rects"]["submit"] not in captured["mask_rects"]
+
+
+def test_invisible_fields_not_masked() -> None:
+    _, captured = asyncio.run(_observe_with_spy(HIDDEN_URL, type_query=False))
+
+    # visibility hidden · opacity 0 칸은 값도 안 보여 가릴 것이 없다.
+    # 막을 그리면 그 자리 아래의 보이는 배너 글을 덮는다.
+    # 반투명 칸은 값이 비쳐 보이므로 보통 칸과 함께 가린다.
+    fields = captured["field_rects"]
+    assert sorted(captured["mask_rects"]) == sorted([fields["faded"], fields["plain"]])
 
 
 async def _field_shot(value: str) -> bytes:
