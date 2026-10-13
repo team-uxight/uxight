@@ -57,8 +57,12 @@ export default function RDashboard() {
 	const [isLoading, setIsLoading] = useState(true);
 	const [loadError, setLoadError] = useState('');
 	const [isCreateOpen, setIsCreateOpen] = useState(false);
+	const [editingProject, setEditingProject] = useState<Project | null>(null);
+	const [deletingProject, setDeletingProject] = useState<Project | null>(null);
 	const [isSubmitting, setIsSubmitting] = useState(false);
+	const [isDeleting, setIsDeleting] = useState(false);
 	const [formError, setFormError] = useState('');
+	const [deleteError, setDeleteError] = useState('');
 	const [statusMessage, setStatusMessage] = useState('');
 	const [title, setTitle] = useState('');
 	const [targetUrl, setTargetUrl] = useState('');
@@ -114,9 +118,20 @@ export default function RDashboard() {
 	};
 
 	const openCreateForm = () => {
+		setEditingProject(null);
 		setTitle('');
 		setTargetUrl('');
 		setDescription('');
+		setAllowedDomains('');
+		setFormError('');
+		setIsCreateOpen(true);
+	};
+
+	const openEditForm = (project: Project) => {
+		setEditingProject(project);
+		setTitle(project.title);
+		setTargetUrl(project.targetUrl);
+		setDescription(project.description ?? '');
 		setAllowedDomains('');
 		setFormError('');
 		setIsCreateOpen(true);
@@ -131,10 +146,40 @@ export default function RDashboard() {
 		}
 	};
 
-	const createProject = async (event: FormEvent<HTMLFormElement>) => {
+	const saveProject = async (event: FormEvent<HTMLFormElement>) => {
 		event.preventDefault();
 		setFormError('');
 		setIsSubmitting(true);
+
+		if (editingProject) {
+			try {
+				const response = await authenticatedFetch(`${API_BASE_URL}/api/projects/${editingProject.projectId}`, {
+					method: 'PATCH',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						title: title.trim(),
+						description: description.trim(),
+					}),
+				});
+				if (!response.ok) {
+					throw new Error(await apiErrorMessage(response, '프로젝트 수정에 실패했습니다.'));
+				}
+
+				setProjects((current) => current.map((project) =>
+					project.projectId === editingProject.projectId
+						? { ...project, title: title.trim(), description: description.trim() || null }
+						: project,
+				));
+				setIsCreateOpen(false);
+				setEditingProject(null);
+				setStatusMessage('프로젝트를 수정했습니다.');
+			} catch (error: unknown) {
+				setFormError(error instanceof Error ? error.message : '프로젝트 수정 중 오류가 발생했습니다.');
+			} finally {
+				setIsSubmitting(false);
+			}
+			return;
+		}
 
 		let parsedUrl: URL;
 		try {
@@ -197,6 +242,31 @@ export default function RDashboard() {
 		}
 	};
 
+	const deleteProject = async () => {
+		if (!deletingProject) return;
+		setDeleteError('');
+		setIsDeleting(true);
+		try {
+			const response = await authenticatedFetch(`${API_BASE_URL}/api/projects/${deletingProject.projectId}`, {
+				method: 'DELETE',
+			});
+			if (!response.ok) {
+				if (response.status === 409) {
+					throw new Error('진행 중인 실험이 있어 프로젝트를 삭제할 수 없습니다. 실험이 끝난 뒤 다시 시도해 주세요.');
+				}
+				throw new Error(await apiErrorMessage(response, '프로젝트 삭제에 실패했습니다.'));
+			}
+
+			setProjects((current) => current.filter((project) => project.projectId !== deletingProject.projectId));
+			setDeletingProject(null);
+			setStatusMessage('프로젝트를 삭제했습니다.');
+		} catch (error: unknown) {
+			setDeleteError(error instanceof Error ? error.message : '프로젝트 삭제 중 오류가 발생했습니다.');
+		} finally {
+			setIsDeleting(false);
+		}
+	};
+
 	return (
 		<>
 			<div className="rd-welcome-row">
@@ -244,7 +314,14 @@ export default function RDashboard() {
 							</div>
 							<footer className="rd-project-footer">
 								<button type="button" onClick={() => navigate('/monitor')}><Icon name="clock" size={14} /> History</button>
-								<button type="button" className="rd-config-button" onClick={() => openRunSetting(project)}><Icon name="settings" size={15} /> 실험 설정</button>
+								<div className="rd-project-actions">
+									<button type="button" onClick={() => openEditForm(project)}>수정</button>
+									<button type="button" className="rd-project-delete-button" onClick={() => {
+										setDeletingProject(project);
+										setDeleteError('');
+									}}>삭제</button>
+									<button type="button" className="rd-config-button" onClick={() => openRunSetting(project)}><Icon name="settings" size={15} /> 실험 설정</button>
+								</div>
 							</footer>
 						</article>
 					))}
@@ -267,32 +344,59 @@ export default function RDashboard() {
 				}}>
 					<section className="rd-modal" role="dialog" aria-modal="true" aria-labelledby="project-create-title">
 						<button className="rd-modal-close" type="button" aria-label="닫기" disabled={isSubmitting} onClick={() => setIsCreateOpen(false)}>×</button>
-						<h2 id="project-create-title">새 프로젝트</h2>
-						<p>분석할 웹사이트와 Agent가 탐색할 수 있는 도메인을 등록합니다.</p>
-						<form onSubmit={createProject}>
+						<h2 id="project-create-title">{editingProject ? '프로젝트 수정' : '새 프로젝트'}</h2>
+						<p>{editingProject ? '프로젝트 이름과 설명을 수정할 수 있습니다.' : '분석할 웹사이트와 Agent가 탐색할 수 있는 도메인을 등록합니다.'}</p>
+						<form onSubmit={saveProject}>
 							<label>
 								프로젝트 이름
 								<input autoFocus required maxLength={100} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="예: 가천대 포털" />
 							</label>
-							<label>
-								대상 URL
-								<input type="url" required maxLength={2048} value={targetUrl} onChange={(event) => updateTargetUrl(event.target.value)} placeholder="https://www.example.com" />
-							</label>
+							{editingProject ? (
+								<label>
+									대상 URL <span className="rd-form-optional">수정 불가</span>
+									<input type="url" readOnly value={targetUrl} />
+								</label>
+							) : (
+								<label>
+									대상 URL
+									<input type="url" required maxLength={2048} value={targetUrl} onChange={(event) => updateTargetUrl(event.target.value)} placeholder="https://www.example.com" />
+								</label>
+							)}
 							<label>
 								설명 <span className="rd-form-optional">선택</span>
 								<textarea maxLength={1000} value={description} onChange={(event) => setDescription(event.target.value)} placeholder="프로젝트에 대한 설명" />
 							</label>
-							<label>
-								허용 도메인
-								<textarea required value={allowedDomains} onChange={(event) => setAllowedDomains(event.target.value)} placeholder="example.com" />
-								<span className="rd-form-help">쉼표 또는 줄바꿈으로 여러 도메인을 입력할 수 있습니다. 대상 URL의 도메인을 기본으로 사용합니다.</span>
-							</label>
+							{!editingProject && (
+								<label>
+									허용 도메인
+									<textarea required value={allowedDomains} onChange={(event) => setAllowedDomains(event.target.value)} placeholder="example.com" />
+									<span className="rd-form-help">쉼표 또는 줄바꿈으로 여러 도메인을 입력할 수 있습니다. 대상 URL의 도메인을 기본으로 사용합니다.</span>
+								</label>
+							)}
 							{formError && <p className="rd-form-error" role="alert">{formError}</p>}
 							<div className="rd-modal-actions">
 								<button className="rd-cancel-button" type="button" disabled={isSubmitting} onClick={() => setIsCreateOpen(false)}>취소</button>
-								<button className="rd-create-button" type="submit" disabled={isSubmitting}>{isSubmitting ? '생성 중…' : '프로젝트 생성'}</button>
+								<button className="rd-create-button" type="submit" disabled={isSubmitting}>{isSubmitting ? '저장 중…' : editingProject ? '변경사항 저장' : '프로젝트 생성'}</button>
 							</div>
 						</form>
+					</section>
+				</div>
+			)}
+			{deletingProject && (
+				<div className="rd-modal-backdrop" onMouseDown={(event) => {
+					if (event.target === event.currentTarget && !isDeleting) setDeletingProject(null);
+				}}>
+					<section className="rd-modal rd-delete-modal" role="alertdialog" aria-modal="true" aria-labelledby="project-delete-title" aria-describedby="project-delete-description">
+						<button className="rd-modal-close" type="button" aria-label="닫기" disabled={isDeleting} onClick={() => setDeletingProject(null)}>×</button>
+						<h2 id="project-delete-title">프로젝트 삭제</h2>
+						<p id="project-delete-description"><strong>{deletingProject.title}</strong> 프로젝트를 삭제할까요? 프로젝트 데이터는 목록에서 숨겨지며, 기존 실험 기록은 보존됩니다.</p>
+						{deleteError && <p className="rd-form-error" role="alert">{deleteError}</p>}
+						<div className="rd-modal-actions">
+							<button className="rd-cancel-button" type="button" disabled={isDeleting} onClick={() => setDeletingProject(null)}>취소</button>
+							<button className="rd-project-delete-confirm" type="button" disabled={isDeleting} onClick={() => void deleteProject()}>
+								{isDeleting ? '삭제 중…' : '프로젝트 삭제'}
+							</button>
+						</div>
 					</section>
 				</div>
 			)}

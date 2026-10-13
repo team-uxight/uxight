@@ -448,6 +448,25 @@
 	background: #f0eef8;
 }
 
+.rd-project-actions {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+}
+
+.rd-project-footer .rd-config-button {
+	background: #fff;
+	box-shadow: 0 2px 8px rgb(40 36 71 / 9%);
+}
+
+.rd-project-footer .rd-project-delete-button {
+	color: #a54444;
+}
+
+.rd-project-footer .rd-project-delete-button:hover {
+	background: #fbebeb;
+}
+
 .rd-project-footer .rd-config-button {
 	background: #fff;
 	box-shadow: 0 2px 8px rgb(40 36 71 / 9%);
@@ -2200,6 +2219,23 @@
 	font: inherit;
 	font-size: 13px;
 	cursor: pointer;
+}
+
+.rd-project-delete-confirm {
+	min-height: 42px;
+	padding: 0 15px;
+	border: 1px solid #a54444;
+	border-radius: 999px;
+	background: #a54444;
+	color: #fff;
+	font: inherit;
+	font-size: 13px;
+	font-weight: 700;
+	cursor: pointer;
+}
+
+.rd-project-delete-confirm:hover {
+	background: #8f3838;
 }
 
 .rd-modal-actions .rd-create-button {
