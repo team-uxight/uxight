@@ -169,21 +169,17 @@ class RunOrchestrator:
         # 어떤 상태로 바뀌었는지는 db.py의 SQL 로그(UPDATE runs SET status ...)에 이어서 남는다.
         logger.info("run=%s 모든 페르소나 종료, 런 상태 판정: %s", run_id, statuses)
 
-        # 우선순위: 실패(fail/timeout) > 취소(cancelled) > 완료. fail과 cancelled가 섞이면 failed.
-        failed = {
-            persona_id: status
-            for persona_id, status in statuses.items()
-            if status in ("fail", "timeout")
-        }
-        if failed:
+        # Persona 일부가 fail · timeout 이어도 회차는 실패가 아니다
+        # (architecture §3.3, PM 결정 10/13).
+        # 우선순위: 취소(cancelled 가 하나라도) > 실패(모두 fail = 실행 오류) > 완료(그 밖 전부).
+        if "cancelled" in statuses.values():
+            run_repository.mark_cancelled(run_id)
+        elif all(status == "fail" for status in statuses.values()):
             failed_text = ", ".join(
-                f"{persona_id}({status})" for persona_id, status in failed.items()
+                f"{persona_id}({status})" for persona_id, status in statuses.items()
             )
             run_repository.mark_failed(run_id, error=f"실패한 페르소나: {failed_text}")
-        elif "cancelled" in statuses.values():
-            run_repository.mark_cancelled(run_id)
         else:
-            # 여기까지 오면 모든 페르소나가 정상 종료(done/max_steps)다.
             # 성공률 = Agent 가 스스로 done 을 낸 페르소나 비율 (메인 판정 기준, D21).
             done = sum(1 for status in statuses.values() if status == "done")
             run_repository.mark_done(run_id, success_rate=round(done / len(statuses) * 100, 2))

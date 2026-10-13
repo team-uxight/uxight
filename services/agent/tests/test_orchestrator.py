@@ -215,6 +215,7 @@ def test_persona_over_max_seconds_times_out(fakes: SimpleNamespace) -> None:
     asyncio.run(run(fakes, RUN_ID, snap))
 
     assert fakes.personas.statuses == {1: "max_steps", 2: "timeout"}
+    assert fakes.runs.status == "done"  # 일부 시간 초과는 회차 실패가 아니다
     assert fakes.browsers.open == 0  # 시간 상한에 걸린 브라우저도 닫혔다
     assert free_global_slots() == 3
 
@@ -232,7 +233,7 @@ def test_browser_close_is_outside_max_seconds(fakes: SimpleNamespace) -> None:
 
 @pytest.mark.parametrize(
     ("step_seconds", "outcome", "run_status"),
-    [(0, "max_steps", "done"), (HANG_SECONDS, "timeout", "failed")],
+    [(0, "max_steps", "done"), (HANG_SECONDS, "timeout", "done")],
     ids=["after-steps", "after-max-seconds"],
 )
 def test_hung_browser_close_does_not_block_result(
@@ -253,6 +254,33 @@ def test_hung_browser_close_does_not_block_result(
     assert fakes.personas.statuses == {1: outcome}
     assert fakes.runs.status == run_status
     assert free_global_slots() == 3
+
+
+@pytest.mark.parametrize(
+    ("persona_statuses", "run_status", "error"),
+    [
+        ({1: "max_steps", 2: "max_steps", 3: "max_steps", 4: "timeout"}, "done", None),
+        ({1: "done", 2: "fail"}, "done", None),
+        ({1: "fail", 2: "fail"}, "failed", "실패한 페르소나: 1(fail), 2(fail)"),
+        ({1: "timeout", 2: "timeout"}, "done", None),
+        ({1: "done", 2: "fail", 3: "cancelled"}, "cancelled", None),
+    ],
+    ids=["some-timeout", "done-and-fail", "all-fail", "all-timeout", "with-cancelled"],
+)
+def test_run_status_from_persona_statuses(
+    fakes: SimpleNamespace,
+    persona_statuses: dict[int, str],
+    run_status: str,
+    error: str | None,
+) -> None:
+    # Persona 일부가 fail · timeout 이어도 회차는 실패가 아니다 (architecture §3.3, PM 결정 10/13).
+    # 취소가 섞이면 cancelled, 모두 fail 이면 failed, 그 밖은 done.
+    fakes.personas.statuses.update(persona_statuses)
+
+    RunOrchestrator()._finish_run(RUN_ID)
+
+    assert fakes.runs.status == run_status
+    assert fakes.runs.error == error
 
 
 @pytest.mark.parametrize("slots_held_by_other_runs", [0, 2], ids=["running", "waiting-for-slot"])
