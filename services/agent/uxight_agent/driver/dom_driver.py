@@ -10,7 +10,10 @@ NAVIGATION_TIMEOUT_MS = 15_000
 ACTION_TIMEOUT_MS = 5_000
 ID_ATTRIBUTE = "data-ux-id"
 
-# 관측에서 뺄 "사람 눈에 안 보이는" 요소의 기준값 (관측 정제 L0.5, agent-safety §2.2 #4).
+# 관측에서 뺄 "사람 눈에 안 보이는" 글의 기준값 (관측 정제 L0.5, agent-safety §2.2 #4).
+# 요소가 아니라 글(글 조각 · 버튼 value · placeholder)에만 적용한다 — 투명 select를 씌운 드롭다운
+# · font-size 0 닫기 버튼 같은 정상 컨트롤은 글이 빠진 요소 줄로 남는다 (PM 결정 10/13).
+# 숨기거나 투명하게 한 체크박스 · 라디오를 보이는 라벨로 바꿀지도 이 기준으로 정한다.
 # 조상까지 곱한 불투명도가 이보다 낮으면 안 보인다고 본다. 0만 막으면 0.01 같은 값으로 우회된다.
 MIN_OPACITY = 0.1
 # 글자 크기(px)가 이보다 작으면 읽을 수 없다고 본다. 정상 페이지의 각주 · 캡션도 보통 10px 이상이다.
@@ -25,14 +28,17 @@ _COLLECT_ELEMENTS_JS = """
 ({ idAttr, minOpacity, minFontSizePx, maxValueLength }) => {
   document.querySelectorAll(`[${idAttr}]`).forEach(el => el.removeAttribute(idAttr));
 
-  // 사람 눈에 안 보이는 요소: 크기 0 · 그려지지 않음(display:none 조상 · 닫힌 details · visibility)
-  // · 작은 글자 · aria-hidden · 투명 · 화면 밖.
-  const isHidden = (el) => {
+  // 사람 눈에 보이는 정도.
+  // 'hidden': 요소째 안 보인다 — 크기 0 · 화면 밖 · 그려지지 않음(display:none 조상 · 닫힌 details
+  //   · visibility). 이런 요소는 관측에서 뺀다.
+  // 'textHidden': 요소는 있지만 글은 못 읽는다 — 투명 · 작은 글자. 요소는 남기고 글만 뺀다.
+  // aria-hidden은 보이는 요소에도 붙으므로(예: 슬라이더가 보이는 슬라이드에 붙임) 보지 않는다.
+  // 그 안의 주입 문구는 관측에 들어가고 mark_instructions 표시로 다룬다 (PM 결정 10/13,
+  // 프롬프트에 연결하는 일은 GACA-107).
+  const visibilityOf = (el) => {
     const rect = el.getBoundingClientRect();
-    if (rect.width === 0 || rect.height === 0) return true;
-    if (!el.checkVisibility({ visibilityProperty: true })) return true;
-    const fontSize = parseFloat(getComputedStyle(el).fontSize);
-    if (fontSize < minFontSizePx || el.closest('[aria-hidden="true"]')) return true;
+    if (rect.width === 0 || rect.height === 0) return 'hidden';
+    if (!el.checkVisibility({ visibilityProperty: true })) return 'hidden';
     // opacity는 상속되지 않지만 조상 값과 곱해져 보이므로 조상까지 곱한다.
     // fixed 조상이 있으면 스크롤해도 화면 위치가 그대로라 문서 좌표로 바꾸지 않는다.
     let opacity = 1;
@@ -42,10 +48,13 @@ _COLLECT_ELEMENTS_JS = """
       opacity *= parseFloat(style.opacity);
       fixed ||= style.position === 'fixed';
     }
-    if (opacity < minOpacity) return true;
     // 화면 밖: 가로는 뷰포트 밖(가로 스크롤은 사람도 Agent도 거의 하지 않는다),
     // 세로는 문서 위쪽 바깥(스크롤로도 닿지 않는다). 아래쪽은 스크롤하면 보이므로 남긴다.
-    return rect.right <= 0 || rect.left >= innerWidth || rect.bottom + (fixed ? 0 : scrollY) <= 0;
+    if (rect.right <= 0 || rect.left >= innerWidth || rect.bottom + (fixed ? 0 : scrollY) <= 0) {
+      return 'hidden';
+    }
+    const fontSize = parseFloat(getComputedStyle(el).fontSize);
+    return opacity < minOpacity || fontSize < minFontSizePx ? 'textHidden' : 'visible';
   };
 
   // 글 조각을 감싼 가장 가까운 블록 요소. 블록이 바뀌는 곳만 innerText처럼 띄어 붙인다.
@@ -55,7 +64,7 @@ _COLLECT_ELEMENTS_JS = """
     return el;
   };
 
-  // innerText는 투명 · 화면 밖 · 작은 글자 · aria-hidden인 자식의 글까지 담으므로
+  // innerText는 투명 · 화면 밖 · 작은 글자인 자식의 글까지 담으므로
   // 글 조각마다 감싼 요소를 다시 거른다.
   const visibleText = (el) => {
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
@@ -69,7 +78,7 @@ _COLLECT_ELEMENTS_JS = """
       // display:contents는 상자가 없어 크기가 0이므로 상자가 있는 조상으로 판정한다.
       let parent = node.parentElement;
       while (getComputedStyle(parent).display === 'contents') parent = parent.parentElement;
-      if (isHidden(parent)) continue;
+      if (visibilityOf(parent) !== 'visible') continue;
       const block = blockOf(node);
       text += (block === lastBlock ? '' : ' ') + node.textContent;
       lastBlock = block;
@@ -83,22 +92,23 @@ _COLLECT_ELEMENTS_JS = """
   let nextId = 1;
   for (const el of document.querySelectorAll(selector)) {
     const tag = el.tagName.toLowerCase();
-    const hidden = isHidden(el);
-    // 체크박스 · 라디오를 숨기고 꾸민 라벨로 보여주는 흔한 UI — 사람은 보이는 라벨을 눌러 쓴다.
-    // 이때는 라벨에 ID를 붙여 라벨을 누르게 하고, 글도 숨은 요소의 속성 대신 라벨 글을 쓴다.
-    const label = hidden && tag === 'input' && ['checkbox', 'radio'].includes(el.type)
+    const visibility = visibilityOf(el);
+    // 체크박스 · 라디오를 숨기거나 투명하게 하고 꾸민 라벨로 보여주는 흔한 UI — 사람은 보이는
+    // 라벨을 눌러 쓴다. 이때는 라벨에 ID를 붙여 라벨을 누르게 하고, 글도 라벨 글을 쓴다.
+    const toggle = tag === 'input' && ['checkbox', 'radio'].includes(el.type);
+    const label = toggle && visibility !== 'visible'
       ? Array.from(el.labels).find((l) => visibleText(l).trim())
       : undefined;
-    if (el.disabled || (hidden && !label)) {
+    if (el.disabled || (visibility === 'hidden' && !label)) {
       continue;
     }
     (label ?? el).setAttribute(idAttr, String(nextId));
     // 입력칸의 value는 입력값(비밀번호 포함)이라 관측 어디에도 넣지 않는다 (agent-safety §1.2).
     // React처럼 입력값을 value 속성에 맞춰 두는 페이지도 있어 속성도 읽지 않는다.
-    // 값이 곧 버튼 글자인 submit · button · reset과, 사용자가 입력할 수 없는 페이지 값인
-    // checkbox · radio만 쓴다 (라디오끼리 구별할 글이 value뿐인 경우가 많다).
-    const pageValue = tag === 'input'
-      && ['submit', 'button', 'reset', 'checkbox', 'radio'].includes(el.type)
+    // 값이 곧 버튼 글자인 submit · button · reset(글이 보일 때만)과, 사용자가 입력할 수 없는
+    // 페이지 값인 checkbox · radio만 쓴다 (라디오끼리 구별할 글이 value뿐인 경우가 많다).
+    const buttonInput = tag === 'input' && ['submit', 'button', 'reset'].includes(el.type);
+    const pageValue = ((buttonInput && visibility === 'visible') || toggle)
       && el.getAttribute('value');
     // select의 글은 옵션 전체라서 제외한다 (옵션은 options로 따로 제공).
     const text = (
@@ -114,7 +124,8 @@ _COLLECT_ELEMENTS_JS = """
       type: el.getAttribute('type'),
       text,
       name: el.getAttribute('name'),
-      placeholder: el.getAttribute('placeholder'),
+      // placeholder도 입력칸에 그려지는 글이라 글이 안 보이면 뺀다.
+      placeholder: visibility === 'visible' ? el.getAttribute('placeholder') : null,
       href: el.getAttribute('href'),
       options: tag === 'select'
         ? Array.from(el.options).map(o => ({ value: o.value, text: o.text.trim() }))
