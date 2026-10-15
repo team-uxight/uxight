@@ -11,6 +11,7 @@ import RDiagnosis from './pages/R-Diagnosis';
 import RFixes from './pages/R-Fixes';
 import RReports from './pages/R-Reports';
 import DesignSystem from './pages/DesignSystem';
+import SomViewerDemo from './pages/SomViewerDemo';
 
 export default function App() {
   return (
@@ -20,6 +21,7 @@ export default function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<SignUp />} />
         <Route path="/design-system" element={<DesignSystem />} />
+        <Route path="/som-viewer-demo" element={<SomViewerDemo />} />
 
         <Route element={<ProtectedRoute />}>
           <Route element={<ResearcherLayout />}>
