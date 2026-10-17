@@ -74,6 +74,37 @@ class RunRepository:
                 {"run_id": run_id, "error": error},
             )
 
+    def fail_unfinished(self, run_id: int, error: str) -> None:
+        # mark_failed 와 달리 accepted 회차도 마감한다 — 수락 뒤 시작 전에 멈춘 회차가 있다.
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "UPDATE runs SET status = 'failed', error = :error, finished_at = NOW() "
+                    "WHERE run_id = :run_id AND status IN ('accepted', 'running')"
+                ),
+                {"run_id": run_id, "error": error},
+            )
+
+    def cancel_unfinished(self, run_id: int) -> None:
+        # mark_cancelled 와 달리 accepted 회차도 마감한다 — 재시작 정리에서 쓴다.
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "UPDATE runs SET status = 'cancelled', finished_at = NOW() "
+                    "WHERE run_id = :run_id AND status IN ('accepted', 'running')"
+                ),
+                {"run_id": run_id},
+            )
+
+    def get_unfinished_run_ids(self) -> list[int]:
+        # 수락했지만 끝나지 않은 회차. queued 는 아직 수락 전이라 넣지 않는다.
+        with engine.begin() as conn:
+            return list(
+                conn.execute(
+                    text("SELECT run_id FROM runs WHERE status IN ('accepted', 'running')")
+                ).scalars()
+            )
+
     def mark_cancelled(self, run_id: int) -> None:
         with engine.begin() as conn:
             conn.execute(
@@ -122,6 +153,14 @@ class RunRepository:
                     "  WHERE run_id = :run_id AND status IN ('done', 'max_steps')"
                     ") WHERE run_id = :run_id"
                 ),
+                {"run_id": run_id},
+            )
+
+    def touch_heartbeat(self, run_id: int) -> None:
+        # Watcher 감시 주기마다 갱신한다. Spring 은 이 값이 임계보다 오래되면 stale 로 보여준다.
+        with engine.begin() as conn:
+            conn.execute(
+                text("UPDATE runs SET heartbeat_at = NOW() WHERE run_id = :run_id"),
                 {"run_id": run_id},
             )
 
