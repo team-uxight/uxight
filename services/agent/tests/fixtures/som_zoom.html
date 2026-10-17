@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>SoM zoom fixture</title>
+  <!-- 글자 키우기 버튼이 흔히 쓰는 body zoom + 큰 글자. 블러는 24px 이상 글자를 못 가린다.
+       html zoom 은 html 아래 붙는 덧그림 컨테이너에도 물려, 막 좌표가 어긋나는지 함께 본다 -->
+  <style>
+    html { zoom: 1.25; }
+    body { margin: 0; zoom: 1.5; }
+    input { display: block; margin: 40px 8px; width: 400px; font: 32px sans-serif; }
+  </style>
+</head>
+<body>
+  <a href="#top">맨 위 링크</a>
+  <input name="secret" type="text">
+</body>
+</html>
