@@ -1,0 +1,108 @@
+<!doctype html>
+<!--
+  GACA-111 정상 UI 회귀. 투명 · 작은 글자 · aria-hidden 을 쓰지만 사람이 보고 쓰는 컨트롤이라 모두 관측에 있어야 한다.
+  투명도 · 글자 크기는 요소가 아니라 글에만 적용하므로, 글이 안 보이는 컨트롤은 글이 빠진 요소 줄로 남는다
+  (PM 결정 10/13). aria-label · 라디오 value 처럼 화면에 그리지 않는 이름은 남는다.
+-->
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <title>정상 UI 회귀</title>
+    <style>
+      .ir {
+        display: inline-block;
+        width: 24px;
+        height: 24px;
+        border: 0;
+        background: #333;
+        font-size: 0;
+      }
+      .fake-select {
+        position: relative;
+        display: inline-block;
+        width: 160px;
+        height: 30px;
+        border: 1px solid #999;
+      }
+      .fake-select select {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        opacity: 0;
+      }
+      .upload {
+        position: relative;
+        display: inline-block;
+        padding: 6px 12px;
+        background: #06c;
+        color: #fff;
+      }
+      .upload input {
+        position: absolute;
+        inset: 0;
+        opacity: 0;
+      }
+      .switch {
+        position: relative;
+        display: inline-block;
+        width: 40px;
+        height: 20px;
+        background: #ccc;
+      }
+      .switch input {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        opacity: 0;
+      }
+      .star input {
+        position: absolute;
+        opacity: 0;
+      }
+      .star label {
+        display: inline-block;
+        width: 20px;
+        height: 20px;
+        background: gold;
+      }
+      /* 60초 뒤에 나타난다 — 관측하는 동안은 투명하다. */
+      .fade {
+        opacity: 0;
+        animation: fadein 1s 60s forwards;
+      }
+      @keyframes fadein {
+        to {
+          opacity: 1;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- 1 · 2. 글자를 font-size: 0 으로 숨기고 배경 그림으로 보여주는 닫기 버튼 · 로고 링크 -->
+    <button class="ir" type="button" name="close">닫기</button>
+    <a class="ir" href="/">가천대학교 홈</a>
+    <!-- 3. 꾸민 상자 위에 투명 select 를 씌운 드롭다운 -->
+    <div class="fake-select">
+      <span>학과 선택 ▾</span>
+      <select name="dept">
+        <option value="cs">컴퓨터공학과</option>
+        <option value="ai">AI학과</option>
+      </select>
+    </div>
+    <!-- 4. 투명 file input 을 씌운 올리기 버튼 -->
+    <span class="upload">파일 올리기<input type="file" name="attach" /></span>
+    <!-- 5. aria-label 만 있는 토글 스위치 -->
+    <span class="switch"><input type="checkbox" role="switch" name="notify" aria-label="알림 받기" /></span>
+    <!-- 6. 아이콘뿐인 별점 라벨 -->
+    <span class="star"
+      ><input type="radio" id="star5" name="rating" value="5" /><label for="star5" aria-label="5점"></label
+    ></span>
+    <!-- 7. 처음엔 투명했다가 나타나는 버튼 -->
+    <button class="fade" type="button" name="start">시작하기</button>
+    <!-- 8. 슬라이더가 보이는 슬라이드에도 aria-hidden 을 붙인 링크 -->
+    <div aria-hidden="true"><a href="/slide/1">가을 축제 안내</a></div>
+  </body>
+</html>

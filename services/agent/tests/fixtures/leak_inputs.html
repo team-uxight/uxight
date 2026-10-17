@@ -1,0 +1,31 @@
+<!doctype html>
+<!--
+  GACA-111 입력값 누출. 입력칸 값(비밀번호 포함)은 관측 글 어디에도 들어가지 않아야 한다.
+  React 제어 입력칸처럼 입력할 때마다 값을 value 속성 · textarea 기본값(글 노드)에 맞춰 두는 스크립트를 넣었다.
+  textarea 를 품은 버튼 역할 요소는 글을 모을 때 textarea 글 노드까지 지나간다.
+  submit 버튼의 value 는 버튼 글자, 라디오의 value 는 입력할 수 없는 페이지 값이라 관측에 남는다.
+-->
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <title>입력값 누출</title>
+  </head>
+  <body>
+    <form>
+      <input type="text" name="user" value="attr-user-secret" />
+      <input type="password" name="pw" value="hunter2" />
+      <textarea name="memo">attr-memo-secret</textarea>
+      <div role="button">메모 카드 <textarea name="card">attr-card-secret</textarea></div>
+      <label><input type="radio" name="pay" value="card" />카드</label>
+      <label><input type="radio" name="pay" value="bank" />계좌이체</label>
+      <input type="submit" value="가입하기" />
+    </form>
+    <script>
+      document.addEventListener('input', (e) => {
+        const el = e.target;
+        if (el.tagName === 'TEXTAREA') el.defaultValue = el.value;
+        else el.setAttribute('value', el.value);
+      });
+    </script>
+  </body>
+</html>
