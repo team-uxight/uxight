@@ -4,11 +4,12 @@ LLM 없이 로컬 fixture 페이지로 본다.
 """
 
 import asyncio
+import time
 from pathlib import Path
 
 from uxight_agent.driver.base import Observation
 from uxight_agent.driver.dom_driver import DomDriver
-from uxight_agent.driver.som_driver import MARK_ATTRIBUTE, SomDriver
+from uxight_agent.driver.som_driver import MARK_ATTRIBUTE, STILL_WAIT_MS, SomDriver
 from uxight_agent.schemas import Action
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -16,6 +17,10 @@ PAGE_URL = (FIXTURES / "som_page.html").as_uri()
 DIALOG_URL = (FIXTURES / "som_dialog.html").as_uri()
 ZOOM_URL = (FIXTURES / "som_zoom.html").as_uri()
 HIDDEN_URL = (FIXTURES / "som_hidden.html").as_uri()
+FADE_URL = (FIXTURES / "som_fade.html").as_uri()
+SMOOTH_URL = (FIXTURES / "som_smooth.html").as_uri()
+REDIRECT_URL = (FIXTURES / "som_redirect.html").as_uri()
+PROGRESS_URL = (FIXTURES / "som_progress.html").as_uri()
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 TYPED_QUERY = "졸업 요건"
 
@@ -204,3 +209,96 @@ def test_page_restored_after_capture() -> None:
     assert TYPED_QUERY in after["values"]
     assert leftover["box_count"] == 0
     assert leftover["mask_rects"] == []
+
+
+async def _shot_after_click(url: str, text: str) -> bytes | None:
+    """url 을 열어 글이 text 인 요소를 누르고, 곧바로 SomDriver 로 찍는다."""
+    async with SomDriver() as driver:
+        await driver.start(url)
+        first = await driver.observe()
+        target = next(id_ for id_, item in first.element_map.items() if item["text"] == text)
+        result = await driver.act(Action(kind="click", element_id=target))
+        assert result.ok, result.error
+        observation = await driver.observe()
+        return observation.screenshot
+
+
+def test_value_masked_while_modal_fades_in() -> None:
+    # 값이 든 창이 0.5초 동안 나타나며 내려온다. 그 사이 막을 그리면 막이 빠지거나 빗나간다.
+    shots = [
+        asyncio.run(_shot_after_click(f"{FADE_URL}?v={value}", "로그인 창 열기"))
+        for value in ("hunter2", "XXXXXXX")
+    ]
+
+    assert shots[0] is not None
+    # 값이 한 픽셀이라도 이미지에 남으면 두 장이 달라진다.
+    assert shots[0] == shots[1]
+
+
+def test_value_masked_after_smooth_scroll() -> None:
+    # 부드러운 스크롤 중에 막을 그리면 막은 그린 자리에 남고 입력칸만 올라간다.
+    shots = [
+        asyncio.run(_shot_after_click(f"{SMOOTH_URL}?v={value}", "폼으로 이동"))
+        for value in ("hunter2", "XXXXXXX")
+    ]
+
+    assert shots[0] is not None
+    assert shots[0] == shots[1]
+
+
+def test_decorative_animation_not_waited() -> None:
+    # 7초짜리 진행 막대는 번호를 붙일 요소 · 입력칸을 품지 않아 기다리지 않는다.
+    async def scenario() -> tuple[float, Observation]:
+        async with SomDriver() as driver:
+            await driver.start(PROGRESS_URL)
+            started = time.monotonic()
+            observation = await driver.observe()
+            return time.monotonic() - started, observation
+
+    elapsed, observation = asyncio.run(scenario())
+
+    assert observation.screenshot is not None
+    assert elapsed < STILL_WAIT_MS / 1000
+
+
+def test_screenshot_dropped_when_page_moves_during_capture() -> None:
+    async def scenario() -> Observation:
+        async with SomDriver() as driver:
+            await driver.start(f"{SMOOTH_URL}?v=hunter2")
+            page = driver._page
+            real_screenshot = page.screenshot
+
+            async def moved_screenshot(**kwargs) -> bytes:
+                # 막을 그린 뒤 찍기 전에 화면이 움직인다. 몇 번을 다시 해도 그렇다.
+                await page.evaluate("() => scrollBy({ top: 100, behavior: 'instant' })")
+                return await real_screenshot(**kwargs)
+
+            page.screenshot = moved_screenshot
+            return await driver.observe()
+
+    observation = asyncio.run(scenario())
+
+    # 막이 빗나간 그림은 내보내지 않고 글 관측만 돌려준다.
+    assert observation.screenshot is None
+    assert observation.element_map
+
+
+def test_observe_survives_redirect_after_load() -> None:
+    # 로드 직후 스크립트가 다른 페이지로 넘긴다. 관측 도중 문서가 바뀐다.
+    async def observe_once(delay_ms: int) -> tuple[float, Observation]:
+        async with SomDriver() as driver:
+            await driver.start(f"{REDIRECT_URL}?ms={delay_ms}")
+            started = time.monotonic()
+            observation = await driver.observe()
+            return time.monotonic() - started, observation
+
+    # 넘기기 전 페이지는 링크 1개, 넘긴 뒤 페이지(som_page)는 요소 8개다.
+    element_count = {"SoM redirect fixture": 1, "SoM fixture": 8}
+    for delay_ms in (0, 5, 10, 15, 20, 25):
+        elapsed, observation = asyncio.run(observe_once(delay_ms))
+
+        # 예외 없이 10초 안에 끝난다. 전에는 스크린샷에서 30초 동안 멈추기도 했다.
+        assert elapsed < 10, delay_ms
+        assert observation.screenshot is not None, delay_ms
+        # 제목과 요소 목록이 같은 문서의 것이다. 전에는 새 제목에 옛 요소 목록이 섞이기도 했다.
+        assert len(observation.element_map) == element_count[observation.title], delay_ms

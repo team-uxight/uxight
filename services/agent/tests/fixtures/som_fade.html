@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>SoM fade-in fixture</title>
+  <!-- 버튼을 누르면 값이 미리 든 입력칸이 있는 창이 0.5초 동안 나타나며 내려온다.
+       누른 직후 막을 그리면 창이 아직 투명하거나(막이 빠짐) 위에 있다(막이 빗나감) -->
+  <style>
+    #modal {
+      position: fixed; top: 100px; left: 100px; padding: 20px;
+      background: #fff; border: 1px solid #333;
+      opacity: 0; transform: translateY(-120px); pointer-events: none;
+      transition: opacity 0.5s, transform 0.5s;
+    }
+    #modal.open { opacity: 1; transform: none; pointer-events: auto; }
+    input { font: 24px sans-serif; width: 320px; }
+  </style>
+</head>
+<body>
+  <button type="button" id="open">로그인 창 열기</button>
+  <div id="modal"><input name="user" type="text"></div>
+  <script>
+    // 값은 주소의 ?v= 로 받는다. 값만 다르게 두 번 찍어 비교한다.
+    document.querySelector('[name=user]').value = new URLSearchParams(location.search).get('v');
+    document.getElementById('open').onclick = () => {
+      document.getElementById('modal').classList.add('open');
+    };
+  </script>
+</body>
+</html>
