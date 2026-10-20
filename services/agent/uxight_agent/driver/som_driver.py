@@ -106,8 +106,9 @@ _DRAW_MARKS_JS = """
 # 찍은 뒤 그림을 믿을 수 있는지 보고 덧그림을 지운다. 아래가 모두 맞아야 true 다.
 # - 덧그림이 남아 있다: 그린 뒤 문서가 바뀌지 않았다.
 # - 요소가 있었다면 번호 박스도 있다: 번호를 붙인 뒤 그리기 전에 문서가 바뀌지 않았다.
-# - 지금 보이는 입력칸마다 같은 자리에 막이 있다: 찍는 사이 화면이 움직이지 않았고,
-#   그릴 때 투명하던 칸이 나타나지도 않았다.
+# - 막 수와 지금 보이는 입력칸 수가 같고, 그 칸마다 같은 자리에 막이 있다: 찍는 사이 화면이
+#   움직이지 않았고, 그릴 때 투명하던 칸이 나타나지도 보이던 칸이 사라지지도 않았다.
+#   움직였다가 확인 전에 사라진 칸은 막 밖에 찍혔을 수 있다 (JS 로 움직이는 패널).
 #   transform 아래에서는 좌표에 1/64px 오차가 있어 1px 미만 차이는 같은 자리로 본다.
 _VERIFY_AND_CLEAR_JS = """
 ({ markAttr, maskSelector, expectBoxes }) => {
@@ -118,11 +119,12 @@ _VERIFY_AND_CLEAR_JS = """
     return masks.some((mask) => ['left', 'top', 'width', 'height']
       .every((key) => Math.abs(mask[key] - rect[key]) < 1));
   };
+  const visible = Array.from(document.querySelectorAll(maskSelector))
+    .filter((el) => el.checkVisibility({ visibilityProperty: true, opacityProperty: true }));
   const ok = document.querySelector(`[${markAttr}=""]`) !== null
     && (!expectBoxes || document.querySelector(`[${markAttr}=box]`) !== null)
-    && Array.from(document.querySelectorAll(maskSelector))
-      .filter((el) => el.checkVisibility({ visibilityProperty: true, opacityProperty: true }))
-      .every(covered);
+    && visible.length === masks.length
+    && visible.every(covered);
   document.querySelectorAll(`[${markAttr}]`).forEach((el) => el.remove());
   return ok;
 }

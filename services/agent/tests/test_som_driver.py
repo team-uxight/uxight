@@ -7,6 +7,9 @@ import asyncio
 import time
 from pathlib import Path
 
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
+
+from uxight_agent.driver import som_driver
 from uxight_agent.driver.base import Observation
 from uxight_agent.driver.dom_driver import DomDriver
 from uxight_agent.driver.som_driver import MARK_ATTRIBUTE, STILL_WAIT_MS, SomDriver
@@ -212,13 +215,26 @@ def test_page_restored_after_capture() -> None:
 
 
 async def _shot_after_click(url: str, text: str) -> bytes | None:
-    """url 을 열어 글이 text 인 요소를 누르고, 곧바로 SomDriver 로 찍는다."""
+    """url 을 열어 글이 text 인 요소를 누르고, 곧바로 SomDriver 로 찍는다.
+
+    막을 그린 뒤 찍기까지 0.15초가 걸리게 한다. 빠른 기계에서는 화면이 움직이기 전에 찍혀
+    막이 빗나가는 경우를 놓친다. 느린 러너에서는 그사이 화면이 움직인다.
+    """
     async with SomDriver() as driver:
         await driver.start(url)
         first = await driver.observe()
         target = next(id_ for id_, item in first.element_map.items() if item["text"] == text)
         result = await driver.act(Action(kind="click", element_id=target))
         assert result.ok, result.error
+
+        page = driver._page
+        real_screenshot = page.screenshot
+
+        async def slow_screenshot(**kwargs) -> bytes:
+            await asyncio.sleep(0.15)
+            return await real_screenshot(**kwargs)
+
+        page.screenshot = slow_screenshot
         observation = await driver.observe()
         return observation.screenshot
 
@@ -283,6 +299,37 @@ def test_screenshot_dropped_when_page_moves_during_capture() -> None:
     assert observation.element_map
 
 
+def test_value_masked_when_field_moves_then_hides() -> None:
+    # JS 로 움직이는 패널(getAnimations 에 안 잡힌다)이 찍는 사이 미끄러지고, 확인 전에 숨는다.
+    # 확인할 때 보이는 입력칸이 없어도, 막 밖에 값이 찍힌 그림은 받아들이지 않는다.
+    async def shot(value: str) -> bytes | None:
+        async with SomDriver() as driver:
+            await driver.start(f"{SMOOTH_URL}?v={value}")
+            page = driver._page
+            real_screenshot = page.screenshot
+            calls = 0
+
+            async def slide_then_hide(**kwargs) -> bytes:
+                nonlocal calls
+                calls += 1
+                if calls > 1:
+                    return await real_screenshot(**kwargs)
+                form = "document.getElementById('form').style"
+                await page.evaluate(f"() => {{ {form}.transform = 'translateX(400px)'; }}")
+                image = await real_screenshot(**kwargs)
+                await page.evaluate(f"() => {{ {form}.visibility = 'hidden'; }}")
+                return image
+
+            page.screenshot = slide_then_hide
+            observation = await driver.observe()
+            return observation.screenshot
+
+    shots = [asyncio.run(shot(value)) for value in ("hunter2", "XXXXXXX")]
+
+    assert shots[0] is not None
+    assert shots[0] == shots[1]
+
+
 def test_observe_survives_redirect_after_load() -> None:
     # 로드 직후 스크립트가 다른 페이지로 넘긴다. 관측 도중 문서가 바뀐다.
     async def observe_once(delay_ms: int) -> tuple[float, Observation]:
@@ -302,3 +349,63 @@ def test_observe_survives_redirect_after_load() -> None:
         assert observation.screenshot is not None, delay_ms
         # 제목과 요소 목록이 같은 문서의 것이다. 전에는 새 제목에 옛 요소 목록이 섞이기도 했다.
         assert len(observation.element_map) == element_count[observation.title], delay_ms
+
+
+def test_reobserved_when_document_changes_before_marks() -> None:
+    # 번호를 붙인 직후, 덧그림을 그리기 전에 문서가 바뀐다. 새 문서에는 번호가 없다.
+    async def scenario() -> Observation:
+        async with SomDriver() as driver:
+            await driver.start(ZOOM_URL)
+            real_collect = driver._collect_elements
+            calls = 0
+
+            async def collect_then_navigate(page):
+                nonlocal calls
+                calls += 1
+                items = await real_collect(page)
+                if calls == 1:
+                    await page.goto(PAGE_URL)
+                return items
+
+            driver._collect_elements = collect_then_navigate
+            return await driver.observe()
+
+    observation = asyncio.run(scenario())
+
+    # 옛 문서(요소 2개)의 목록을 새 문서(som_page, 요소 8개)의 제목 · 그림과 섞지 않는다.
+    assert observation.title == "SoM fixture"
+    assert len(observation.element_map) == 8
+    assert observation.screenshot is not None
+
+
+def test_stuck_screenshot_cut_and_retried(monkeypatch) -> None:
+    # 찍기가 멈추면(관측 중 문서가 바뀔 때 30초 멈춘 적이 있다) 상한에서 끊고 다시 찍는다.
+    # 상한을 줄여 빨리 돌린다.
+    monkeypatch.setattr(som_driver, "SCREENSHOT_TIMEOUT_MS", 300)
+
+    async def scenario() -> tuple[float, Observation]:
+        async with SomDriver() as driver:
+            await driver.start(PAGE_URL)
+            page = driver._page
+            real_screenshot = page.screenshot
+            calls = 0
+
+            async def stuck_once(**kwargs) -> bytes:
+                nonlocal calls
+                calls += 1
+                if calls > 1:
+                    return await real_screenshot(**kwargs)
+                # 멈춘 찍기는 받은 상한이 지나야 TimeoutError 로 끝난다.
+                # 상한을 넘기지 않으면 Playwright 기본값(30초)을 다 기다린다.
+                await asyncio.sleep(kwargs.get("timeout", 30_000) / 1000)
+                raise PlaywrightTimeoutError("Timeout exceeded")
+
+            page.screenshot = stuck_once
+            started = time.monotonic()
+            observation = await driver.observe()
+            return time.monotonic() - started, observation
+
+    elapsed, observation = asyncio.run(scenario())
+
+    assert observation.screenshot is not None
+    assert elapsed < 10
