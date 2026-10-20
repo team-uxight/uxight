@@ -78,15 +78,20 @@ class RunOrchestrator:
         사이에 멈춘 경우뿐이라 실행하지 않고 running 과 같이 마감한다.
         """
         for run_id in run_repository.get_unfinished_run_ids():
-            if run_repository.is_cancel_requested(run_id):
-                logger.warning(
-                    "run=%s cancel requested before restart, closing as cancelled", run_id
-                )
-                self._finish_running_personas(run_id, "cancelled")
-                run_repository.cancel_unfinished(run_id)
-            else:
-                logger.warning("run=%s interrupted by restart, closing as failed", run_id)
-                self._fail_run(run_id, error="interrupted")
+            try:
+                if run_repository.is_cancel_requested(run_id):
+                    logger.warning(
+                        "run=%s cancel requested before restart, closing as cancelled", run_id
+                    )
+                    self._finish_running_personas(run_id, "cancelled")
+                    run_repository.cancel_unfinished(run_id)
+                else:
+                    logger.warning("run=%s interrupted by restart, closing as failed", run_id)
+                    self._fail_run(run_id, error="interrupted")
+            except Exception:
+                # 한 회차의 DB 오류로 나머지 회차를 running 으로 남기지 않는다.
+                # 오류가 난 회차는 다음 기동 때 다시 정리된다.
+                logger.exception("run=%s restart cleanup failed, skipping", run_id)
 
     async def run_personas(self, run_id: int, snapshot: RunSnapshot) -> None:
         # 202 로 수락한 뒤라 여기서 난 예외는 Spring 에 닿지 않는다. 어디서 예외가 나든
@@ -159,7 +164,18 @@ class RunOrchestrator:
             if status == "running":
                 run_persona_repository.mark_finished(run_id, persona_id, outcome)
 
+    @staticmethod
+    def _refresh_progress(run_id: int) -> None:
+        # 진행률은 매번 처음부터 다시 센다. 갱신이 한 번 실패해도 회차를 실패로 만들지 않고
+        # 기록만 한다 — 다음 갱신(다른 페르소나 종료, 회차 마감)에서 맞춰진다.
+        try:
+            run_repository.refresh_progress(run_id)
+        except Exception:
+            logger.exception("run=%s progress refresh failed", run_id)
+
     def _finish_run(self, run_id: int) -> None:
+        # 마지막 페르소나의 진행률 갱신이 실패했어도 회차를 마감하기 전에 맞춘다.
+        self._refresh_progress(run_id)
         statuses = run_persona_repository.get_statuses(run_id)
         # 아직 실행 중인 페르소나가 있으면 런은 running 그대로 둔다. 판정은 모두 종료된 뒤에만 한다.
         if not statuses or "running" in statuses.values():
@@ -216,20 +232,16 @@ class RunOrchestrator:
                             run_id,
                             persona_id,
                         )
-                except TimeoutError:
-                    logger.info(
-                        "run=%s persona=%s exceeded max_seconds=%s", run_id, persona_id, max_seconds
-                    )
-                    outcome = "timeout"
                 except Exception:
-                    # 브라우저 실행 실패, 시작 URL 접근 실패 등
+                    # 브라우저 실행 실패, 시작 URL 접근 실패, 스텝 안에서 난 시간 초과
+                    # (LLM 호출 하나의 상한 등 — 시간 상한과는 다르다) 등
                     # - 페르소나를 running에 남기지 않는다.
                     logger.exception("run=%s persona=%s 수행 실패", run_id, persona_id)
                     outcome = "fail"
 
         # 종료 처리는 이 한 곳에서만 한다. 페르소나 상태를 확정한 뒤 런의 progress를 갱신한다.
         run_persona_repository.mark_finished(run_id, persona_id, outcome)
-        run_repository.refresh_progress(run_id)
+        self._refresh_progress(run_id)
 
     @contextlib.asynccontextmanager
     async def _persona_slot(
@@ -264,6 +276,10 @@ class RunOrchestrator:
                     persona_id,
                     BROWSER_CLOSE_TIMEOUT_SECONDS,
                 )
+            except Exception:
+                # 닫기 실패가 이미 정해진 Persona 결과(done · max_steps · timeout · cancelled)를
+                # 덮지 않게 기록만 한다. 덮이면 취소한 회차도 failed 로 보인다.
+                logger.exception("run=%s persona=%s browser close failed", run_id, persona_id)
 
     async def _drive_persona(
         self,
@@ -274,58 +290,75 @@ class RunOrchestrator:
         max_steps: int,
         max_seconds: float,
         cancel_event: asyncio.Event,
-    ) -> Literal["done", "max_steps", "cancelled"]:
+    ) -> Literal["done", "max_steps", "timeout", "cancelled"]:
         persona_id = persona["persona_id"]
         step_log_writer.prepare(run_id, persona_id)
         # 어느 경로로 return하든 async with를 빠져나가며 브라우저(컨텍스트, 페이지 포함)를 폐기한다.
         # 시간 상한은 자리를 잡은 뒤 브라우저 시작부터 잰다. 넘으면 진행 중인 스텝을 끊고
         # TimeoutError 로 빠져나간다. 브라우저 닫기는 시간 상한이 풀린 뒤라 그 상한에는 끊기지 않고
         # 닫기 상한(BROWSER_CLOSE_TIMEOUT_SECONDS)만 따른다.
-        async with self._open_driver(run_id, persona_id) as driver, asyncio.timeout(max_seconds):
-            started, _ = await self._run_unless_cancelled(driver.start(target_url), cancel_event)
-            if not started:
-                logger.info("run=%s persona=%s 브라우저 시작 중단", run_id, persona_id)
-                return "cancelled"
-            agent = PersonaAgent(persona, task, driver, decider)
-            # 한 스텝 = observe → decide(LLM 1회) → act.
-            # Agent 가 done 을 내거나 max_steps 에 도달하면 종료.
-            for step_no in range(1, max_steps + 1):
-                finished, step = await self._run_unless_cancelled(agent.step(), cancel_event)
-                if not finished:
-                    # 감시 태스크가 진행 중인 스텝을 중단했다.
-                    # 끝나지 않은 스텝이라 로그는 남기지 않는다.
-                    logger.info(
-                        "run=%s persona=%s 진행 중이던 스텝 %s 중단", run_id, persona_id, step_no
-                    )
+        deadline = asyncio.timeout(max_seconds)
+        try:
+            async with self._open_driver(run_id, persona_id) as driver, deadline:
+                started, _ = await self._run_unless_cancelled(
+                    driver.start(target_url), cancel_event
+                )
+                if not started:
+                    logger.info("run=%s persona=%s 브라우저 시작 중단", run_id, persona_id)
                     return "cancelled"
-                # 페르소나가 넘겨준 스텝 결과를 즉시 한 줄로 남긴다.
-                # 도중에 죽어도 그때까지의 스텝은 남는다.
-                step_log_writer.append(
-                    run_id, persona_id, self._to_step_log(run_id, persona_id, step_no, step)
-                )
-                run_persona_repository.increment_steps(run_id, persona_id)
-                logger.info(
-                    "run=%s persona=%s step=%s url=%s action=%r result=%s",
-                    run_id,
-                    persona_id,
-                    step_no,
-                    step.observation.url,
-                    step.action,
-                    step.result,
-                )
-                # 취소 확인은 로그 저장 이후에 한다. 취소 이전 스텝의 로그를 보존하기 위해서다.
-                if run_repository.is_cancel_requested(run_id):
+                agent = PersonaAgent(persona, task, driver, decider)
+                # 한 스텝 = observe → decide(LLM 1회) → act.
+                # Agent 가 done 을 내거나 max_steps 에 도달하면 종료.
+                for step_no in range(1, max_steps + 1):
+                    finished, step = await self._run_unless_cancelled(agent.step(), cancel_event)
+                    if not finished:
+                        # 감시 태스크가 진행 중인 스텝을 중단했다.
+                        # 끝나지 않은 스텝이라 로그는 남기지 않는다.
+                        logger.info(
+                            "run=%s persona=%s 진행 중이던 스텝 %s 중단",
+                            run_id,
+                            persona_id,
+                            step_no,
+                        )
+                        return "cancelled"
+                    # 페르소나가 넘겨준 스텝 결과를 즉시 한 줄로 남긴다.
+                    # 도중에 죽어도 그때까지의 스텝은 남는다.
+                    step_log_writer.append(
+                        run_id, persona_id, self._to_step_log(run_id, persona_id, step_no, step)
+                    )
+                    run_persona_repository.increment_steps(run_id, persona_id)
                     logger.info(
-                        "run=%s persona=%s 스텝 %s 종료 후 취소 요청 확인",
+                        "run=%s persona=%s step=%s url=%s action=%r result=%s",
                         run_id,
                         persona_id,
                         step_no,
+                        step.observation.url,
+                        step.action,
+                        step.result,
                     )
-                    cancel_event.set()  # 같은 런의 다른 페르소나도 멈추게 한다.
-                    return "cancelled"
-                if step.action.kind == "done":
-                    # Agent 가 스스로 과업 완료를 선언했다 = 성공 (메인 판정 기준, D21).
-                    return "done"
+                    # 취소 확인은 로그 저장 이후에 한다. 취소 이전 스텝의 로그를 보존하기 위해서다.
+                    if run_repository.is_cancel_requested(run_id):
+                        logger.info(
+                            "run=%s persona=%s 스텝 %s 종료 후 취소 요청 확인",
+                            run_id,
+                            persona_id,
+                            step_no,
+                        )
+                        cancel_event.set()  # 같은 런의 다른 페르소나도 멈추게 한다.
+                        return "cancelled"
+                    if step.action.kind == "done":
+                        # Agent 가 스스로 과업 완료를 선언했다 = 성공 (메인 판정 기준, D21).
+                        return "done"
+        except TimeoutError:
+            if not deadline.expired():
+                # 스텝 안에서 난 다른 시간 초과(LLM 호출 하나에 건 상한 등)는 시간 상한이 아니라
+                # 실행 오류(fail)다. 시간 상한으로 세면 모두 실패한 회차가 done 으로 보인다.
+                raise
+            # 시간 상한 종료는 WARN 으로 남긴다 (설계서 8.3 로그 파일 설계의 AI 모듈 로그 수준).
+            logger.warning(
+                "run=%s persona=%s exceeded max_seconds=%s", run_id, persona_id, max_seconds
+            )
+            return "timeout"
         return "max_steps"
 
     async def _watch_cancel(self, run_id: int, cancel_event: asyncio.Event) -> None:

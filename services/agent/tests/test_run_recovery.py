@@ -2,6 +2,7 @@
 
 시작 정리: accepted · running 회차는 failed, 그 running 페르소나는 fail, queued 는 그대로.
 취소 요청된 accepted · running 회차는 cancelled, 그 running 페르소나도 cancelled.
+회차 하나에서 오류가 나도 나머지 회차는 정리한다.
 수락 직후 예외: 회차를 accepted · running 으로 남기지 않고, 응답에 예외 문구를 싣지 않는다.
 """
 
@@ -129,6 +130,30 @@ def test_startup_cleanup_cancels_runs_with_cancel_request(monkeypatch: pytest.Mo
     assert runs.statuses == {1: "cancelled", 2: "cancelled", 3: "failed", 4: "queued", 5: "done"}
     assert runs.errors == {3: "interrupted"}
     assert personas.rows == {1: {10: "cancelled", 11: "done"}, 3: {12: "fail"}, 5: {13: "done"}}
+
+
+def test_startup_cleanup_continues_after_error_in_one_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 회차 하나에서 DB 오류가 나도 나머지 회차는 정리한다. 오류 난 회차는 다음 기동 때 정리된다.
+    runs, personas = install(
+        monkeypatch,
+        {1: "running", 2: "running", 3: "running"},
+        {1: {10: "running"}, 2: {11: "running"}, 3: {12: "running"}},
+    )
+    is_cancel_requested = runs.is_cancel_requested
+
+    def db_error_on_run_1(run_id: int) -> bool:
+        if run_id == 1:
+            raise RuntimeError(DB_ERROR)
+        return is_cancel_requested(run_id)
+
+    runs.is_cancel_requested = db_error_on_run_1
+
+    RunOrchestrator().close_interrupted_runs()
+
+    assert runs.statuses == {1: "running", 2: "failed", 3: "failed"}
+    assert personas.rows == {1: {10: "running"}, 2: {11: "fail"}, 3: {12: "fail"}}
 
 
 def test_app_startup_runs_cleanup_once(monkeypatch: pytest.MonkeyPatch) -> None:

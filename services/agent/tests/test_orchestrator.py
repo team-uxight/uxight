@@ -90,6 +90,7 @@ class Browsers:
         self.open = 0
         self.peak = 0
         self.close_seconds = 0.0  # 브라우저를 닫는 데 걸리는 시간
+        self.close_error: Exception | None = None  # 닫은 뒤 낼 예외 (드라이버 연결 끊김 등)
 
 
 def fake_driver_class(browsers: Browsers) -> type[Driver]:
@@ -113,6 +114,8 @@ def fake_driver_class(browsers: Browsers) -> type[Driver]:
             await asyncio.sleep(browsers.close_seconds)
             if self._started:
                 browsers.open -= 1
+            if browsers.close_error:
+                raise browsers.close_error
 
     return FakeDriver
 
@@ -122,6 +125,14 @@ class SleepyDecider(Decider):
 
     async def decide(self, persona, task, observation, history) -> Action:
         await asyncio.sleep(persona["step_seconds"])
+        return Action(kind="scroll", value="down")
+
+
+class InnerTimeoutDecider(Decider):
+    """LLM 호출 하나에 건 상한(asyncio.wait_for)이 먼저 끊긴다 — 시간 상한과는 다른 시간 초과."""
+
+    async def decide(self, persona, task, observation, history) -> Action:
+        await asyncio.wait_for(asyncio.sleep(HANG_SECONDS), 0.01)
         return Action(kind="scroll", value="down")
 
 
@@ -222,6 +233,22 @@ def test_persona_over_max_seconds_times_out(fakes: SimpleNamespace) -> None:
     assert free_global_slots() == 3
 
 
+def test_timeout_inside_step_is_fail_not_max_seconds(
+    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 스텝 안에서 난 내장 TimeoutError 는 실행 오류다. 시간 상한(timeout)으로 세면
+    # 모두 실패한 회차가 failed 가 아니라 done(성공률 0%)으로 보인다.
+    monkeypatch.setattr(orchestrator_module, "decider", InnerTimeoutDecider())
+    snap = snapshot([persona(1), persona(2)], max_steps=3, max_seconds=HANG_SECONDS)
+
+    asyncio.run(run(fakes, RUN_ID, snap))
+
+    assert fakes.personas.statuses == {1: "fail", 2: "fail"}
+    assert fakes.runs.status == "failed"
+    assert fakes.browsers.open == 0
+    assert free_global_slots() == 3
+
+
 def test_browser_close_is_outside_max_seconds(fakes: SimpleNamespace) -> None:
     # 스텝은 상한 안에 끝났고 닫는 데 상한을 넘겨 걸린다 — 닫기가 끊기면 브라우저가 남는다.
     fakes.browsers.close_seconds = 0.5
@@ -259,6 +286,43 @@ def test_hung_browser_close_does_not_block_result(
 
 
 @pytest.mark.parametrize(
+    ("step_seconds", "max_seconds", "cancel", "outcome", "run_status"),
+    [
+        (0, HANG_SECONDS, False, "max_steps", "done"),
+        (HANG_SECONDS, 0.2, False, "timeout", "done"),
+        (HANG_SECONDS, HANG_SECONDS, True, "cancelled", "cancelled"),
+    ],
+    ids=["after-steps", "after-max-seconds", "after-cancel"],
+)
+def test_browser_close_error_does_not_change_result(
+    fakes: SimpleNamespace,
+    step_seconds: float,
+    max_seconds: float,
+    cancel: bool,
+    outcome: str,
+    run_status: str,
+) -> None:
+    # 닫기가 시간 초과가 아닌 예외를 내도 이미 정해진 페르소나 결과를 덮지 않는다.
+    # 덮이면 셋 다 fail · failed 가 된다 — 취소한 회차도 '실패' 로 보인다.
+    fakes.browsers.close_error = RuntimeError("Connection closed while reading from the driver")
+    snap = snapshot([persona(1, step_seconds)], max_steps=1, max_seconds=max_seconds)
+
+    async def run_and_cancel() -> None:
+        task = asyncio.create_task(run(fakes, RUN_ID, snap))
+        if cancel:
+            await asyncio.sleep(POLL_SECONDS * 2)
+            fakes.runs.cancel_requested = True
+        await task
+
+    asyncio.run(run_and_cancel())
+
+    assert fakes.personas.statuses == {1: outcome}
+    assert fakes.runs.status == run_status
+    assert fakes.browsers.open == 0
+    assert free_global_slots() == 3
+
+
+@pytest.mark.parametrize(
     ("persona_statuses", "run_status", "error"),
     [
         ({1: "max_steps", 2: "max_steps", 3: "max_steps", 4: "timeout"}, "done", None),
@@ -285,17 +349,27 @@ def test_run_status_from_persona_statuses(
     assert fakes.runs.error == error
 
 
-@pytest.mark.parametrize("slots_held_by_other_runs", [0, 2], ids=["running", "waiting-for-slot"])
+@pytest.mark.parametrize(
+    ("slots_held_by_other_runs", "persona_concurrency", "started"),
+    [(0, None, 2), (2, None, 0), (0, 1, 1)],
+    ids=["running", "waiting-for-slot", "waiting-for-run-slot"],
+)
 def test_cancel_stops_all_personas_quickly(
-    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, slots_held_by_other_runs: int
+    fakes: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    slots_held_by_other_runs: int,
+    persona_concurrency: int | None,
+    started: int,
 ) -> None:
     # 전역 상한 2 · 페르소나 3명. running: 2명은 스텝 중 · 1명은 대기.
     # waiting-for-slot: 다른 회차가 전역 자리를 다 쥐고 있어 3명 모두 대기.
+    # waiting-for-run-slot: 회차 안 상한 1 — 1명은 스텝 중, 2명은 회차 자리를 기다린다.
     set_global_cap(monkeypatch, 2)
     snap = snapshot(
         [persona(1, HANG_SECONDS), persona(2, HANG_SECONDS), persona(3, HANG_SECONDS)],
         max_steps=3,
         max_seconds=HANG_SECONDS,
+        persona_concurrency=persona_concurrency,
     )
 
     async def cancel_midway() -> float:
@@ -314,7 +388,7 @@ def test_cancel_stops_all_personas_quickly(
     assert fakes.personas.statuses == {1: "cancelled", 2: "cancelled", 3: "cancelled"}
     assert fakes.runs.status == "cancelled"
     assert fakes.browsers.open == 0
-    assert fakes.browsers.started == 2 - slots_held_by_other_runs
+    assert fakes.browsers.started == started
     assert free_global_slots() == 2 - slots_held_by_other_runs
 
 
@@ -381,6 +455,31 @@ def test_exception_during_run_does_not_leave_run_running(fakes: SimpleNamespace)
     assert fakes.runs.error == "실행 오류로 중단: RuntimeError"
     assert "running" not in fakes.personas.statuses.values()
     assert free_global_slots() == 3
+
+
+def test_progress_refresh_error_does_not_fail_run(fakes: SimpleNamespace) -> None:
+    # 진행률 갱신이 DB 오류로 한 번 실패해도 회차는 실패가 아니다. 마지막 페르소나의 갱신이
+    # 실패하는 경우라, 회차를 마감할 때 다시 세어 맞춰야 진행률이 3 이 된다.
+    progress: list[int] = []
+    failures: list[int] = []
+
+    def refresh_fails_once_at_three(run_id: int) -> None:
+        count = sum(s in ("done", "max_steps") for s in fakes.personas.statuses.values())
+        if count == 3 and not failures:
+            failures.append(count)
+            raise RuntimeError("db down")
+        progress.append(count)
+
+    fakes.runs.refresh_progress = refresh_fails_once_at_three
+    snap = snapshot([persona(1), persona(2), persona(3)], max_steps=2)
+
+    asyncio.run(run(fakes, RUN_ID, snap))
+
+    assert fakes.personas.statuses == {1: "max_steps", 2: "max_steps", 3: "max_steps"}
+    assert fakes.runs.status == "done"
+    assert fakes.runs.error is None
+    assert failures == [3]
+    assert progress == [1, 2, 3]
 
 
 def test_heartbeat_written_every_watch_cycle(fakes: SimpleNamespace) -> None:

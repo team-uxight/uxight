@@ -34,10 +34,13 @@ class RunRepository:
             return result.rowcount == 1
 
     def mark_running(self, run_id: int) -> None:
+        # heartbeat_at 도 같이 쓴다. Spring 의 멈춤(stale) 판정은 heartbeat_at 이 NULL 이면
+        # 뜨지 않아서, 감시 태스크가 첫 heartbeat 를 쓰기 전에 멈춘 회차도 멈춤으로 보이게 한다.
         with engine.begin() as conn:
             conn.execute(
                 text(
-                    "UPDATE runs SET status = 'running', started_at = NOW() "
+                    "UPDATE runs SET status = 'running', started_at = NOW(), "
+                    "heartbeat_at = NOW() "
                     "WHERE run_id = :run_id AND status = 'accepted'"
                 ),
                 {"run_id": run_id},
