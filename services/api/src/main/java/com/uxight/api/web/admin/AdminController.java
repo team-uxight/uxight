@@ -1,14 +1,23 @@
 package com.uxight.api.web.admin;
 
 import com.uxight.api.common.ApiException;
+import com.uxight.api.domain.user.Role;
+import com.uxight.api.domain.user.RoleChangeRequest;
 import com.uxight.api.domain.user.User;
 import com.uxight.api.domain.user.UserRepository;
+import com.uxight.api.domain.user.UserService;
+import com.uxight.api.web.common.AuthConst;
 import com.uxight.api.web.common.PageResponse;
+import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestAttribute;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -19,10 +28,12 @@ import org.springframework.web.bind.annotation.RestController;
 public class AdminController {
 
   private final UserRepository userRepository;
+  private final UserService userService;
 
   @Autowired
-  public AdminController(UserRepository userRepository) {
+  public AdminController(UserRepository userRepository, UserService userService) {
     this.userRepository = userRepository;
+    this.userService = userService;
   }
 
   /**
@@ -41,5 +52,16 @@ public class AdminController {
     // user_id 는 가입 순으로 늘어난다 — 같은 시각에 가입한 계정도 순서가 흔들리지 않게 created_at 대신 쓴다
     Page<User> users = userRepository.findAll(PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "id")));
     return PageResponse.of(users.map(AdminUserResponse::from).getContent(), page, size, users.getTotalElements());
+  }
+
+  /**
+   * 계정 역할 변경. admin 은 모든 계정을 세 역할 중 하나로, maintainer 는 리서처 계정만 리서처로 둘 수 있다(그 밖은 403).
+   * 마지막 활성 관리자를 내리면 409 ACC-ERR-002. 토큰에 역할이 없어 대상 계정의 다음 요청부터 바로 적용된다.
+   */
+  @PatchMapping("/users/{userId}/role")
+  public RoleChangeResponse changeRole(@PathVariable Long userId, @Valid @RequestBody RoleChangeRequest request,
+      @RequestAttribute(AuthConst.LOGIN_USER_ID) Long actorId) {
+    User user = userService.changeRole(actorId, userId, Role.valueOf(request.role()));
+    return new RoleChangeResponse(user.getId(), user.getRole());
   }
 }

@@ -1,12 +1,15 @@
 package com.uxight.api.web.admin;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.uxight.api.domain.user.JwtProvider;
+import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -15,6 +18,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
@@ -22,8 +26,9 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * 계정 목록(GET /api/admin/users) — admin · maintainer 만. 가입한 모든 계정을 최근 가입 순으로 페이지 단위로 돌려준다.
- * 실제 MySQL, 테스트마다 롤백. seed 계정이 있을 수 있어 건수는 테스트 안에서 센 값과 비교한다.
+ * 계정 목록(GET /api/admin/users) · 역할 변경(PATCH /api/admin/users/{userId}/role) — admin · maintainer 만.
+ * 실제 MySQL, 테스트마다 롤백. seed 계정이 있을 수 있어 건수는 테스트 안에서 센 값과 비교하고,
+ * 마지막 관리자를 보는 테스트는 다른 관리자를 리서처로 내려 둔다(롤백된다).
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -38,6 +43,9 @@ class AdminControllerTest {
 
   @Autowired
   private JdbcTemplate jdbcTemplate;
+
+  @Autowired
+  private EntityManager entityManager;
 
   private Long adminId;
 
@@ -152,6 +160,185 @@ class AdminControllerTest {
     users(adminId, get("/api/admin/users"))
         .andExpect(status().isUnauthorized())
         .andExpect(jsonPath("$.code").value("AUT-ERR-005"));
+  }
+
+  // ───────── PATCH /api/admin/users/{userId}/role ─────────
+
+  @ParameterizedTest(name = "admin: researcher → {0}")
+  @CsvSource({"maintainer", "admin"})
+  void admin_changesRole_andAuditLogHasBeforeAndAfter(String role) throws Exception {
+    Long target = insertUser("role-target@uxight.com", "local", null, "대상", "researcher", true);
+
+    changeRole(adminId, target, "{\"role\":\"" + role + "\"}")
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.*", hasSize(2)))
+        .andExpect(jsonPath("$.userId").value(target))
+        .andExpect(jsonPath("$.role").value(role));
+
+    entityManager.flush();
+    assertThat(roleOf(target)).isEqualTo(role);
+    assertThat(jdbcTemplate.queryForMap("SELECT actor, action, target, JSON_UNQUOTE(JSON_EXTRACT(detail, '$.before')) AS before_role, "
+            + "JSON_UNQUOTE(JSON_EXTRACT(detail, '$.after')) AS after_role FROM audit_log ORDER BY audit_log_id DESC LIMIT 1"))
+        .containsEntry("actor", "user:" + adminId)
+        .containsEntry("action", "user.role_update")
+        .containsEntry("target", "user:" + target)
+        .containsEntry("before_role", "researcher")
+        .containsEntry("after_role", role);
+  }
+
+  @Test
+  void admin_canDemoteAnotherAdmin_whileAnotherActiveAdminRemains() throws Exception {
+    Long other = insertUser("role-other-admin@uxight.com", "local", null, "다른 관리자", "admin", true);
+
+    changeRole(adminId, other, "{\"role\":\"maintainer\"}")
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.role").value("maintainer"));
+  }
+
+  @Test
+  void sameRole_isOk_withoutAuditLog() throws Exception {
+    Long target = insertUser("role-same@uxight.com", "local", null, "대상", "maintainer", true);
+    long before = auditLogCount();
+
+    changeRole(adminId, target, "{\"role\":\"maintainer\"}")
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.role").value("maintainer"));
+    assertThat(auditLogCount()).isEqualTo(before);
+  }
+
+  @ParameterizedTest(name = "마지막 관리자 → {0}: 409")
+  @CsvSource({"maintainer", "researcher"})
+  void demotingLastActiveAdmin_isConflict_evenSelf(String role) throws Exception {
+    leaveOnlyAdmin(adminId);
+    insertUser("role-maintainer@uxight.com", "local", null, "메인테이너", "maintainer", true);   // 메인테이너가 있어도
+    insertUser("role-inactive-admin@uxight.com", "local", null, "비활성 관리자", "admin", false);   // 로그인 못 하는 관리자는 세지 않는다
+    long before = auditLogCount();
+
+    changeRole(adminId, adminId, "{\"role\":\"" + role + "\"}")
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("ACC-ERR-002"));
+
+    entityManager.flush();
+    assertThat(roleOf(adminId)).isEqualTo("admin");
+    assertThat(auditLogCount()).isEqualTo(before);
+  }
+
+  @Test
+  void demotingInactiveAdmin_isOk_evenIfOnlyOneActiveAdmin() throws Exception {
+    leaveOnlyAdmin(adminId);
+    Long inactive = insertUser("role-inactive-admin@uxight.com", "local", null, "비활성 관리자", "admin", false);
+
+    changeRole(adminId, inactive, "{\"role\":\"researcher\"}")
+        .andExpect(status().isOk());
+  }
+
+  @Test
+  void changedRole_appliesFromTheTargetsNextRequest() throws Exception {
+    Long target = insertUser("role-next@uxight.com", "local", null, "대상", "researcher", true);
+    users(target, get("/api/admin/users")).andExpect(status().isForbidden());
+
+    changeRole(adminId, target, "{\"role\":\"maintainer\"}").andExpect(status().isOk());
+    users(target, get("/api/admin/users")).andExpect(status().isOk());   // 같은 access 토큰으로 바로
+
+    changeRole(adminId, target, "{\"role\":\"researcher\"}").andExpect(status().isOk());
+    users(target, get("/api/admin/users")).andExpect(status().isForbidden());
+  }
+
+  @Test
+  void maintainer_canOnlyKeepResearcherAsResearcher() throws Exception {
+    Long maintainer = insertUser("role-maintainer@uxight.com", "local", null, "메인테이너", "maintainer", true);
+    Long researcher = insertUser("role-researcher@uxight.com", "local", null, "리서처", "researcher", true);
+    Long otherMaintainer = insertUser("role-maintainer2@uxight.com", "local", null, "메인테이너2", "maintainer", true);
+
+    changeRole(maintainer, researcher, "{\"role\":\"researcher\"}")
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.role").value("researcher"));
+    // 메인테이너 · 관리자를 부여하거나, 메인테이너 · 관리자 계정을 바꾸면 403
+    for (String[] c : new String[][] {
+        {String.valueOf(researcher), "maintainer"}, {String.valueOf(researcher), "admin"},
+        {String.valueOf(otherMaintainer), "researcher"}, {String.valueOf(adminId), "researcher"},
+        {String.valueOf(maintainer), "researcher"}}) {
+      changeRole(maintainer, Long.valueOf(c[0]), "{\"role\":\"" + c[1] + "\"}")
+          .andExpect(status().isForbidden())
+          .andExpect(jsonPath("$.code").value("AUT-ERR-006"));
+    }
+    entityManager.flush();
+    assertThat(roleOf(researcher)).isEqualTo("researcher");
+    assertThat(roleOf(otherMaintainer)).isEqualTo("maintainer");
+    assertThat(roleOf(adminId)).isEqualTo("admin");
+  }
+
+  @Test
+  void researcher_isForbidden_forRoleChange() throws Exception {
+    Long researcher = insertUser("role-researcher@uxight.com", "local", null, "리서처", "researcher", true);
+    changeRole(researcher, researcher, "{\"role\":\"admin\"}")
+        .andExpect(status().isForbidden())
+        .andExpect(jsonPath("$.code").value("AUT-ERR-006"));
+    entityManager.flush();
+    assertThat(roleOf(researcher)).isEqualTo("researcher");
+  }
+
+  @Test
+  void unknownAccount_isNotFound() throws Exception {
+    changeRole(adminId, 999_999_999L, "{\"role\":\"researcher\"}")
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("ACC-ERR-001"));
+  }
+
+  @ParameterizedTest(name = "[{index}] {0} → GLB-ERR-002 role")
+  @CsvSource(delimiter = '|', value = {
+      "{\"role\":\"owner\"}",
+      "{\"role\":\"Admin\"}",   // 대소문자도 정확히
+      "{}",
+      "{\"role\":null}"
+  })
+  void invalidRole_isBadRequest(String body) throws Exception {
+    Long target = insertUser("role-target@uxight.com", "local", null, "대상", "researcher", true);
+    changeRole(adminId, target, body)
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("GLB-ERR-002"))
+        .andExpect(jsonPath("$.fieldErrors[0].field").value("role"));
+  }
+
+  @Test
+  void malformedBodyOrUserId_isBadRequest() throws Exception {
+    Long target = insertUser("role-target@uxight.com", "local", null, "대상", "researcher", true);
+    changeRole(adminId, target, "{\"role\":")
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("GLB-ERR-001"));
+    mvc.perform(patch("/api/admin/users/abc/role")
+            .header(HttpHeaders.AUTHORIZATION, "Bearer " + jwtProvider.createAccessToken(adminId))
+            .contentType(MediaType.APPLICATION_JSON).content("{\"role\":\"admin\"}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("GLB-ERR-001"));
+  }
+
+  @Test
+  void roleChange_withoutToken_isUnauthorized() throws Exception {
+    mvc.perform(patch("/api/admin/users/{userId}/role", adminId)
+            .contentType(MediaType.APPLICATION_JSON).content("{\"role\":\"researcher\"}"))
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("AUT-ERR-001"));
+  }
+
+  private ResultActions changeRole(Long actorId, Long targetId, String json) throws Exception {
+    return mvc.perform(patch("/api/admin/users/{userId}/role", targetId)
+        .header(HttpHeaders.AUTHORIZATION, "Bearer " + jwtProvider.createAccessToken(actorId))
+        .contentType(MediaType.APPLICATION_JSON)
+        .content(json));
+  }
+
+  /** seed 등 다른 관리자를 리서처로 내린다 — 테스트 트랜잭션과 함께 롤백된다. */
+  private void leaveOnlyAdmin(Long keepAdminId) {
+    jdbcTemplate.update("UPDATE users SET role = 'researcher' WHERE role = 'admin' AND user_id <> ?", keepAdminId);
+  }
+
+  private String roleOf(Long userId) {
+    return jdbcTemplate.queryForObject("SELECT role FROM users WHERE user_id = ?", String.class, userId);
+  }
+
+  private long auditLogCount() {
+    return jdbcTemplate.queryForObject("SELECT COUNT(*) FROM audit_log", Long.class);
   }
 
   private ResultActions users(Long userId, MockHttpServletRequestBuilder request) throws Exception {

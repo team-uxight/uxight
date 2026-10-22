@@ -71,6 +71,11 @@ public class User {
     return new User(email, null, AuthProvider.google, googleSub, name);
   }
 
+  /** 역할 변경. 권한 · 마지막 관리자 확인은 UserService 가 잠금 안에서 한다. 토큰에 역할이 없어 다음 요청부터 적용된다. */
+  public void changeRole(Role role) {
+    this.role = role;
+  }
+
   /** 이메일 로그인 비밀번호 확인. Google 로만 가입해 비밀번호가 없는 계정은 항상 false. */
   public boolean matchesPassword(String rawPassword, PasswordEncoder passwordEncoder) {
     return passwordHash != null && passwordEncoder.matches(rawPassword, passwordHash);
