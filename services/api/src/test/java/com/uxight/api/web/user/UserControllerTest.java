@@ -34,7 +34,7 @@ class UserControllerTest {
   private JdbcTemplate jdbcTemplate;
 
   @ParameterizedTest
-  @ValueSource(strings = {"researcher", "admin"})
+  @ValueSource(strings = {"researcher", "maintainer", "admin"})
   void me_returnsUserIdNameAndRole(String role) throws Exception {
     jdbcTemplate.update("INSERT INTO users (email, password_hash, auth_provider, name, role, is_active) "
         + "VALUES ('me-test@uxight.com', 'hash', 'local', '대시보드', ?, TRUE)", role);
