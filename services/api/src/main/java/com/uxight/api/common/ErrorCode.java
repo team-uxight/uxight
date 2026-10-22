@@ -22,6 +22,7 @@ public enum ErrorCode {
 
   USER_NOT_FOUND(HttpStatus.NOT_FOUND, "ACC-ERR-001", "계정을 찾을 수 없습니다."),
   LAST_ADMIN(HttpStatus.CONFLICT, "ACC-ERR-002", "마지막 관리자의 역할은 변경할 수 없습니다."),
+  NOT_CHANGE_TARGET(HttpStatus.CONFLICT, "ACC-ERR-003", "해당 계정은 변경 대상이 아닙니다."),
 
   PROJECT_NOT_FOUND(HttpStatus.NOT_FOUND, "PRJ-ERR-001", "프로젝트를 찾을 수 없습니다."),
 

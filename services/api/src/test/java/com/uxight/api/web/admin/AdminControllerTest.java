@@ -262,14 +262,19 @@ class AdminControllerTest {
     changeRole(maintainer, researcher, "{\"role\":\"researcher\"}")
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.role").value("researcher"));
-    // 메인테이너 · 관리자를 부여하거나, 메인테이너 · 관리자 계정을 바꾸면 403
-    for (String[] c : new String[][] {
-        {String.valueOf(researcher), "maintainer"}, {String.valueOf(researcher), "admin"},
-        {String.valueOf(otherMaintainer), "researcher"}, {String.valueOf(adminId), "researcher"},
-        {String.valueOf(maintainer), "researcher"}}) {
-      changeRole(maintainer, Long.valueOf(c[0]), "{\"role\":\"" + c[1] + "\"}")
+    // 리서처에게 메인테이너 · 관리자를 부여하면 403 — 권한 부족
+    for (String role : new String[] {"maintainer", "admin"}) {
+      changeRole(maintainer, researcher, "{\"role\":\"" + role + "\"}")
           .andExpect(status().isForbidden())
           .andExpect(jsonPath("$.code").value("AUT-ERR-006"));
+    }
+    // 메인테이너 · 관리자 계정(자기 포함)이 대상이면 409 — 대상 계정이 변경 대상이 아니다. 관리자를 부여하려 해도 대상 확인이 먼저
+    for (String[] c : new String[][] {
+        {String.valueOf(otherMaintainer), "researcher"}, {String.valueOf(adminId), "researcher"},
+        {String.valueOf(maintainer), "researcher"}, {String.valueOf(otherMaintainer), "admin"}}) {
+      changeRole(maintainer, Long.valueOf(c[0]), "{\"role\":\"" + c[1] + "\"}")
+          .andExpect(status().isConflict())
+          .andExpect(jsonPath("$.code").value("ACC-ERR-003"));
     }
     entityManager.flush();
     assertThat(roleOf(researcher)).isEqualTo("researcher");
@@ -375,30 +380,33 @@ class AdminControllerTest {
     assertThat(auditLogCount()).isEqualTo(before);
   }
 
-  @ParameterizedTest(name = "{0} 이 {1} 계정 → 403")
+  @ParameterizedTest(name = "{0} 이 {1} 계정 → 409 ACC-ERR-003")
   @CsvSource({
       "admin, admin",
       "admin, maintainer",
       "maintainer, admin",
       "maintainer, maintainer"
   })
-  void adminOrMaintainerAccount_isForbidden_evenForAdmin(String actorRole, String targetRole) throws Exception {
+  void adminOrMaintainerAccount_isNotChangeTarget_evenForAdmin(String actorRole, String targetRole) throws Exception {
     Long actor = actorRole.equals("admin") ? adminId
         : insertUser("active-actor@uxight.com", "local", null, "요청자", "maintainer", true);
     Long target = insertUser("active-" + targetRole + "@uxight.com", "local", null, "대상", targetRole, true);
+    long before = auditLogCount();
 
     changeActive(actor, target, "{\"isActive\":false}")
-        .andExpect(status().isForbidden())
-        .andExpect(jsonPath("$.code").value("AUT-ERR-006"));
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("ACC-ERR-003"))
+        .andExpect(jsonPath("$.message").value("해당 계정은 변경 대상이 아닙니다."));
     entityManager.flush();
     assertThat(activeOf(target)).isTrue();
+    assertThat(auditLogCount()).isEqualTo(before);
   }
 
   @Test
-  void selfDeactivation_isForbidden_becauseActorIsNeverResearcher() throws Exception {
+  void selfDeactivation_isNotChangeTarget_becauseActorIsNeverResearcher() throws Exception {
     changeActive(adminId, adminId, "{\"isActive\":false}")
-        .andExpect(status().isForbidden())
-        .andExpect(jsonPath("$.code").value("AUT-ERR-006"));
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("ACC-ERR-003"));
   }
 
   @Test

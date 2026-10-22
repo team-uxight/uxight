@@ -27,7 +27,8 @@ public class UserService {
   }
 
   /**
-   * 계정 역할 변경. 없는 계정 404 ACC-ERR-001 → 요청자 권한 403 AUT-ERR-006 → 마지막 관리자 409 ACC-ERR-002 순으로 본다.
+   * 계정 역할 변경. 없는 계정 404 ACC-ERR-001 → 요청자가 다룰 수 없는 계정 409 ACC-ERR-003(maintainer 가 관리자 · 메인테이너
+   * 계정을 바꾸려 함) → 부여할 수 없는 역할 403 AUT-ERR-006(maintainer 가 메인테이너 · 관리자 부여) → 마지막 관리자 409 ACC-ERR-002 순으로 본다.
    * 바뀌었으면 감사 로그(user.role_update, 변경 전 · 후 역할)를 같은 트랜잭션에 남긴다. 같은 역할이면 아무것도 바꾸지 않는다.
    */
   @Transactional
@@ -39,7 +40,13 @@ public class UserService {
     // 요청자 역할은 잠근 뒤에 다시 읽는다 — 그사이 강등됐으면 강등된 역할로 판단한다
     Role actorRole = userRepository.findById(actorId).map(User::getRole)
         .orElseThrow(() -> new ApiException(ErrorCode.UNAUTHORIZED));
-    if (!actorRole.canChangeRole(target.getRole(), newRole)) {
+    if (!actorRole.canAccessAdmin()) {   // 요청 도중 리서처로 강등된 요청자
+      throw new ApiException(ErrorCode.FORBIDDEN);
+    }
+    if (!actorRole.canManage(target.getRole())) {
+      throw new ApiException(ErrorCode.NOT_CHANGE_TARGET);
+    }
+    if (!actorRole.canGrant(newRole)) {
       throw new ApiException(ErrorCode.FORBIDDEN);
     }
 
@@ -60,7 +67,8 @@ public class UserService {
   }
 
   /**
-   * 리서처 계정의 활성 상태 변경. 없는 계정 404 ACC-ERR-001, 관리자 · 메인테이너 계정이면 요청자가 관리자여도 403 AUT-ERR-006.
+   * 리서처 계정의 활성 상태 변경. 없는 계정 404 ACC-ERR-001, 관리자 · 메인테이너 계정이면 요청자가 누구든 409 ACC-ERR-003
+   * (권한 부족 403 AUT-ERR-006 과 구분 — 요청자가 아니라 대상 계정이 이 기능의 대상이 아니다).
    * 요청자는 관리자 · 메인테이너뿐이라 자기 계정이나 마지막 관리자를 비활성화하는 경우는 생기지 않는다.
    * 바뀌었으면 감사 로그(user.active_update, 변경 전 · 후)를 남긴다. 같은 상태면 아무것도 바꾸지 않는다.
    */
@@ -70,7 +78,7 @@ public class UserService {
     User target = userRepository.findForUpdate(targetId)
         .orElseThrow(() -> new ApiException(ErrorCode.USER_NOT_FOUND));
     if (target.getRole() != Role.researcher) {
-      throw new ApiException(ErrorCode.FORBIDDEN);
+      throw new ApiException(ErrorCode.NOT_CHANGE_TARGET);
     }
 
     boolean before = target.isActive();
