@@ -56,7 +56,8 @@ public class AdminController {
   }
 
   /**
-   * 계정 역할 변경. admin 은 모든 계정을 세 역할 중 하나로, maintainer 는 리서처 계정만 리서처로 둘 수 있다(그 밖은 403).
+   * 계정 역할 변경. admin 은 모든 계정을 세 역할 중 하나로, maintainer 는 리서처 계정만 리서처로 둘 수 있다
+   * (관리자 · 메인테이너 계정이 대상이면 409 ACC-ERR-003, 메인테이너 · 관리자를 부여하면 403 AUT-ERR-006).
    * 마지막 활성 관리자를 내리면 409 ACC-ERR-002. 토큰에 역할이 없어 대상 계정의 다음 요청부터 바로 적용된다.
    */
   @PatchMapping("/users/{userId}/role")
@@ -67,7 +68,7 @@ public class AdminController {
   }
 
   /**
-   * 리서처 계정 비활성화 · 다시 활성화. admin · maintainer 모두 호출할 수 있고, 대상이 관리자 · 메인테이너 계정이면 403.
+   * 리서처 계정 비활성화 · 다시 활성화. admin · maintainer 모두 호출할 수 있고, 대상이 관리자 · 메인테이너 계정이면 409 ACC-ERR-003.
    * 같은 요청을 여러 번 보내도 결과가 같다. 비활성화된 계정은 다음 요청 · 로그인 · 토큰 재발급부터 401 AUT-ERR-005.
    */
   @PatchMapping("/users/{userId}/active")
