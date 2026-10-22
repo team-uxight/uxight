@@ -1143,7 +1143,9 @@ paths:
         "404":
           $ref: "#/components/responses/UserNotFound"
         "409":
-          description: "ACC-ERR-002: 마지막 관리자의 역할을 바꾸려 함"
+          description: |-
+            - ACC-ERR-002: 마지막 관리자의 역할을 바꾸려 함
+            - ACC-ERR-003: maintainer가 admin 또는 maintainer 계정(자기 포함)의 역할을 바꾸려 함. maintainer는 researcher 계정만 관리한다.
           content:
             application/json:
               schema:
@@ -1151,6 +1153,8 @@ paths:
               examples:
                 ACC-ERR-002:
                   $ref: "#/components/examples/ACC-ERR-002"
+                ACC-ERR-003:
+                  $ref: "#/components/examples/ACC-ERR-003"
 
   /api/admin/users/{userId}/active:
     parameters:
@@ -1179,8 +1183,7 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           description: |-
-            - AUT-ERR-006: 리서처의 관리자 API 호출
-            - AUT-ERR-006: 대상이 admin 또는 maintainer 계정임. 활성 상태는 리서처 계정만 바꿀 수 있다.
+            - AUT-ERR-006: 요청자의 역할로 호출할 수 없는 API
           content:
             application/json:
               schema:
@@ -1190,6 +1193,16 @@ paths:
                   $ref: "#/components/examples/AUT-ERR-006"
         "404":
           $ref: "#/components/responses/UserNotFound"
+        "409":
+          description: |-
+            - ACC-ERR-003: 대상이 admin 또는 maintainer 계정임. 활성 상태는 리서처 계정만 바꿀 수 있다.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                ACC-ERR-003:
+                  $ref: "#/components/examples/ACC-ERR-003"
 
   # ───────── 13. 정책 관리 ─────────
 
@@ -1550,6 +1563,11 @@ components:
       value:
         code: ACC-ERR-002
         message: 마지막 관리자의 역할은 변경할 수 없습니다.
+        fieldErrors: []
+    ACC-ERR-003:
+      value:
+        code: ACC-ERR-003
+        message: 해당 계정은 변경 대상이 아닙니다.
         fieldErrors: []
 
   responses:
