@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>SoM dialog fixture</title>
+</head>
+<body>
+  <button type="button">뒤 버튼</button>
+  <!-- 모달 dialog 는 top layer 에 그려져 일반 z-index 로는 그 위에 박스를 그릴 수 없다 -->
+  <dialog>
+    <input name="password" type="password" value="hunter2">
+    <button type="button">로그인</button>
+  </dialog>
+  <script>document.querySelector('dialog').showModal();</script>
+</body>
+</html>

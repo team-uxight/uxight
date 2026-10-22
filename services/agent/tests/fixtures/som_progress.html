@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>SoM progress bar fixture</title>
+  <!-- 학교 사본 홈의 슬라이드 진행 막대처럼 7초짜리 장식 애니메이션이 돈다.
+       막대는 번호를 붙일 요소나 입력칸을 품지 않는다 -->
+  <style>
+    .progress { height: 4px; background: #369; animation: grow 7s linear; }
+    @keyframes grow { from { width: 0; } to { width: 100%; } }
+  </style>
+</head>
+<body>
+  <div class="progress"></div>
+  <a href="#next">다음</a>
+  <input name="q" type="text" value="검색어">
+</body>
+</html>

@@ -1,0 +1,39 @@
+name: deploy-dev
+
+# dev 서버(팀 전용) 자동 배포 — develop · fe 에 push 한 CI 가 성공하면, 서버가 따르는 브랜치를 다시 받아 빌드한다.
+# CI 가 실패한 push(테스트 · DB 마이그레이션이 깨진 것)는 배포하지 않는다. PR 의 CI 로는 배포하지 않는다.
+# 서버가 어느 브랜치를 따르는지는 서버 쪽 설정이 정한다 (지금 fe, FE 가 develop 에 병합되면 develop).
+# 키는 서버의 배포 스크립트 하나만 돌릴 수 있는 전용 키다. 손으로 다시 올리려면 Actions 탭에서 Run workflow.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [develop, fe]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  deploy:
+    if: >-
+      github.repository == 'team-uxight/uxight' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: dev 서버에 배포
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy
+          chmod 600 ~/.ssh/deploy
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          ssh -i ~/.ssh/deploy -o BatchMode=yes -o ServerAliveInterval=30 "ubuntu@$DEPLOY_HOST" deploy
