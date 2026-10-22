@@ -1,6 +1,7 @@
 package com.uxight.api.web.admin;
 
 import com.uxight.api.common.ApiException;
+import com.uxight.api.domain.user.ActiveChangeRequest;
 import com.uxight.api.domain.user.Role;
 import com.uxight.api.domain.user.RoleChangeRequest;
 import com.uxight.api.domain.user.User;
@@ -63,5 +64,16 @@ public class AdminController {
       @RequestAttribute(AuthConst.LOGIN_USER_ID) Long actorId) {
     User user = userService.changeRole(actorId, userId, Role.valueOf(request.role()));
     return new RoleChangeResponse(user.getId(), user.getRole());
+  }
+
+  /**
+   * 리서처 계정 비활성화 · 다시 활성화. admin · maintainer 모두 호출할 수 있고, 대상이 관리자 · 메인테이너 계정이면 403.
+   * 같은 요청을 여러 번 보내도 결과가 같다. 비활성화된 계정은 다음 요청 · 로그인 · 토큰 재발급부터 401 AUT-ERR-005.
+   */
+  @PatchMapping("/users/{userId}/active")
+  public ActiveChangeResponse changeActive(@PathVariable Long userId, @Valid @RequestBody ActiveChangeRequest request,
+      @RequestAttribute(AuthConst.LOGIN_USER_ID) Long actorId) {
+    User user = userService.changeActive(actorId, userId, request.isActive());
+    return new ActiveChangeResponse(user.getId(), user.isActive());
   }
 }

@@ -5,10 +5,13 @@ import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.uxight.api.domain.user.JwtProvider;
+import jakarta.servlet.http.Cookie;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -20,13 +23,16 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Map;
+
 /**
- * 계정 목록(GET /api/admin/users) · 역할 변경(PATCH /api/admin/users/{userId}/role) — admin · maintainer 만.
+ * 계정 목록(GET /api/admin/users) · 역할 변경(PATCH .../role) · 활성 상태 변경(PATCH .../active) — admin · maintainer 만.
  * 실제 MySQL, 테스트마다 롤백. seed 계정이 있을 수 있어 건수는 테스트 안에서 센 값과 비교하고,
  * 마지막 관리자를 보는 테스트는 다른 관리자를 리서처로 내려 둔다(롤백된다).
  */
@@ -46,6 +52,9 @@ class AdminControllerTest {
 
   @Autowired
   private EntityManager entityManager;
+
+  @Autowired
+  private ObjectMapper objectMapper;
 
   private Long adminId;
 
@@ -319,6 +328,164 @@ class AdminControllerTest {
             .contentType(MediaType.APPLICATION_JSON).content("{\"role\":\"researcher\"}"))
         .andExpect(status().isUnauthorized())
         .andExpect(jsonPath("$.code").value("AUT-ERR-001"));
+  }
+
+  // ───────── PATCH /api/admin/users/{userId}/active ─────────
+
+  @ParameterizedTest(name = "{0} 이 리서처를 비활성화 · 다시 활성화")
+  @CsvSource({"admin", "maintainer"})
+  void adminOrMaintainer_togglesResearcher_andAuditLogsEachChange(String actorRole) throws Exception {
+    Long actor = actorRole.equals("admin") ? adminId
+        : insertUser("active-maintainer@uxight.com", "local", null, "메인테이너", "maintainer", true);
+    Long target = insertUser("active-target@uxight.com", "local", null, "대상", "researcher", true);
+
+    changeActive(actor, target, "{\"isActive\":false}")
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.*", hasSize(2)))
+        .andExpect(jsonPath("$.userId").value(target))
+        .andExpect(jsonPath("$.isActive").value(false));
+    entityManager.flush();
+    assertThat(activeOf(target)).isFalse();
+    assertThat(lastAuditLog())
+        .containsEntry("actor", "user:" + actor)
+        .containsEntry("action", "user.active_update")
+        .containsEntry("target", "user:" + target)
+        .containsEntry("before_value", "true")
+        .containsEntry("after_value", "false");
+
+    changeActive(actor, target, "{\"isActive\":true}")
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.isActive").value(true));
+    entityManager.flush();
+    assertThat(activeOf(target)).isTrue();
+    assertThat(lastAuditLog()).containsEntry("before_value", "false").containsEntry("after_value", "true");
+  }
+
+  @ParameterizedTest(name = "이미 isActive={0} → 200 · 감사 로그 없음")
+  @CsvSource({"true", "false"})
+  void sameActiveState_isOk_withoutAuditLog(boolean active) throws Exception {
+    Long target = insertUser("active-same@uxight.com", "local", null, "대상", "researcher", active);
+    long before = auditLogCount();
+
+    for (int i = 0; i < 2; i++) {   // 여러 번 보내도 결과가 같다
+      changeActive(adminId, target, "{\"isActive\":" + active + "}")
+          .andExpect(status().isOk())
+          .andExpect(jsonPath("$.isActive").value(active));
+    }
+    assertThat(auditLogCount()).isEqualTo(before);
+  }
+
+  @ParameterizedTest(name = "{0} 이 {1} 계정 → 403")
+  @CsvSource({
+      "admin, admin",
+      "admin, maintainer",
+      "maintainer, admin",
+      "maintainer, maintainer"
+  })
+  void adminOrMaintainerAccount_isForbidden_evenForAdmin(String actorRole, String targetRole) throws Exception {
+    Long actor = actorRole.equals("admin") ? adminId
+        : insertUser("active-actor@uxight.com", "local", null, "요청자", "maintainer", true);
+    Long target = insertUser("active-" + targetRole + "@uxight.com", "local", null, "대상", targetRole, true);
+
+    changeActive(actor, target, "{\"isActive\":false}")
+        .andExpect(status().isForbidden())
+        .andExpect(jsonPath("$.code").value("AUT-ERR-006"));
+    entityManager.flush();
+    assertThat(activeOf(target)).isTrue();
+  }
+
+  @Test
+  void selfDeactivation_isForbidden_becauseActorIsNeverResearcher() throws Exception {
+    changeActive(adminId, adminId, "{\"isActive\":false}")
+        .andExpect(status().isForbidden())
+        .andExpect(jsonPath("$.code").value("AUT-ERR-006"));
+  }
+
+  @Test
+  void activeChange_byResearcher_isForbidden_andUnknownAccount_isNotFound() throws Exception {
+    Long researcher = insertUser("active-researcher@uxight.com", "local", null, "리서처", "researcher", true);
+    changeActive(researcher, researcher, "{\"isActive\":false}")
+        .andExpect(status().isForbidden())
+        .andExpect(jsonPath("$.code").value("AUT-ERR-006"));
+    changeActive(adminId, 999_999_999L, "{\"isActive\":false}")
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("ACC-ERR-001"));
+  }
+
+  @ParameterizedTest(name = "[{index}] {0} → {1}")
+  @CsvSource(delimiter = '|', value = {
+      "{}|GLB-ERR-002",
+      "{\"isActive\":null}|GLB-ERR-002",
+      "{\"isActive\":\"yes\"}|GLB-ERR-001",
+      "{\"isActive\":|GLB-ERR-001"
+  })
+  void invalidBody_isBadRequest(String body, String errorCode) throws Exception {
+    Long target = insertUser("active-target@uxight.com", "local", null, "대상", "researcher", true);
+    ResultActions result = changeActive(adminId, target, body)
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value(errorCode));
+    if (errorCode.equals("GLB-ERR-002")) {
+      result.andExpect(jsonPath("$.fieldErrors[0].field").value("isActive"));
+    }
+  }
+
+  /** 완료 기준: 비활성화한 계정은 다음 요청 · 로그인 · 토큰 갱신에서 거절되고, 다시 활성화하면 같은 refresh 토큰을 이어서 쓴다. */
+  @Test
+  void deactivatedAccount_isRejectedOnNextRequestLoginAndRefresh_andRefreshTokenWorksAgainAfterReactivation()
+      throws Exception {
+    mvc.perform(post("/api/auth/signup").contentType(MediaType.APPLICATION_JSON)
+            .content("{\"email\":\"active-flow@uxight.com\",\"password\":\"password12\",\"name\":\"흐름\"}"))
+        .andExpect(status().isCreated());
+    Long target = jdbcTemplate.queryForObject("SELECT user_id FROM users WHERE email = 'active-flow@uxight.com'", Long.class);
+    MockHttpServletResponse loginResponse = login("active-flow@uxight.com", "password12")
+        .andExpect(status().isOk()).andReturn().getResponse();
+    String accessToken = objectMapper.readTree(loginResponse.getContentAsString()).get("accessToken").asText();
+    Cookie refreshCookie = loginResponse.getCookie("refreshToken");
+
+    changeActive(adminId, target, "{\"isActive\":false}").andExpect(status().isOk());
+
+    mvc.perform(get("/api/users/me").header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken))
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("AUT-ERR-005"));
+    login("active-flow@uxight.com", "password12")
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("AUT-ERR-005"));
+    mvc.perform(post("/api/auth/refresh").cookie(refreshCookie))
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("AUT-ERR-005"));
+    entityManager.flush();
+    assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM refresh_tokens WHERE user_id = ? AND revoked_at IS NULL",
+        Long.class, target)).isEqualTo(1);   // 비활성화해도 refresh 토큰 행은 지우지 않는다
+
+    changeActive(adminId, target, "{\"isActive\":true}").andExpect(status().isOk());
+
+    mvc.perform(post("/api/auth/refresh").cookie(refreshCookie))   // 다시 로그인하지 않고 이어서
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.accessToken").isNotEmpty());
+    mvc.perform(get("/api/users/me").header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken))
+        .andExpect(status().isOk());
+  }
+
+  private ResultActions changeActive(Long actorId, Long targetId, String json) throws Exception {
+    return mvc.perform(patch("/api/admin/users/{userId}/active", targetId)
+        .header(HttpHeaders.AUTHORIZATION, "Bearer " + jwtProvider.createAccessToken(actorId))
+        .contentType(MediaType.APPLICATION_JSON)
+        .content(json));
+  }
+
+  private ResultActions login(String email, String password) throws Exception {
+    return mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
+        .content("{\"email\":\"" + email + "\",\"password\":\"" + password + "\"}"));
+  }
+
+  private boolean activeOf(Long userId) {
+    return jdbcTemplate.queryForObject("SELECT is_active FROM users WHERE user_id = ?", Boolean.class, userId);
+  }
+
+  private Map<String, Object> lastAuditLog() {
+    return jdbcTemplate.queryForMap("SELECT actor, action, target, "
+        + "CAST(JSON_EXTRACT(detail, '$.before') AS CHAR) AS before_value, "
+        + "CAST(JSON_EXTRACT(detail, '$.after') AS CHAR) AS after_value FROM audit_log ORDER BY audit_log_id DESC LIMIT 1");
   }
 
   private ResultActions changeRole(Long actorId, Long targetId, String json) throws Exception {
