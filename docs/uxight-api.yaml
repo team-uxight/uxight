@@ -1152,6 +1152,45 @@ paths:
                 ACC-ERR-002:
                   $ref: "#/components/examples/ACC-ERR-002"
 
+  /api/admin/users/{userId}/active:
+    parameters:
+      - $ref: "#/components/parameters/UserId"
+    patch:
+      tags: [계정 관리]
+      operationId: changeUserActive
+      summary: 계정 활성 상태 변경
+      description: 리서처 계정을 비활성화하거나 다시 활성화한다. admin / maintainer 모두 호출할 수 있다. 활성 여부는 매 요청에서 DB에서 확인하므로 비활성화는 대상 사용자의 다음 요청부터 바로 반영되고, refresh 토큰 재발급도 막힌다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ActiveChangeRequest"
+      responses:
+        "200":
+          description: 변경 완료
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActiveChangeResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: |-
+            - AUT-ERR-006: 리서처의 관리자 API 호출
+            - AUT-ERR-006: 대상이 admin 또는 maintainer 계정임. 활성 상태는 리서처 계정만 바꿀 수 있다.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                AUT-ERR-006:
+                  $ref: "#/components/examples/AUT-ERR-006"
+        "404":
+          $ref: "#/components/responses/UserNotFound"
+
   # ───────── 13. 정책 관리 ─────────
 
   /api/admin/policy:
@@ -1911,6 +1950,25 @@ components:
         role:
           $ref: "#/components/schemas/Role"
 
+    ActiveChangeRequest:
+      type: object
+      required: [isActive]
+      properties:
+        isActive:
+          type: boolean
+          description: false면 비활성화, ture면 활성화
+
+    ActiveChangeResponse:
+      type: object
+      required: [userId, isActive]
+      properties:
+        userId:
+          type: integer
+          format: int64
+        isActive:
+          type: boolean
+          description: 변경 후 계정 활성 여부
+
     # ───────── 프로젝트, Persona, 테스트 계정 ─────────
 
     ProjectSummary:
@@ -2144,7 +2202,8 @@ components:
     ExperimentSummary:
       type: object
       description: 실험 목록의 항목. runId, round, status, progress는 실험의 마지막 회차 기준이다.
-      required: [
+      required:
+        [
           firstRunId,
           runId,
           round,
