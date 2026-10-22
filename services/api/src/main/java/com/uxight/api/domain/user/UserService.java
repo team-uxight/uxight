@@ -15,6 +15,7 @@ import java.util.Map;
 public class UserService {
 
   static final String AUDIT_ACTION_ROLE_UPDATE = "user.role_update";
+  static final String AUDIT_ACTION_ACTIVE_UPDATE = "user.active_update";
 
   private final UserRepository userRepository;
   private final AuditLogRepository auditLogRepository;
@@ -55,6 +56,30 @@ public class UserService {
     target.changeRole(newRole);
     auditLogRepository.save(AuditLog.byUser(actorId, AUDIT_ACTION_ROLE_UPDATE, "user:" + target.getId(),
         Map.of("before", before.name(), "after", newRole.name())));
+    return target;
+  }
+
+  /**
+   * 리서처 계정의 활성 상태 변경. 없는 계정 404 ACC-ERR-001, 관리자 · 메인테이너 계정이면 요청자가 관리자여도 403 AUT-ERR-006.
+   * 요청자는 관리자 · 메인테이너뿐이라 자기 계정이나 마지막 관리자를 비활성화하는 경우는 생기지 않는다.
+   * 바뀌었으면 감사 로그(user.active_update, 변경 전 · 후)를 남긴다. 같은 상태면 아무것도 바꾸지 않는다.
+   */
+  @Transactional
+  public User changeActive(Long actorId, Long targetId, boolean active) {
+    // 대상 행을 잠근다 — 동시에 들어온 역할 변경(리서처 → 관리자)과 차례로 처리돼, 리서처인지 확인한 뒤 역할이 바뀌지 않는다
+    User target = userRepository.findForUpdate(targetId)
+        .orElseThrow(() -> new ApiException(ErrorCode.USER_NOT_FOUND));
+    if (target.getRole() != Role.researcher) {
+      throw new ApiException(ErrorCode.FORBIDDEN);
+    }
+
+    boolean before = target.isActive();
+    if (before == active) {
+      return target;
+    }
+    target.changeActive(active);
+    auditLogRepository.save(AuditLog.byUser(actorId, AUDIT_ACTION_ACTIVE_UPDATE, "user:" + target.getId(),
+        Map.of("before", before, "after", active)));
     return target;
   }
 }
