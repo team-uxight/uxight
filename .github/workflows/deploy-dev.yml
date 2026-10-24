@@ -3,7 +3,9 @@ name: deploy-dev
 # dev 서버(팀 전용) 자동 배포 — develop · fe 에 push 한 CI 가 성공하면, 서버가 따르는 브랜치를 다시 받아 빌드한다.
 # CI 가 실패한 push(테스트 · DB 마이그레이션이 깨진 것)는 배포하지 않는다. PR 의 CI 로는 배포하지 않는다.
 # 서버가 어느 브랜치를 따르는지는 서버 쪽 설정이 정한다 (지금 fe, FE 가 develop 에 병합되면 develop).
-# 키는 서버의 배포 스크립트 하나만 돌릴 수 있는 전용 키다. 손으로 다시 올리려면 Actions 탭에서 Run workflow.
+# 그 브랜치에 새 커밋이 없으면 서버가 배포를 건너뛴다. Actions 탭의 Run workflow 는 새 커밋이 없어도 다시 빌드한다.
+# 키는 서버의 배포 스크립트 하나만 돌릴 수 있는 전용 키다.
+# 결과(배포됨 · 건너뜀 · CI 실패 · 배포 실패)는 Slack 으로 알린다. 시크릿 SLACK_WEBHOOK_URL 이 없으면 알리지 않는다.
 on:
   workflow_run:
     workflows: [CI]
@@ -25,15 +27,57 @@ jobs:
        (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'))
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      result: ${{ steps.deploy.outputs.result }}
     steps:
       - name: dev 서버에 배포
+        id: deploy
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          FORCE: ${{ github.event_name == 'workflow_dispatch' && ' force' || '' }}
         run: |
+          set -o pipefail   # tee 가 ssh 실패를 가리지 않게
           install -m 700 -d ~/.ssh
           printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy
           chmod 600 ~/.ssh/deploy
           printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          ssh -i ~/.ssh/deploy -o BatchMode=yes -o ServerAliveInterval=30 "ubuntu@$DEPLOY_HOST" deploy
+          ssh -i ~/.ssh/deploy -o BatchMode=yes -o ServerAliveInterval=30 "ubuntu@$DEPLOY_HOST" "deploy$FORCE" | tee out.txt
+          echo "result=$(sed -n 's/^DEPLOY_RESULT=//p' out.txt | tail -1)" >> "$GITHUB_OUTPUT"
+
+  notify:
+    needs: deploy
+    if: >-
+      always() && github.repository == 'team-uxight/uxight' &&
+      (github.event_name == 'workflow_dispatch' || github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Slack 에 알림
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          BRANCH: ${{ github.event.workflow_run.head_branch || github.ref_name }}
+          SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          TITLE: ${{ github.event.workflow_run.display_title || '손으로 다시 배포' }}
+          CI: ${{ github.event.workflow_run.conclusion }}
+          CI_URL: ${{ github.event.workflow_run.html_url }}
+          DEPLOY: ${{ needs.deploy.result }}
+          RESULT: ${{ needs.deploy.outputs.result }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          [ -n "$SLACK_WEBHOOK_URL" ] || { echo "SLACK_WEBHOOK_URL 없음 — 알림 건너뜀"; exit 0; }
+          head="$BRANCH 에 push — $TITLE (${SHA:0:7})"
+          if [ -n "$CI" ] && [ "$CI" != success ]; then
+            text="[CI 실패] $head. dev 서버는 그대로. $CI_URL"
+          elif [ "$DEPLOY" != success ]; then
+            text="[배포 실패] $head. $RUN_URL"
+          else
+            case "$RESULT" in
+              deployed*)  text="[dev 서버 반영] $head. https://dev.uxight.duckdns.org" ;;
+              unchanged*) srv=${RESULT#unchanged }; text="[CI 통과] $head. dev 서버는 ${srv%% *} 브랜치를 따라 그대로" ;;
+              *)          text="[확인 필요] $head. $RUN_URL" ;;
+            esac
+          fi
+          [ "$BRANCH" = develop ] && [ "$CI" = success ] && [ "$DEPLOY" = success ] && text="$text — 작업 브랜치에 최신 develop 을 받아 주세요"
+          jq -n --arg t "$text" '{text: $t}' | curl -fsS -X POST -H 'Content-Type: application/json' --data @- "$SLACK_WEBHOOK_URL" > /dev/null
