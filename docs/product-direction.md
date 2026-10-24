@@ -32,7 +32,7 @@ PM 확정본. 제안서(W03) 슬라이드 분배와 S1 요구분석의 입력이
 | Persona | 3종: Novice / Expert / Mobile-viewport (Playwright 디바이스 에뮬레이션) |
 | 탐색 | Task 기반. UXAgent 방식의 브라우저 조작(click / type / scroll / back) |
 | 진단 | **UX Friction Taxonomy 7종** — Navigation Confusion · Discoverability · Interaction Failure · Information Overload · Misleading Label · Task Failure · Excessive Steps. 각 진단에 행동 근거 + 심각도 |
-| 개선안 | 3안 + 근거 + 예상 영향 / 수정 비용 |
+| 개선안 | 회차마다 최대 3안 + 근거 + 예상 효과. 나은 순서로 번호를 매겨 앞 번호를 추천한다 (10/24 — 예상 효과는 나아질 지표 하나만 쓰고, 숫자는 재실험이 잰다. 수정 비용 · After 미리보기는 이번 학기에 뺀다) |
 | 적용 | **DOM 패치 4종만**: ① 라벨 변경 ② 요소 이동 ③ 요소 강조 ④ 도움말 삽입 |
 | 승인 | 모바일 앱에서 알림 → 상세 → 승인/반려 (Human-in-the-loop) |
 | 재실험 | 승인 즉시 같은 Persona 재투입. Before/After 지표: 성공률 · 행동 수 · 백트래킹 |

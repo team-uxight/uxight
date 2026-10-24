@@ -222,7 +222,7 @@ flowchart BT
 | 2 | 시뮬레이션 | Watcher → Persona Agent ×N (세마포어) → Driver | 관측 → 관측 정제 → 행동 JSON → 가드 → 실행 → step 로그 | `data/runs/<id>/<persona>/steps.jsonl` + 스크린샷 · `run_personas` 진행률 · **step 마다 누적 `tokens` · `cost_usd`** |
 | 3 | Friction 검출 | Detector | step 로그 → (규칙: 왕복 · 반복 · 실패 · 경로 길이) + LLM 보조 분류 → Taxonomy · 근거 step · 심각도 | `findings` |
 | 4 | 진단 | Diagnosis | findings 묶음 → 문제 요약 · 우선순위 | `findings.summary` · `run_metrics` (성공률 · 행동 수 · 백트래킹) · `runs.status=done` |
-| 5 | 개선안 (선택) | Improvement | 진단 → 3안 + 근거 + 예상 영향 (패치 4종 안에서) | `improvements` |
+| 5 | 개선안 (선택) | Improvement | 회차의 진단을 종합 → 최대 3안 + 근거 + 예상 효과 (안마다 패치 하나, 패치 4종 안에서. 나은 순서로 번호를 매기고 남은 안 중 앞 번호가 추천 — 10/24, 결정 로그 T33) | `improvements` |
 | 6 | 승인 → 패치 → 재실험 (선택) | 리서처 승인(Spring `approvals`) → Spring 이 새 run INSERT → Patcher 주입 → 2~4 반복 | 해당 Friction 에 걸린 Persona 만 재투입 · 수렴 시 조기 종료 (tech-stack §9.3) | `runs(parent_run_id · improvement_id)` · `patch_versions` · Before/After = `run_metrics` 두 행 (`rerun_links` 는 09/20 삭제 — parent_run_id 로 충분, T21) |
 
 승인(6) 은 **Spring 이 쓰고 Python 이 큐를 본다**: 승인 행이 생기면 Spring 이 새 `run_id` 로 행을 INSERT 하고 `POST /runs` 를 다시 부른다 (`parent_run_id` · `improvement_id` 포함).
@@ -312,7 +312,7 @@ run 당 디렉터리, Persona 당 `steps.jsonl` 한 줄 = step 하나. DB 에는
 | `run_metrics` | Python | run_id · success_rate · avg_steps · avg_backtracks · avg_seconds · tokens · cost_usd (run 종료 시 확정 집계) |
 | `patch_versions` | Python | id · run_id · improvement_id · patch_kind(4종) · patch(json) · applied(bool) · fail_reason — Before/After · 실험 이력의 "패치 버전" |
 | `findings` | Python | id · run_id · taxonomy(4종+3) · severity · evidence(json — persona_id · step 범위 · url) · summary |
-| `improvements` | Python | id · finding_id · option_no(1~3, `rank` 는 MySQL 예약어) · patch_kind(4종) · patch(json) · rationale · expected_effect |
+| `improvements` | Python | id · run_id · finding_ids(json, 이 안이 다루는 Friction) · option_no(1~3, 나은 순서 — 남은 안 중 앞 번호가 추천, `rank` 는 MySQL 예약어) · patch_kind(relabel · move · highlight · help_text) · patch(json, 코드가 만든 한 줄 설명 description 포함) · rationale · expected_effect(나아질 지표 하나로 코드가 만든 문장 — 숫자 예측 없음) · fix_cost(이번 학기는 비움) (10/24 BE 테이블 명세에 맞춤, 결정 로그 T33) |
 | `approvals` | Spring | id · improvement_id · user_id · decision(`approve`/`reject`) · decided_at |
 | `audit_log` | Spring(운영 행위) / Python(차단 액션) | id · actor(user_id 또는 `agent:<run_id>`) · action · target · detail(json) · ts |
 
@@ -334,7 +334,7 @@ run 당 디렉터리, Persona 당 `steps.jsonl` 한 줄 = step 하나. DB 에는
 | 리서처 | `GET /api/projects/{id}/runs` | **실험 이력 목록** (화면 R7) — run # · 일시 · Task · Persona 수 · 상태 · 성공률 · 비용 · 패치 버전. 페이지네이션 |
 | 리서처 | `GET /api/runs/{id}` | 상태 · 진행률 · `dispatch_state` · `stale` 여부 (폴링 3초) |
 | 리서처 | `GET /api/runs/{id}/findings` · `GET /api/findings/{id}` | 진단 목록 · 상세(근거 step · 스크린샷) |
-| 리서처 | `GET /api/findings/{id}/improvements` · `POST /api/improvements/{id}/approvals` | 개선안 3안 · 승인/반려 → 재실험 트리거 |
+| 리서처 | `GET /api/runs/{runId}/improvements` · `GET /api/improvements/{id}` · `POST /api/runs/{runId}/approvals` | 회차의 개선안(최대 3안) · 상세 · 승인/반려 → 다음 회차 (10/24 API 문서에 맞춤) |
 | 리서처 | `GET /api/runs/{id}/compare?with={before_id}` | Before/After 지표 |
 | 리서처 | `POST /api/runs/{id}/cancel` | 내 run 중단 |
 | 리서처 | `GET /api/runs/{id}/personas/{pid}/steps` | step 로그. **Spring 이 `data/runs/` 를 읽기 전용으로 마운트해 `steps.jsonl` 을 읽어 JSON 으로 돌려준다** (§10). 이름은 screens-sketch 와 같다 |
