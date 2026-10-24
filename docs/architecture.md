@@ -171,7 +171,7 @@ sequenceDiagram
 
 | 테이블 | 쓰기 | 읽기 | 비고 |
 | --- | --- | --- | --- |
-| users · projects · tasks · personas · policies · test_accounts · approvals · human_results | Spring | Spring (Python 은 policies · test_accounts · personas 를 run 시작 시 **읽기만**) | 사람 입력 · 정책 |
+| users · projects · tasks · personas · policies · test_accounts · approvals | Spring | Spring (Python 은 policies · test_accounts · personas 를 run 시작 시 **읽기만**) | 사람 입력 · 정책 |
 | runs | **INSERT 는 Spring 만** (`status='queued'` 초기값 · `dispatch_state`) · **UPDATE 는 상태 컬럼을 Python, 설정 컬럼을 Spring** | 둘 다 | 소유 경계가 행 안에 있다 — 컬럼 단위로 나눈다. `status` 를 UPDATE 하는 쪽은 Python 하나뿐이다 (§3.3) |
 | run_personas · findings · improvements · run_metrics · patch_versions | Python | Spring | 실행 산출물 |
 | audit_log | **Spring(운영 행위) · Python(차단 액션)** — 행 단위로 나눠 쓴다, 행을 고치는 쪽은 없다 | 둘 다 | append-only. §7 과 같은 규칙이다 |
@@ -314,7 +314,6 @@ run 당 디렉터리, Persona 당 `steps.jsonl` 한 줄 = step 하나. DB 에는
 | `findings` | Python | id · run_id · taxonomy(4종+3) · severity · evidence(json — persona_id · step 범위 · url) · summary |
 | `improvements` | Python | id · finding_id · option_no(1~3, `rank` 는 MySQL 예약어) · patch_kind(4종) · patch(json) · rationale · expected_effect |
 | `approvals` | Spring | id · improvement_id · user_id · decision(`approve`/`reject`) · decided_at |
-| `human_results` | Spring | id · run_id · participant_label · succeeded(bool) · seconds · sus_score · note — D10 실사용자 결과(화면 R8, S5) |
 | `audit_log` | Spring(운영 행위) / Python(차단 액션) | id · actor(user_id 또는 `agent:<run_id>`) · action · target · detail(json) · ts |
 
 `policies.scope` 해석: **project 행이 global 행을 필드 단위로 덮어쓴다.** project 행에서 비어 있는 필드는 global 값이 그대로 산다 — 행 단위로 통째로 덮지 않는다.
@@ -408,7 +407,7 @@ flowchart TB
 | 저장 | Spring `test_accounts.secret_enc` — 앱 키로 암호화(AES-GCM, 키는 env). DB 덤프에 평문 없음 |
 | 전달 | `POST /runs` 에 **값이 아니라 `credential_ref`**. Python 이 시작 시 복호화된 값을 **내부 엔드포인트로 1회** 받거나(제안) DB 를 직접 복호화(키 공유 — 비추천) |
 | 사용 | Driver 의 **로그인 스텝(스크립트)** 에만 주입. Persona Agent 루프가 시작되기 **전**에 끝난다 |
-| 금지 | LLM 프롬프트 · 관측 · 로그 · 스크린샷 어디에도 없다. 자격증명 필드에 넣은 `type` 값만 마스킹 + 그 필드 영역 블러 (§6) |
+| 금지 | LLM 프롬프트 · 관측 · 로그 · 스크린샷 어디에도 없다. 로그에서는 자격증명 필드에 넣은 `type` 값만 마스킹(§6). 관측(요소 목록 · 스크린샷)에서는 모든 입력칸 값을 불투명하게 가리고 값이 있는지만 표시한다(10/24, 결정 로그 T31) |
 | 시점 | 계정 풀은 **S3**. S1~S2 는 로그인 없는 대상(D19)만 — `credential_ref: null` |
 
 **[한재완 확인 — 복호화 위치. 제안은 Spring 이 복호화해 내부 엔드포인트 `GET /internal/credentials/{ref}` 로 1회 제공, Python 은 메모리에만]**
