@@ -171,7 +171,7 @@ sequenceDiagram
 
 | 테이블 | 쓰기 | 읽기 | 비고 |
 | --- | --- | --- | --- |
-| users · projects · tasks · personas · policies · test_accounts · approvals · human_results | Spring | Spring (Python 은 policies · test_accounts · personas 를 run 시작 시 **읽기만**) | 사람 입력 · 정책 |
+| users · projects · tasks · personas · policies · test_accounts · approvals | Spring | Spring (Python 은 policies · test_accounts · personas 를 run 시작 시 **읽기만**) | 사람 입력 · 정책 |
 | runs | **INSERT 는 Spring 만** (`status='queued'` 초기값 · `dispatch_state`) · **UPDATE 는 상태 컬럼을 Python, 설정 컬럼을 Spring** | 둘 다 | 소유 경계가 행 안에 있다 — 컬럼 단위로 나눈다. `status` 를 UPDATE 하는 쪽은 Python 하나뿐이다 (§3.3) |
 | run_personas · findings · improvements · run_metrics · patch_versions | Python | Spring | 실행 산출물 |
 | audit_log | **Spring(운영 행위) · Python(차단 액션)** — 행 단위로 나눠 쓴다, 행을 고치는 쪽은 없다 | 둘 다 | append-only. §7 과 같은 규칙이다 |
@@ -222,7 +222,7 @@ flowchart BT
 | 2 | 시뮬레이션 | Watcher → Persona Agent ×N (세마포어) → Driver | 관측 → 관측 정제 → 행동 JSON → 가드 → 실행 → step 로그 | `data/runs/<id>/<persona>/steps.jsonl` + 스크린샷 · `run_personas` 진행률 · **step 마다 누적 `tokens` · `cost_usd`** |
 | 3 | Friction 검출 | Detector | step 로그 → (규칙: 왕복 · 반복 · 실패 · 경로 길이) + LLM 보조 분류 → Taxonomy · 근거 step · 심각도 | `findings` |
 | 4 | 진단 | Diagnosis | findings 묶음 → 문제 요약 · 우선순위 | `findings.summary` · `run_metrics` (성공률 · 행동 수 · 백트래킹) · `runs.status=done` |
-| 5 | 개선안 (선택) | Improvement | 진단 → 3안 + 근거 + 예상 영향 (패치 4종 안에서) | `improvements` |
+| 5 | 개선안 (선택) | Improvement | 회차의 진단을 종합 → 최대 3안 + 근거 + 예상 효과 (안마다 패치 하나, 패치 4종 안에서. 나은 순서로 번호를 매기고 남은 안 중 앞 번호가 추천 — 10/24, 결정 로그 T33) | `improvements` |
 | 6 | 승인 → 패치 → 재실험 (선택) | 리서처 승인(Spring `approvals`) → Spring 이 새 run INSERT → Patcher 주입 → 2~4 반복 | 해당 Friction 에 걸린 Persona 만 재투입 · 수렴 시 조기 종료 (tech-stack §9.3) | `runs(parent_run_id · improvement_id)` · `patch_versions` · Before/After = `run_metrics` 두 행 (`rerun_links` 는 09/20 삭제 — parent_run_id 로 충분, T21) |
 
 승인(6) 은 **Spring 이 쓰고 Python 이 큐를 본다**: 승인 행이 생기면 Spring 이 새 `run_id` 로 행을 INSERT 하고 `POST /runs` 를 다시 부른다 (`parent_run_id` · `improvement_id` 포함).
@@ -312,9 +312,8 @@ run 당 디렉터리, Persona 당 `steps.jsonl` 한 줄 = step 하나. DB 에는
 | `run_metrics` | Python | run_id · success_rate · avg_steps · avg_backtracks · avg_seconds · tokens · cost_usd (run 종료 시 확정 집계) |
 | `patch_versions` | Python | id · run_id · improvement_id · patch_kind(4종) · patch(json) · applied(bool) · fail_reason — Before/After · 실험 이력의 "패치 버전" |
 | `findings` | Python | id · run_id · taxonomy(4종+3) · severity · evidence(json — persona_id · step 범위 · url) · summary |
-| `improvements` | Python | id · finding_id · option_no(1~3, `rank` 는 MySQL 예약어) · patch_kind(4종) · patch(json) · rationale · expected_effect |
+| `improvements` | Python | id · run_id · finding_ids(json, 이 안이 다루는 Friction) · option_no(1~3, 나은 순서 — 남은 안 중 앞 번호가 추천, `rank` 는 MySQL 예약어) · patch_kind(relabel · move · highlight · help_text) · patch(json, 코드가 만든 한 줄 설명 description 포함) · rationale · expected_effect(나아질 지표 하나로 코드가 만든 문장 — 숫자 예측 없음) · fix_cost(이번 학기는 비움) (10/24 BE 테이블 명세에 맞춤, 결정 로그 T33) |
 | `approvals` | Spring | id · improvement_id · user_id · decision(`approve`/`reject`) · decided_at |
-| `human_results` | Spring | id · run_id · participant_label · succeeded(bool) · seconds · sus_score · note — D10 실사용자 결과(화면 R8, S5) |
 | `audit_log` | Spring(운영 행위) / Python(차단 액션) | id · actor(user_id 또는 `agent:<run_id>`) · action · target · detail(json) · ts |
 
 `policies.scope` 해석: **project 행이 global 행을 필드 단위로 덮어쓴다.** project 행에서 비어 있는 필드는 global 값이 그대로 산다 — 행 단위로 통째로 덮지 않는다.
@@ -335,7 +334,7 @@ run 당 디렉터리, Persona 당 `steps.jsonl` 한 줄 = step 하나. DB 에는
 | 리서처 | `GET /api/projects/{id}/runs` | **실험 이력 목록** (화면 R7) — run # · 일시 · Task · Persona 수 · 상태 · 성공률 · 비용 · 패치 버전. 페이지네이션 |
 | 리서처 | `GET /api/runs/{id}` | 상태 · 진행률 · `dispatch_state` · `stale` 여부 (폴링 3초) |
 | 리서처 | `GET /api/runs/{id}/findings` · `GET /api/findings/{id}` | 진단 목록 · 상세(근거 step · 스크린샷) |
-| 리서처 | `GET /api/findings/{id}/improvements` · `POST /api/improvements/{id}/approvals` | 개선안 3안 · 승인/반려 → 재실험 트리거 |
+| 리서처 | `GET /api/runs/{runId}/improvements` · `GET /api/improvements/{id}` · `POST /api/runs/{runId}/approvals` | 회차의 개선안(최대 3안) · 상세 · 승인/반려 → 다음 회차 (10/24 API 문서에 맞춤) |
 | 리서처 | `GET /api/runs/{id}/compare?with={before_id}` | Before/After 지표 |
 | 리서처 | `POST /api/runs/{id}/cancel` | 내 run 중단 |
 | 리서처 | `GET /api/runs/{id}/personas/{pid}/steps` | step 로그. **Spring 이 `data/runs/` 를 읽기 전용으로 마운트해 `steps.jsonl` 을 읽어 JSON 으로 돌려준다** (§10). 이름은 screens-sketch 와 같다 |
@@ -408,7 +407,7 @@ flowchart TB
 | 저장 | Spring `test_accounts.secret_enc` — 앱 키로 암호화(AES-GCM, 키는 env). DB 덤프에 평문 없음 |
 | 전달 | `POST /runs` 에 **값이 아니라 `credential_ref`**. Python 이 시작 시 복호화된 값을 **내부 엔드포인트로 1회** 받거나(제안) DB 를 직접 복호화(키 공유 — 비추천) |
 | 사용 | Driver 의 **로그인 스텝(스크립트)** 에만 주입. Persona Agent 루프가 시작되기 **전**에 끝난다 |
-| 금지 | LLM 프롬프트 · 관측 · 로그 · 스크린샷 어디에도 없다. 자격증명 필드에 넣은 `type` 값만 마스킹 + 그 필드 영역 블러 (§6) |
+| 금지 | LLM 프롬프트 · 관측 · 로그 · 스크린샷 어디에도 없다. 로그에서는 자격증명 필드에 넣은 `type` 값만 마스킹(§6). 관측(요소 목록 · 스크린샷)에서는 모든 입력칸 값을 불투명하게 가리고 값이 있는지만 표시한다(10/24, 결정 로그 T31) |
 | 시점 | 계정 풀은 **S3**. S1~S2 는 로그인 없는 대상(D19)만 — `credential_ref: null` |
 
 **[한재완 확인 — 복호화 위치. 제안은 Spring 이 복호화해 내부 엔드포인트 `GET /internal/credentials/{ref}` 로 1회 제공, Python 은 메모리에만]**
