@@ -33,6 +33,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.YearMonth;
 import java.time.ZoneId;
 import java.util.Optional;
@@ -157,7 +158,10 @@ class UsageControllerTest {
     JsonNode before = usageBody();
 
     long runId = requestExperiment();
-    jdbcTemplate.update("UPDATE runs SET status = 'done', tokens = 4321, cost_usd = 0.0789 WHERE run_id = ?", runId);
+    // AI 가 쓰는 비용 · 토큰. 요청 시각은 KST 지금으로 맞춘다 — created_at 기본값은 DB 시계라 CI 의 UTC MySQL 에서는
+    // KST 오늘과 날짜가 달라질 수 있다(운영 · 로컬 compose 의 MySQL 은 +09:00)
+    jdbcTemplate.update("UPDATE runs SET status = 'done', tokens = 4321, cost_usd = 0.0789, created_at = ? WHERE run_id = ?",
+        LocalDateTime.now(KST), runId);
     JsonNode after = usageBody();
 
     assertThat(after.at("/total/costUsd").decimalValue().subtract(before.at("/total/costUsd").decimalValue()))

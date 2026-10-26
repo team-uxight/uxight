@@ -25,7 +25,6 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.OffsetDateTime;
 
 /**
  * 감사 로그 조회(GET /api/admin/audit-logs) — admin · maintainer 만. 기간 [from, to) 의 기록을 최근 기록 순으로 돌려준다.
@@ -196,7 +195,6 @@ class AuditLogControllerTest {
   @Test
   void operationsDoneThroughApi_areRecorded_andListedNewestFirst() throws Exception {
     Long researcher = insertUser("audit-target@uxight.com", "researcher", true);
-    String from = OffsetDateTime.now().minusMinutes(1).toString();
 
     adminCall(patch("/api/admin/policy"), "{\"maxSteps\":11}").andExpect(status().isOk());
     adminCall(patch("/api/admin/users/{userId}/role", researcher), "{\"role\":\"maintainer\"}").andExpect(status().isOk());
@@ -206,7 +204,9 @@ class AuditLogControllerTest {
     entityManager.flush();
     entityManager.clear();
 
-    audit(adminId, "from", from, "size", "4")
+    // 기간을 걸지 않고 최근 4건을 본다 — ts 는 DB 시계(CURRENT_TIMESTAMP)라 CI 의 UTC MySQL 에서는 KST 로 잡은 기간과 9시간 어긋난다.
+    // 방금 쓴 행이 DB 시계로 가장 늦고, 같은 초면 audit_log_id 가 커서 맨 앞에 온다
+    audit(adminId, "size", "4")
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.content[*].action").value(contains("user.active_update", "user.role_update",
             "user.role_update", "policy.update")))
