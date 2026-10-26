@@ -11,8 +11,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 
 /**
  * 회차의 Persona 진행 · step 로그 · 스크린샷 조회. 리서처용과 운영자용은 회차를 찾는 권한 확인만 다르고 읽는 코드(RunLogReader)는 같다.
@@ -41,18 +39,8 @@ public class RunLogService {
   @Transactional(readOnly = true)
   public RunPersonaList getPersonas(Long userId, Long runId) {
     Run run = researcherRun(userId, runId);
-    Map<Long, RunPersonaStatus> statuses = runPersonaQueryRepository.findByRunId(run.getId()).stream()
-        .collect(Collectors.toMap(RunPersonaStatus::personaId, Function.identity()));
-    List<RunPersonaList.Item> personas = run.getPersonaSnapshot().stream()
-        .map(persona -> {
-          long personaId = personaId(persona);
-          Optional<RunPersonaStatus> status = Optional.ofNullable(statuses.get(personaId));
-          return new RunPersonaList.Item(personaId, (String) persona.get("name"),
-              status.map(RunPersonaStatus::status).orElse(null), status.map(RunPersonaStatus::steps).orElse(null),
-              status.map(RunPersonaStatus::finishedAt).orElse(null));
-        })
-        .toList();
-    return new RunPersonaList(run.getId(), run.getStatus(), personas);
+    return new RunPersonaList(run.getId(), run.getStatus(),
+        RunPersonaList.Item.of(run.getPersonaSnapshot(), runPersonaQueryRepository.findByRunId(run.getId())));
   }
 
   @Transactional(readOnly = true)
