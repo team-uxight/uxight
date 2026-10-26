@@ -2575,11 +2575,14 @@ components:
 
     AdminExperimentSummary:
       type: object
-      description: 전체 실험 목록의 항목. round, status, finishedAt은 실험의 마지막 회차 기준이다.
+      description: |-
+        전체 실험 목록의 항목. round, status, finishedAt은 실험의 마지막 회차 기준이다.
+        모든 사용자의 실험을 최근 요청 순으로 보여주며, 리서처가 삭제한 프로젝트의 실험도 projectDeleted로 표시해 포함한다.
       required:
         [
           firstRunId,
           projectTitle,
+          projectDeleted,
           ownerEmail,
           taskGoal,
           mode,
@@ -2594,6 +2597,9 @@ components:
           format: int64
         projectTitle:
           type: string
+        projectDeleted:
+          type: boolean
+          description: 리서처가 삭제한 프로젝트의 실험이면 true다. 리서처 실험 목록에서는 보이지 않는다.
         ownerEmail:
           type: string
           description: 프로젝트 소유 리서처의 이메일
@@ -2629,7 +2635,9 @@ components:
 
     PersonaRunResult:
       type: object
-      description: Persona 실행 결과(run_personas 한 행)
+      description: |-
+        Persona 실행 결과(run_personas 한 행). 회차의 Persona 스냅샷 순서다.
+        AI 모듈이 회차를 접수하기 전(queued, accepted)이면 run_personas 행이 없어 이름만 있고 status, steps는 null이다.
       required: [personaId, name, status, steps]
       properties:
         personaId:
@@ -2637,12 +2645,15 @@ components:
           format: int64
         name:
           type: string
-          description: Persona 표시 이름
+          description: Persona 표시 이름(회차 요청 시점의 스냅샷)
         status:
-          $ref: "#/components/schemas/PersonaRunStatus"
+          description: Persona 실행 상태. AI 모듈이 회차를 접수하기 전이면 null이다.
+          anyOf:
+            - $ref: "#/components/schemas/PersonaRunStatus"
+            - type: "null"
         steps:
           type: [integer, "null"]
-          description: 총 step 수. 실행하지 않은 step도 포함한다(행동 로그 명세 2절).
+          description: 총 step 수. 실행하지 않은 step도 포함한다(행동 로그 명세 2절). 접수 전이면 null이다.
 
     AdminRoundSummary:
       type: object
