@@ -7,7 +7,7 @@ info:
     기준 문서는 '서비스 REST API 설계'(7.3)와 '오류 코드 및 오류 파일 설계'(8.4)이고, 두 문서에 없는 동작은 design-decision.md를 따른다.
 
     **규칙**
-    - 모든 API는 /api로 시작하고, 관리자 전용 API는 /api/admin으로 시작한다.
+    - 모든 API는 /api로 시작하고, 관리자 전용 API는 /api/admin으로 시작하며 admin / maintainer만 호출할 수 있다.
     - 로그인이 필요한 API는 Authorization 헤더에 Bearer access 토큰을 보낸다.
     - 본인 소유가 아닌 자원에 접근하면 403 대신 자원이 없는 경우와 같은 404 코드로 응답해 자원의 존재 자체를 숨긴다. 조회 조건을 충족하지 않는 자원(done이 아닌 회차의 진단과 개선안, 진단 근거나 Before/After 범위 밖의 스크린샷)도 마찬가지다.
     - 실패 응답 본문은 모든 API가 같은 형식(code, message, fieldErrors)을 사용한다. HTTP 상태 코드가 같아도 원인이 다르면 code가 다르다.
@@ -1120,7 +1120,7 @@ paths:
       tags: [계정 관리]
       operationId: changeUserRole
       summary: 계정 역할 변경
-      description: 역할은 매 요청 DB에서 확인하므로 토큰 만료를 기다리지 않고 바로 반영된다.
+      description: 역할은 매 요청 DB에서 확인하므로 토큰 만료를 기다리지 않고 바로 반영된다. maintainer는 researcher 계정의 권한만 설정할 수 있고, maintainer / admin은 부여하지 못한다.
       requestBody:
         required: true
         content:
@@ -1143,7 +1143,9 @@ paths:
         "404":
           $ref: "#/components/responses/UserNotFound"
         "409":
-          description: "ACC-ERR-002: 마지막 관리자를 리서처로 바꾸려 함"
+          description: |-
+            - ACC-ERR-002: 마지막 관리자의 역할을 바꾸려 함
+            - ACC-ERR-003: maintainer가 admin 또는 maintainer 계정(자기 포함)의 역할을 바꾸려 함. maintainer는 researcher 계정만 관리한다.
           content:
             application/json:
               schema:
@@ -1151,6 +1153,56 @@ paths:
               examples:
                 ACC-ERR-002:
                   $ref: "#/components/examples/ACC-ERR-002"
+                ACC-ERR-003:
+                  $ref: "#/components/examples/ACC-ERR-003"
+
+  /api/admin/users/{userId}/active:
+    parameters:
+      - $ref: "#/components/parameters/UserId"
+    patch:
+      tags: [계정 관리]
+      operationId: changeUserActive
+      summary: 계정 활성 상태 변경
+      description: 리서처 계정을 비활성화하거나 다시 활성화한다. admin / maintainer 모두 호출할 수 있다. 활성 여부는 매 요청에서 DB에서 확인하므로 비활성화는 대상 사용자의 다음 요청부터 바로 반영되고, refresh 토큰 재발급도 막힌다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ActiveChangeRequest"
+      responses:
+        "200":
+          description: 변경 완료
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActiveChangeResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: |-
+            - AUT-ERR-006: 요청자의 역할로 호출할 수 없는 API
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                AUT-ERR-006:
+                  $ref: "#/components/examples/AUT-ERR-006"
+        "404":
+          $ref: "#/components/responses/UserNotFound"
+        "409":
+          description: |-
+            - ACC-ERR-003: 대상이 admin 또는 maintainer 계정임. 활성 상태는 리서처 계정만 바꿀 수 있다.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                ACC-ERR-003:
+                  $ref: "#/components/examples/ACC-ERR-003"
 
   # ───────── 13. 정책 관리 ─────────
 
@@ -1512,6 +1564,11 @@ components:
         code: ACC-ERR-002
         message: 마지막 관리자의 역할은 변경할 수 없습니다.
         fieldErrors: []
+    ACC-ERR-003:
+      value:
+        code: ACC-ERR-003
+        message: 해당 계정은 변경 대상이 아닙니다.
+        fieldErrors: []
 
   responses:
     BadRequest:
@@ -1541,7 +1598,7 @@ components:
             AUT-ERR-005:
               $ref: "#/components/examples/AUT-ERR-005"
     Forbidden:
-      description: "AUT-ERR-006: 관리자가 아님(리서처의 관리자 API 호출)"
+      description: "AUT-ERR-006: 관리자 API 권한 없음(리서처의 관리자 API 호출)"
       content:
         application/json:
           schema:
@@ -1693,8 +1750,8 @@ components:
 
     Role:
       type: string
-      enum: [admin, researcher]
-      description: 계정 역할. admin(관리자), researcher(리서처)
+      enum: [admin, maintainer, researcher]
+      description: 계정 역할. admin(관리자), maintainer(메인테이너), researcher(리서처)
 
     AuthProvider:
       type: string
@@ -1910,6 +1967,25 @@ components:
           format: int64
         role:
           $ref: "#/components/schemas/Role"
+
+    ActiveChangeRequest:
+      type: object
+      required: [isActive]
+      properties:
+        isActive:
+          type: boolean
+          description: false면 비활성화, ture면 활성화
+
+    ActiveChangeResponse:
+      type: object
+      required: [userId, isActive]
+      properties:
+        userId:
+          type: integer
+          format: int64
+        isActive:
+          type: boolean
+          description: 변경 후 계정 활성 여부
 
     # ───────── 프로젝트, Persona, 테스트 계정 ─────────
 

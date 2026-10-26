@@ -85,6 +85,15 @@ class LoginCheckInterceptorTest {
   }
 
   @Test
+  void adminPath_allowsMaintainer() throws Exception {
+    Long maintainerId = insertUser("maintainer-test@uxight.com", "maintainer", true);
+
+    adminApi("Bearer " + jwtProvider.createAccessToken(maintainerId))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.maxSteps").isNumber());
+  }
+
+  @Test
   void adminPath_rejectsResearcher() throws Exception {
     Long researcherId = insertUser("researcher@uxight.com", "researcher", true);
 

@@ -97,7 +97,7 @@ public class RunController {
 
   /**
    * 전체 실험 중단(kill switch, 관리자). 진행 중인 모든 회차에 취소 요청을 기록하고 그 실험 수를 돌려준다 — 승인 대기 중인 실험은 빠진다.
-   * 실제 중단은 AI 모듈이 하므로 202. /api/admin/** 는 AdminCheckInterceptor 가 관리자만 통과시킨다(리서처 403 AUT-ERR-006).
+   * 실제 중단은 AI 모듈이 하므로 202. /api/admin/** 는 AdminCheckInterceptor 가 admin · maintainer 만 통과시킨다(리서처 403 AUT-ERR-006).
    */
   @PostMapping("/api/admin/runs/cancel-all")
   @ResponseStatus(HttpStatus.ACCEPTED)

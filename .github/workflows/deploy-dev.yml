@@ -1,0 +1,93 @@
+name: deploy-dev
+
+# dev 서버(팀 전용) 자동 배포 — develop · fe 에 push 한 CI 가 성공하면, 서버가 따르는 브랜치를 다시 받아 빌드한다.
+# CI 가 실패한 push(테스트 · DB 마이그레이션이 깨진 것)는 배포하지 않는다. PR 의 CI 로는 배포하지 않는다.
+# 서버가 어느 브랜치를 따르는지는 서버 쪽 설정이 정한다 (지금 fe, FE 가 develop 에 병합되면 develop).
+# 그 브랜치에 새 커밋이 없으면 서버가 배포를 건너뛴다. Actions 탭의 Run workflow 는 새 커밋이 없어도 다시 빌드한다.
+# 키는 서버의 배포 스크립트 하나만 돌릴 수 있는 전용 키다.
+# 결과(배포됨 · 건너뜀 · CI 실패 · 배포 실패)는 Slack 으로 알린다 — PR · 바뀐 곳 · 서버 상태 · 버튼(.github/scripts/deploy-notify.sh).
+# 시크릿 SLACK_WEBHOOK_URL 이 없으면 알리지 않는다.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [develop, fe]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  deploy:
+    if: >-
+      github.repository == 'team-uxight/uxight' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      result: ${{ steps.deploy.outputs.result }}
+      services: ${{ steps.deploy.outputs.services }}
+      seconds: ${{ steps.deploy.outputs.seconds }}
+    steps:
+      - name: dev 서버에 배포
+        id: deploy
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          FORCE: ${{ github.event_name == 'workflow_dispatch' && ' force' || '' }}
+        run: |
+          set -o pipefail   # tee 가 ssh 실패를 가리지 않게
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy
+          chmod 600 ~/.ssh/deploy
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          start=$(date +%s)
+          ssh -i ~/.ssh/deploy -o BatchMode=yes -o ServerAliveInterval=30 "ubuntu@$DEPLOY_HOST" "deploy$FORCE" | tee out.txt
+          {
+            echo "result=$(sed -n 's/^DEPLOY_RESULT=//p' out.txt | tail -1)"
+            echo "services=$(sed -n 's/^DEPLOY_SERVICES=//p' out.txt | tail -1)"
+            echo "seconds=$(( $(date +%s) - start ))"
+          } >> "$GITHUB_OUTPUT"
+
+  notify:
+    needs: deploy
+    if: >-
+      always() && github.repository == 'team-uxight/uxight' &&
+      (github.event_name == 'workflow_dispatch' || github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read          # CI 실패 때 실패한 검사 이름
+      contents: read         # 커밋 → PR 찾기
+      pull-requests: read    # PR 제목 · 본문 · 바뀐 파일
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+      - name: Slack 에 알림
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          REPO: ${{ github.repository }}
+          SERVER_URL: ${{ github.server_url }}
+          EVENT: ${{ github.event_name }}
+          ACTOR: ${{ github.triggering_actor }}
+          BRANCH: ${{ github.event.workflow_run.head_branch || github.ref_name }}
+          SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          COMMIT_MSG: ${{ github.event.workflow_run.head_commit.message }}
+          COMMIT_AUTHOR: ${{ github.event.workflow_run.head_commit.author.name }}
+          CI: ${{ github.event.workflow_run.conclusion }}
+          CI_URL: ${{ github.event.workflow_run.html_url }}
+          CI_RUN_ID: ${{ github.event.workflow_run.id }}
+          DEPLOY: ${{ needs.deploy.result }}
+          RESULT: ${{ needs.deploy.outputs.result }}
+          SERVICES: ${{ needs.deploy.outputs.services }}
+          SECONDS_TAKEN: ${{ needs.deploy.outputs.seconds }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: bash .github/scripts/deploy-notify.sh

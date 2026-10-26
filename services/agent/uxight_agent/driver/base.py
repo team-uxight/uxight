@@ -17,13 +17,15 @@ class Observation:
     """observe()가 돌려주는 현재 페이지 상태.
 
     dom은 LLM에게 보여줄 텍스트, element_map은 ID → 요소 정보.
-    SoM 방식 드라이버는 이 클래스를 확장해 스크린샷 등을 추가한다.
+    screenshot은 SoM 방식 드라이버가 찍은 PNG 바이트이고, DOM 방식에서는 None이다.
+    SoM 방식도 입력칸을 가린 그림을 얻지 못하면 None이다 — 그 step은 글 관측(dom)만으로 진행한다.
     """
 
     url: str
     title: str
     dom: str
     element_map: dict[int, dict] = field(default_factory=dict)
+    screenshot: bytes | None = field(default=None, repr=False)
 
 
 class Driver(ABC):

@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>SoM smooth scroll fixture</title>
+  <!-- Bootstrap 5 기본값처럼 부드러운 스크롤. 같은 페이지 안 링크를 누르면 한동안 스크롤이 이어진다.
+       그사이 막을 그리면 막은 그린 자리에 남고 입력칸만 올라간다 -->
+  <style>
+    html { scroll-behavior: smooth; }
+    input { font: 24px sans-serif; width: 320px; }
+  </style>
+</head>
+<body>
+  <a href="#form">폼으로 이동</a>
+  <div style="height: 350px"></div>
+  <form id="form"><input name="email" type="text"></form>
+  <div style="height: 3000px"></div>
+  <script>
+    // 값은 주소의 ?v= 로 받는다. 값만 다르게 두 번 찍어 비교한다.
+    document.querySelector('[name=email]').value = new URLSearchParams(location.search).get('v');
+  </script>
+</body>
+</html>
