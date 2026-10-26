@@ -44,6 +44,7 @@ tags:
   - name: 정책 관리
   - name: 실험 강제 중단
   - name: 감사 로그 관리
+  - name: 사용량 관리
 
 paths:
   # ───────── 1. 회원가입, 2. 로그인, 3. 로그아웃 ─────────
@@ -1305,6 +1306,48 @@ paths:
                 $ref: "#/components/schemas/AuditLogPage"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  # ───────── 16. 사용량 관리 ─────────
+
+  /api/admin/usage:
+    get:
+      tags: [사용량 관리]
+      operationId: getUsage
+      summary: 모델 사용량 조회
+      description: |-
+        한 달의 비용, 토큰, 실행(회차) 수 합계와 일별 값을 조회한다. admin / maintainer 모두 호출할 수 있다.
+        별도 테이블 없이 회차(runs)에 누적된 토큰과 비용을 회차 요청 시각(KST)의 날짜별로 더한다.
+        실패, 취소, 진행 중인 회차도 지금까지 쓴 만큼 들어가고, 모든 사용자와 삭제된 프로젝트의 회차를 포함한다.
+      parameters:
+        - name: month
+          in: query
+          required: false
+          description: 조회할 달(yyyy-MM, 예 2026-10). 생략하면 이번 달(KST)이다.
+          schema:
+            type: string
+            pattern: "^\\d{4}-\\d{2}$"
+            examples:
+              - "2026-10"
+      responses:
+        "200":
+          description: 조회 성공
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Usage"
+        "400":
+          description: "GLB-ERR-001: month 형식이 틀림(2026-13, 202610 등)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                GLB-ERR-001:
+                  $ref: "#/components/examples/GLB-ERR-001"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -3100,3 +3143,56 @@ components:
               items:
                 $ref: "#/components/schemas/AuditLog"
         - $ref: "#/components/schemas/PageInfo"
+
+    # ───────── 사용량 ─────────
+
+    UsageAmount:
+      type: object
+      required: [costUsd, tokens, runCount]
+      properties:
+        costUsd:
+          type: number
+          minimum: 0
+          description: 비용(USD). 회차에 누적된 비용의 합, 소수 넷째 자리까지
+        tokens:
+          type: integer
+          format: int64
+          minimum: 0
+          description: 토큰 합
+        runCount:
+          type: integer
+          format: int64
+          minimum: 0
+          description: 실행(회차) 수. 한 실험이 여러 회차를 돌면 회차마다 센다
+
+    UsageDay:
+      description: 하루 사용량. 그날(KST) 요청된 회차의 합이다.
+      allOf:
+        - type: object
+          required: [date]
+          properties:
+            date:
+              type: string
+              format: date
+              examples:
+                - "2026-10-01"
+        - $ref: "#/components/schemas/UsageAmount"
+
+    Usage:
+      type: object
+      required: [month, total, daily]
+      properties:
+        month:
+          type: string
+          description: 조회한 달(yyyy-MM)
+          examples:
+            - "2026-10"
+        total:
+          $ref: "#/components/schemas/UsageAmount"
+        daily:
+          type: array
+          description: |-
+            1일부터 날짜 순. 회차가 없는 날은 0으로 채운다.
+            이번 달은 오늘까지, 지난달은 말일까지이고, 앞으로의 달은 빈 목록이다.
+          items:
+            $ref: "#/components/schemas/UsageDay"
