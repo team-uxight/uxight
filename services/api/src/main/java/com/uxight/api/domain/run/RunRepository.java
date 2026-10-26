@@ -26,6 +26,9 @@ public interface RunRepository extends JpaRepository<Run, Long> {
 
   Optional<Run> findTopByFirstRunIdAndProjectUserIdAndProjectDeletedAtIsNullOrderByIdDesc(Long firstRunId, Long userId);
 
+  /** 본인 회차 하나. 남의 회차와 삭제한 프로젝트의 회차는 없는 것과 같다. */
+  Optional<Run> findByIdAndProjectUserIdAndProjectDeletedAtIsNull(Long runId, Long userId);
+
   /**
    * 프로젝트에 진행 중(queued · accepted · running)인 회차가 있는가. 취소 요청된 회차도 실제로 멈추기 전까지는 진행 중이다.
    * 프로젝트 하나의 진행 중인 실험은 최대 1개 — 회차 하나라도 진행 중이면 그 실험이 진행 중이다 (design-decision 5.2).
