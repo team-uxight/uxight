@@ -720,6 +720,104 @@ paths:
 
   # ───────── 8. 행동 로그 관리 ─────────
 
+  /api/runs/{runId}/personas:
+    parameters:
+      - $ref: "#/components/parameters/RunId"
+    get:
+      tags: [행동 로그 관리]
+      operationId: listRunPersonas
+      summary: 회차의 Persona별 진행 조회
+      description: |-
+        실시간 모니터 화면이 1.5초마다 부른다. 회차 상태와 Persona별 상태, step 수, 끝난 시각을 반환한다.
+        personas는 회차의 Persona 스냅샷 순서이며, AI 모듈이 회차를 접수하기 전(queued, accepted)이면 Persona 이름만 있고 status, steps, finishedAt은 null이다.
+        본인 프로젝트의 회차만 조회한다. 남의 회차나 삭제한 프로젝트의 회차는 없는 회차와 같이 404를 응답한다.
+      responses:
+        "200":
+          description: 조회 성공
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunPersonaListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/RunNotFound"
+
+  /api/runs/{runId}/personas/{personaId}/steps:
+    parameters:
+      - $ref: "#/components/parameters/RunId"
+      - $ref: "#/components/parameters/PersonaIdPath"
+    get:
+      tags: [행동 로그 관리]
+      operationId: listMyStepLogs
+      summary: 내 회차의 Persona별 step 로그 조회
+      description: |-
+        운영자용 step 로그 조회(GET /api/admin/runs/{runId}/personas/{personaId}/steps)와 같은 형식이다. 읽는 코드는 같고 권한 확인만 다르다.
+        본인 프로젝트의 회차만 조회한다. 실행 중이거나 아직 시작 전이라 기록된 step이 없으면 빈 목록을 응답한다.
+      responses:
+        "200":
+          description: 조회 성공
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StepLogListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: |-
+            - EXP-ERR-002: 회차가 없거나 본인 프로젝트의 회차가 아님(삭제한 프로젝트 포함)
+            - LOG-ERR-001: 그 회차에 해당 Persona가 없거나, 종료된 Persona 실행의 step 로그 파일이 없음
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                EXP-ERR-002:
+                  $ref: "#/components/examples/EXP-ERR-002"
+                LOG-ERR-001:
+                  $ref: "#/components/examples/LOG-ERR-001"
+
+  /api/runs/{runId}/personas/{personaId}/steps/{step}/screenshot:
+    parameters:
+      - $ref: "#/components/parameters/RunId"
+      - $ref: "#/components/parameters/PersonaIdPath"
+      - $ref: "#/components/parameters/StepPath"
+    get:
+      tags: [행동 로그 관리]
+      operationId: getMyStepScreenshot
+      summary: 내 회차의 step별 스크린샷 조회
+      description: |-
+        운영자용 스크린샷 조회와 같은 이미지다. 프론트엔드는 Authorization 헤더를 붙여 fetch로 받는다.
+        step 로그의 hasScreenshot이 false인 step은 조회하지 않는다. 스크린샷은 한 번 저장되면 바뀌지 않아 본인 브라우저에 하루 캐시한다.
+      responses:
+        "200":
+          description: 스크린샷 이미지
+          headers:
+            Cache-Control:
+              description: private, max-age=86400
+              schema:
+                type: string
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: |-
+            - EXP-ERR-002: 회차가 없거나 본인 프로젝트의 회차가 아님(삭제한 프로젝트 포함)
+            - LOG-ERR-002: 스크린샷이 없거나 그 회차에 해당 Persona가 없음
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                EXP-ERR-002:
+                  $ref: "#/components/examples/EXP-ERR-002"
+                LOG-ERR-002:
+                  $ref: "#/components/examples/LOG-ERR-002"
+
   /api/admin/runs/{runId}/personas/{personaId}/steps:
     parameters:
       - $ref: "#/components/parameters/RunId"
@@ -1669,6 +1767,15 @@ components:
           examples:
             EXP-ERR-001:
               $ref: "#/components/examples/EXP-ERR-001"
+    RunNotFound:
+      description: "EXP-ERR-002: 회차가 없거나 본인 프로젝트의 회차가 아님(삭제한 프로젝트 포함)"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            EXP-ERR-002:
+              $ref: "#/components/examples/EXP-ERR-002"
     RoundNotFound:
       description: "EXP-ERR-002: 회차가 없거나 본인 소유가 아님, 또는 회차가 done이 아님"
       content:
@@ -2576,6 +2683,7 @@ components:
       description: |-
         step 하나의 로그. Spring이 steps.jsonl의 한 줄에서 화면에 필요한 키만 골라 camelCase로 바꾼 것이다.
         step 번호는 1부터 이어지며, 실행하지 않은 step도 포함한다(행동 로그 명세 2절).
+        원본 줄에 없는 키는 null(불리언은 false)로 채운다. agent가 행동 로그 명세 형식으로 쓰면 ts, url, result.urlAfter는 항상 값이 있다.
       required:
         [
           step,
@@ -2594,11 +2702,11 @@ components:
           type: integer
           description: step 번호
         ts:
-          type: string
+          type: [string, "null"]
           format: date-time
           description: 기록 시각. steps.jsonl의 값을 그대로 전달하며 시간대를 포함한다.
         url:
-          type: string
+          type: [string, "null"]
           description: 행동 전 페이지 URL
         reasoning:
           type: [string, "null"]
@@ -2651,7 +2759,7 @@ components:
           type: boolean
           description: 브라우저 행동 실행 성공 여부
         urlAfter:
-          type: string
+          type: [string, "null"]
           description: 행동 뒤 페이지 URL
         error:
           type: [string, "null"]
@@ -2669,6 +2777,44 @@ components:
           description: step 로그 목록
           items:
             $ref: "#/components/schemas/StepLog"
+
+    RunPersonaItem:
+      type: object
+      description: 회차 안 Persona 한 명의 진행. AI 모듈이 회차를 접수하기 전이면 status, steps, finishedAt이 null이다.
+      required: [personaId, name, status, steps, finishedAt]
+      properties:
+        personaId:
+          type: integer
+          format: int64
+        name:
+          type: string
+          description: 회차 요청 시점의 Persona 이름(스냅샷)
+        status:
+          type: [string, "null"]
+          enum: [running, done, max_steps, fail, timeout, cancelled, null]
+          description: Persona 실행 상태(run_personas.status). done이면 Agent가 Task 완료를 선언한 것이다.
+        steps:
+          type: [integer, "null"]
+          description: 지금까지 기록된 step 수
+        finishedAt:
+          type: [string, "null"]
+          format: date-time
+          description: Persona 실행이 끝난 시각. 실행 중이면 null이다.
+
+    RunPersonaListResponse:
+      type: object
+      required: [runId, status, personas]
+      properties:
+        runId:
+          type: integer
+          format: int64
+        status:
+          $ref: "#/components/schemas/RunStatus"
+        personas:
+          type: array
+          description: 회차의 Persona 스냅샷 순서
+          items:
+            $ref: "#/components/schemas/RunPersonaItem"
 
     # ───────── 진단 ─────────
 
