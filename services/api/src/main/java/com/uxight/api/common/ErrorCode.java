@@ -34,6 +34,8 @@ public enum ErrorCode {
   SUCCESS_RULE_FAILED(HttpStatus.BAD_GATEWAY, "EXP-ERR-007", "성공 기준 생성에 실패했습니다."),
   SUCCESS_RULE_TIMEOUT(HttpStatus.GATEWAY_TIMEOUT, "EXP-ERR-008", "성공 기준 생성 시간이 초과되었습니다."),
 
+  FINDING_NOT_FOUND(HttpStatus.NOT_FOUND, "FND-ERR-001", "진단을 찾을 수 없습니다."),
+
   STEP_LOG_NOT_FOUND(HttpStatus.NOT_FOUND, "LOG-ERR-001", "step 로그를 찾을 수 없습니다."),
   SCREENSHOT_NOT_FOUND(HttpStatus.NOT_FOUND, "LOG-ERR-002", "스크린샷을 찾을 수 없습니다."),
 

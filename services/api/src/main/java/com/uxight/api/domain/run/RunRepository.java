@@ -29,6 +29,9 @@ public interface RunRepository extends JpaRepository<Run, Long> {
   /** 실험의 회차들 — 소유자를 가리지 않는다(관리자 회차 목록). 최초 회차가 아닌 runId 면 빈 목록. */
   List<Run> findByFirstRunIdOrderByIdAsc(Long firstRunId);
 
+  /** 실험에서 이 회차까지의 회차 수 = 몇 번째 회차인지. 다음 회차는 이전 회차 뒤에만 생겨 run_id 순서가 회차 순서다. */
+  long countByFirstRunIdAndIdLessThanEqual(Long firstRunId, Long runId);
+
   /** 본인 회차 하나. 남의 회차와 삭제한 프로젝트의 회차는 없는 것과 같다. */
   Optional<Run> findByIdAndProjectUserIdAndProjectDeletedAtIsNull(Long runId, Long userId);
 
