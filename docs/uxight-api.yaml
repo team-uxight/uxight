@@ -919,7 +919,9 @@ paths:
       tags: [진단 관리]
       operationId: getFindingStats
       summary: Friction Taxonomy 분포 조회
-      description: 실험 이력의 Friction Taxonomy 분포 그래프에 쓴다. 실험별 최초 회차의 진단을 집계하며, 최초 회차가 done이 아니면 집계하지 않는다.
+      description: |-
+        실험 이력의 Friction Taxonomy 분포 그래프에 쓴다. 실험별 최초 회차의 진단을 집계하며, 최초 회차가 done이 아니면 집계하지 않는다.
+        본인 프로젝트의 실험만 집계하고 삭제한 프로젝트는 제외한다. stats는 Taxonomy 4종을 항상 정의 순서로 담고, 진단이 없는 유형은 count가 0이다.
       responses:
         "200":
           description: 조회 성공
@@ -974,7 +976,12 @@ paths:
             type: integer
       responses:
         "200":
-          description: 스크린샷 이미지
+          description: 스크린샷 이미지. step 스크린샷과 같은 파일이며 한 번 저장되면 바뀌지 않아 본인 브라우저에 하루 캐시한다.
+          headers:
+            Cache-Control:
+              description: private, max-age=86400
+              schema:
+                type: string
           content:
             image/png:
               schema:
@@ -987,7 +994,7 @@ paths:
         "404":
           description: |-
             - FND-ERR-001: 진단이 없거나 본인 소유가 아님, 또는 진단의 회차가 done이 아님
-            - LOG-ERR-002: 근거 범위 밖의 step이거나 스크린샷이 없음
+            - LOG-ERR-002: 근거 범위 밖의 step이거나(근거에 없는 Persona 포함, 구간 양 끝은 범위 안) 스크린샷이 없음
           content:
             application/json:
               schema:
