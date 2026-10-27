@@ -61,6 +61,15 @@ public class Finding {
         .toList();
   }
 
+  /**
+   * 이 진단의 근거 범위에 Persona 의 step 이 들어 있는지(구간 양 끝 포함). 리서처에게는 근거에 해당하는 스크린샷만 열어 둔다 —
+   * 스크린샷 전체 조회는 관리자 기능이다.
+   */
+  public boolean coversStep(long personaId, int step) {
+    return evidenceList().stream()
+        .anyMatch(e -> e.personaId() == personaId && e.stepFrom() <= step && step <= e.stepTo());
+  }
+
   /** 근거 위치 하나 — 어느 Persona 의 어느 step 구간, 어느 URL 에서 검출됐는지. */
   public record Evidence(long personaId, int stepFrom, int stepTo, String url) {
   }
