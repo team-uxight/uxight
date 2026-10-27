@@ -1,0 +1,10 @@
+{"id": "T01", "input": {"task": "교내 장학금 종류와 신청 방법이 적힌 페이지를 찾는다"}, "label": {"ambiguous": false}}
+{"id": "T02", "input": {"task": "학생증 발급 방법을 찾는다"}, "label": {"ambiguous": false}}
+{"id": "T03", "input": {"task": "학교 오는 길을 대중교통 기준으로 찾는다"}, "label": {"ambiguous": false}}
+{"id": "T04", "input": {"task": "2026학년도 2학기 등록금 납부 기간을 찾는다"}, "label": {"ambiguous": false}}
+{"id": "T05", "input": {"task": "26학번 졸업 이수학점 기준표를 찾는다"}, "label": {"ambiguous": false}}
+{"id": "T06", "input": {"task": "학교 정보를 찾는다"}, "label": {"ambiguous": true}, "note": "무엇을 찾을지 없다"}
+{"id": "T07", "input": {"task": "전화번호를 찾는다"}, "label": {"ambiguous": true}, "note": "어느 부서인지 없다"}
+{"id": "T08", "input": {"task": "일정을 확인한다"}, "label": {"ambiguous": true}, "note": "학사 · 등록금 · 행사 중 무엇인지 없다"}
+{"id": "T09", "input": {"task": "졸업 학점을 찾는다"}, "label": {"ambiguous": true}, "note": "학번마다 기준표가 다르다"}
+{"id": "T10", "input": {"task": "장학금을 신청한다"}, "label": {"ambiguous": true}, "note": "신청은 상태를 바꾸는 행동 — 실험에서 할 수 없다"}
