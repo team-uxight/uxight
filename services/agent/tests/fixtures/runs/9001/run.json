@@ -1,0 +1,46 @@
+{
+  "run_id": 9001,
+  "max_steps": 15,
+  "task": {
+    "goal": "이번 학기 수강신청 기간 찾기",
+    "start_url": "https://school.example.com/kor/index.do",
+    "success_url": "https://school.example.com/kor/1081/subview.do"
+  },
+  "personas": [
+    {
+      "persona_id": 1,
+      "status": "done",
+      "steps": 3,
+      "started_at": "2026-10-27T20:00:01+09:00",
+      "finished_at": "2026-10-27T20:00:07+09:00"
+    },
+    {
+      "persona_id": 2,
+      "status": "done",
+      "steps": 12,
+      "started_at": "2026-10-27T20:00:02+09:00",
+      "finished_at": "2026-10-27T20:00:31+09:00"
+    },
+    {
+      "persona_id": 3,
+      "status": "done",
+      "steps": 7,
+      "started_at": "2026-10-27T20:00:03+09:00",
+      "finished_at": "2026-10-27T20:00:21+09:00"
+    },
+    {
+      "persona_id": 4,
+      "status": "max_steps",
+      "steps": 15,
+      "started_at": "2026-10-27T20:00:04+09:00",
+      "finished_at": "2026-10-27T20:01:42+09:00"
+    },
+    {
+      "persona_id": 5,
+      "status": "fail",
+      "steps": 5,
+      "started_at": "2026-10-27T20:00:05+09:00",
+      "finished_at": "2026-10-27T20:00:19+09:00"
+    }
+  ]
+}
