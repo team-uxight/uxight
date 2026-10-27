@@ -22,6 +22,8 @@ uxight:
     stale-after: PT30S
     interval: PT30S
   web-origin: ${WEB_ORIGIN:http://localhost:5173}
+  # agent 가 쓰는 회차 로그(<runId>/<personaId>/steps.jsonl · step-<n>.png)의 루트. compose 가 읽기 전용으로 마운트하는 곳
+  run-log-dir: ${RUN_LOG_DIR:/data/runs}
   auth:
     jwt-secret: ${JWT_SECRET:}       # HS256 키, 32바이트 이상. 비우면 기동마다 임의 키 (로컬 · 테스트용)
     access-token-ttl: 1h             # architecture §12 확정 (09/20)

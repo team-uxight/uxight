@@ -27,11 +27,17 @@ public enum ErrorCode {
   PROJECT_NOT_FOUND(HttpStatus.NOT_FOUND, "PRJ-ERR-001", "프로젝트를 찾을 수 없습니다."),
 
   EXPERIMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "EXP-ERR-001", "실험을 찾을 수 없습니다."),
+  RUN_NOT_FOUND(HttpStatus.NOT_FOUND, "EXP-ERR-002", "회차를 찾을 수 없습니다."),
   PERSONA_NOT_FOUND(HttpStatus.NOT_FOUND, "EXP-ERR-003", "Persona를 찾을 수 없습니다."),
   EXPERIMENT_IN_PROGRESS(HttpStatus.CONFLICT, "EXP-ERR-004", "프로젝트에 진행 중인 실험이 있습니다."),
   NOT_CANCELLABLE(HttpStatus.CONFLICT, "EXP-ERR-006", "취소할 수 있는 실험이 아닙니다."),
   SUCCESS_RULE_FAILED(HttpStatus.BAD_GATEWAY, "EXP-ERR-007", "성공 기준 생성에 실패했습니다."),
   SUCCESS_RULE_TIMEOUT(HttpStatus.GATEWAY_TIMEOUT, "EXP-ERR-008", "성공 기준 생성 시간이 초과되었습니다."),
+
+  FINDING_NOT_FOUND(HttpStatus.NOT_FOUND, "FND-ERR-001", "진단을 찾을 수 없습니다."),
+
+  STEP_LOG_NOT_FOUND(HttpStatus.NOT_FOUND, "LOG-ERR-001", "step 로그를 찾을 수 없습니다."),
+  SCREENSHOT_NOT_FOUND(HttpStatus.NOT_FOUND, "LOG-ERR-002", "스크린샷을 찾을 수 없습니다."),
 
   // HTTP 응답이 없는 오류 — 실험 요청 · 다음 회차 승인에 이미 201 을 응답한 뒤 생긴다. 예외로 던지지 않고 로그와
   // runs.dispatch_state 에만 남긴다(오류 파일은 추후). 전달하지 못한 회차는 재전송 스케줄러가 다시 보낸다 (8.4.1).
