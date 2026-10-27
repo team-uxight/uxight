@@ -22,15 +22,18 @@ class _FakeCompletions:
     def __init__(self, fail: bool = False) -> None:
         self.fail = fail
         self.calls: list[str] = []
+        self.kw: dict[str, object] = {}
 
     async def create(self, **kw: object) -> SimpleNamespace:
         self.calls.append("create")
+        self.kw = kw
         if self.fail:
             raise TimeoutError("boom")
         return _resp()
 
     async def parse(self, **kw: object) -> SimpleNamespace:
         self.calls.append("parse")
+        self.kw = kw
         return _resp(10, 5, 0)
 
 
@@ -67,6 +70,8 @@ def test_chat_records_success_and_failure(log) -> None:
     msgs = [{"role": "user", "content": "hi"}]
     asyncio.run(llm.chat(msgs, role="judge", max_tokens=200, response_format=dict))
     assert comp.calls == ["parse"]
+    # 추론 모델(Luna)은 max_tokens 를 400 으로 거절한다 — API 에는 max_completion_tokens 로 보낸다
+    assert comp.kw["max_completion_tokens"] == 200 and "max_tokens" not in comp.kw
 
     failing, _ = _client(fail=True)
     with pytest.raises(TimeoutError):

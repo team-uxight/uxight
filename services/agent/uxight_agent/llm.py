@@ -84,7 +84,10 @@ class LLMClient:
         start = time.monotonic()
         meta = {"role": role, "model": self.model, "run_id": run_id, "persona_id": persona_id}
         try:
-            resp = await call(model=self.model, messages=messages, max_tokens=max_tokens, **kwargs)
+            # Luna 같은 추론 모델은 max_tokens 를 400 으로 거절한다 — 같은 한도를 새 이름으로 보낸다
+            resp = await call(
+                model=self.model, messages=messages, max_completion_tokens=max_tokens, **kwargs
+            )
         except Exception as e:
             record_usage(None, latency_ms=_ms(start), error=type(e).__name__, **meta)
             raise
