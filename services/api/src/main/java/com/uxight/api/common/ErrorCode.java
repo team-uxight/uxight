@@ -39,6 +39,8 @@ public enum ErrorCode {
   IMPROVEMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "IMP-ERR-001", "개선안을 찾을 수 없습니다."),
   NOT_DECIDABLE(HttpStatus.CONFLICT, "IMP-ERR-002", "다음 회차를 승인하거나 반려할 수 없는 상태입니다."),
 
+  COMPARISON_NOT_READY(HttpStatus.CONFLICT, "CMP-ERR-001", "최초 회차가 완료되지 않아 결과가 없습니다."),
+
   STEP_LOG_NOT_FOUND(HttpStatus.NOT_FOUND, "LOG-ERR-001", "step 로그를 찾을 수 없습니다."),
   SCREENSHOT_NOT_FOUND(HttpStatus.NOT_FOUND, "LOG-ERR-002", "스크린샷을 찾을 수 없습니다."),
 
