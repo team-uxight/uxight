@@ -2,6 +2,7 @@ package com.uxight.api.domain.finding;
 
 import com.uxight.api.common.ApiException;
 import com.uxight.api.common.ErrorCode;
+import com.uxight.api.domain.improvement.ImprovementRepository;
 import com.uxight.api.domain.run.Run;
 import com.uxight.api.domain.run.RunRepository;
 import com.uxight.api.domain.run.RunStatus;
@@ -22,17 +23,17 @@ import java.util.Map;
 @Service
 public class FindingService {
 
-  // improvements 테이블은 개선안 기능에서 만든다 — 그 전까지 개선안은 없다('개선안 확인' 버튼이 꺼진다)
-  private static final int NO_IMPROVEMENTS_YET = 0;
-
   private final RunRepository runRepository;
   private final FindingRepository findingRepository;
+  private final ImprovementRepository improvementRepository;
   private final RunLogReader runLogReader;
 
   @Autowired
-  public FindingService(RunRepository runRepository, FindingRepository findingRepository, RunLogReader runLogReader) {
+  public FindingService(RunRepository runRepository, FindingRepository findingRepository,
+      ImprovementRepository improvementRepository, RunLogReader runLogReader) {
     this.runRepository = runRepository;
     this.findingRepository = findingRepository;
+    this.improvementRepository = improvementRepository;
     this.runLogReader = runLogReader;
   }
 
@@ -47,7 +48,7 @@ public class FindingService {
     // 다음 회차는 이전 회차가 끝나고 승인된 뒤에만 생기므로 run_id 순서가 회차 순서와 같다
     int round = (int) runRepository.countByFirstRunIdAndIdLessThanEqual(firstRunId, run.getId());
     FindingList.RoundInfo info = new FindingList.RoundInfo(firstRunId, round, run.getProject().getTitle(),
-        run.getTask().getGoal(), NO_IMPROVEMENTS_YET);
+        run.getTask().getGoal(), (int) improvementRepository.countByRunId(run.getId()));
     List<FindingList.Summary> findings = findingRepository.findByRunIdOrderByIdAsc(run.getId()).stream()
         .map(f -> new FindingList.Summary(f.getId(), f.getTaxonomy(), f.getSeverity(), f.getSummary()))
         .toList();

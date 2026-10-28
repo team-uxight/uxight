@@ -36,6 +36,9 @@ public enum ErrorCode {
 
   FINDING_NOT_FOUND(HttpStatus.NOT_FOUND, "FND-ERR-001", "진단을 찾을 수 없습니다."),
 
+  IMPROVEMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "IMP-ERR-001", "개선안을 찾을 수 없습니다."),
+  NOT_DECIDABLE(HttpStatus.CONFLICT, "IMP-ERR-002", "다음 회차를 승인하거나 반려할 수 없는 상태입니다."),
+
   STEP_LOG_NOT_FOUND(HttpStatus.NOT_FOUND, "LOG-ERR-001", "step 로그를 찾을 수 없습니다."),
   SCREENSHOT_NOT_FOUND(HttpStatus.NOT_FOUND, "LOG-ERR-002", "스크린샷을 찾을 수 없습니다."),
 
