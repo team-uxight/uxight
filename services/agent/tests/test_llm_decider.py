@@ -3,11 +3,13 @@
 import asyncio
 import json
 
+import httpx
 import pytest
+from openai import APITimeoutError
 from pydantic import ValidationError
 
 from uxight_agent.driver.base import ActionResult, Driver, Observation
-from uxight_agent.persona.llm_decider import LLMDecider
+from uxight_agent.persona.llm_decider import STEP_TIMEOUT_SECONDS, LLMDecider
 from uxight_agent.persona.persona_agent import PersonaAgent
 from uxight_agent.schemas import Action
 
@@ -24,6 +26,12 @@ UNKNOWN_FIELD = (
     '{"reasoning": "r", "action": {"kind": "click", "element_id": 3, "value": null, '
     '"url": "https://evil.example"}}'
 )
+
+
+def _reply(action: str) -> str:
+    return '{"reasoning": "r", "action": ' + action + "}"
+
+
 UNKNOWN_KIND = (
     '{"reasoning": "r", "action": {"kind": "navigate", "element_id": null, "value": "x"}}'
 )
@@ -56,9 +64,22 @@ def test_normal_reply_becomes_action(scripted_llm) -> None:
         (BROKEN, "PARSE_FAILED"),
         (UNKNOWN_FIELD, "INVALID_ACTION"),
         (UNKNOWN_KIND, "INVALID_ACTION"),
+        (_reply('{"kind": "click", "element_id": null, "value": null}'), "INVALID_ACTION"),
+        (_reply('{"kind": "type", "element_id": 3, "value": null}'), "INVALID_ACTION"),
+        (_reply('{"kind": "scroll", "element_id": null, "value": "left"}'), "INVALID_ACTION"),
         ((BROKEN, "length"), "PARSE_FAILED"),
+        ("<no choices>", "LLM_REQUEST_FAILED"),
     ],
-    ids=["broken-json", "unknown-field", "unknown-kind", "truncated"],
+    ids=[
+        "broken-json",
+        "unknown-field",
+        "unknown-kind",
+        "click-without-element",
+        "type-without-value",
+        "scroll-sideways",
+        "truncated",
+        "no-choices",
+    ],
 )
 def test_bad_reply_is_not_an_action(scripted_llm, content, code: str) -> None:
     llm, _ = scripted_llm(content)
@@ -67,7 +88,36 @@ def test_bad_reply_is_not_an_action(scripted_llm, content, code: str) -> None:
 
     assert decision.action is None
     assert decision.error_code == code
-    assert decision.reasoning is None
+    # 응답이 왔으면 쓴 토큰은 남는다.
+    if code != "LLM_REQUEST_FAILED":
+        assert (decision.prompt_tokens, decision.completion_tokens) == (11, 7)
+    # 스키마 밖이어도 JSON 으로 읽히면 reasoning 은 남긴다.
+    assert (decision.reasoning is not None) == (code == "INVALID_ACTION")
+
+
+def test_usage_is_logged_even_when_reply_is_broken(scripted_llm, tmp_path) -> None:
+    llm, _ = scripted_llm(BROKEN)
+
+    decide(llm)
+
+    row = json.loads((tmp_path / "llm-usage.jsonl").read_text(encoding="utf-8"))
+    assert (row["input_tokens"], row["output_tokens"], row["error"]) == (11, 7, None)
+
+
+def test_step_call_has_timeout() -> None:
+    class TimingOutLLM:
+        model = "m"
+
+        async def chat(self, messages, **kwargs):
+            self.kwargs = kwargs
+            raise APITimeoutError(request=httpx.Request("POST", "http://llm.test"))
+
+    llm = TimingOutLLM()
+
+    decision = decide(llm)
+
+    assert decision.error_code == "LLM_REQUEST_TIMEOUT"
+    assert llm.kwargs["timeout"] == STEP_TIMEOUT_SECONDS
 
 
 def test_llm_request_failure_is_recorded_not_raised(scripted_llm) -> None:

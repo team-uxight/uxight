@@ -9,7 +9,7 @@ from ..db import settings
 from ..driver.dom_driver import DomDriver
 from ..guard.domain import allowed_hosts
 from ..llm import LLMClient
-from ..persona.llm_decider import LLMDecider
+from ..persona.llm_decider import STEP_MAX_RETRIES, LLMDecider
 from ..persona.persona_agent import Decider, PersonaAgent, StepResult
 from ..repositories.audit_log_repository import audit_log_repository
 from ..repositories.run_persona_repository import PersonaOutcome, run_persona_repository
@@ -39,10 +39,9 @@ BROWSER_CLOSE_TIMEOUT_SECONDS = 5
 # 곱해져 RAM 상한이 무너진다 (architecture §3.1). 모든 회차의 Persona 가 이 자리를 나눠 쓴다.
 persona_slots = asyncio.Semaphore(settings.max_concurrent_personas)
 
-# 행동을 얻지 못한 step(파싱 실패 · 스키마 밖)이 이만큼 이어지면 Persona 를 실패로 끝낸다
-# (행동 로그 명세 2절 · architecture §5).
-MAX_CONSECUTIVE_PARSE_FAILURES = 3
-PARSE_FAILURE_CODES = ("PARSE_FAILED", "INVALID_ACTION")
+# 행동을 얻지 못한 step(파싱 실패 · 스키마 밖 · LLM 호출 실패)이 이만큼 이어지면 Persona 를
+# 실패로 끝낸다 (행동 로그 명세 2절 · architecture §5). 키가 만료돼도 max_steps 까지 헛돌지 않게.
+MAX_CONSECUTIVE_NO_ACTION = 3
 
 # 실행하지 않은 step 의 오류 코드 → 차단 사유 (행동 로그 명세 3.5 · 3.8).
 # LLM 호출 실패(LLM_REQUEST_*)는 차단이 아니다.
@@ -55,17 +54,22 @@ BLOCK_REASONS = {
 # type 행동의 입력값은 로그에 이 글자로만 남긴다 (GACA-154).
 MASKED_TEXT = "***"
 
-# LLM 클라이언트는 첫 회차에서 만든다 — LLM 설정(env)이 없는 테스트 · 도구도 이 모듈을 불러오게.
-# 프로세스 안 모든 Persona 가 연결 하나를 나눠 쓴다.
+# LLM 클라이언트는 첫 회차를 수락할 때 만든다 — LLM 설정(env)이 없는 테스트 · 도구도 이 모듈을
+# 불러오게. 프로세스 안 모든 Persona 가 연결 하나를 나눠 쓴다.
 _llm: LLMClient | None = None
+
+
+def llm_client() -> LLMClient:
+    """LLM 설정(LLM_BASE_URL · LLM_API_KEY · LLM_MODEL)이 비면 KeyError."""
+    global _llm
+    if _llm is None:
+        _llm = LLMClient(max_retries=STEP_MAX_RETRIES)
+    return _llm
 
 
 def make_decider(run_id: int) -> Decider:
     """Persona 하나의 판단기. 테스트는 이 함수를 바꿔 끼워 LLM 없이 돈다."""
-    global _llm
-    if _llm is None:
-        _llm = LLMClient()
-    return LLMDecider(_llm, run_id=run_id)
+    return LLMDecider(llm_client(), run_id=run_id)
 
 
 class RunOrchestrator:
@@ -88,6 +92,16 @@ class RunOrchestrator:
                     for persona in snapshot.personas
                 },
             )
+            # LLM 설정이 없으면 브라우저를 띄우기 전에 회차를 마감한다 — 띄운 뒤 모든 Persona 가
+            # 까닭 없이 fail 로 끝나지 않게.
+            try:
+                llm_client()
+            except KeyError:
+                logger.error(
+                    "run=%s LLM settings missing (LLM_BASE_URL, LLM_API_KEY, LLM_MODEL)", run_id
+                )
+                self._fail_run(run_id, error="LLM 설정 없음")
+                return None
         except Exception as exc:
             # 수락한 회차를 accepted · running 으로 남기지 않는다. 호출한 쪽은 None 을 받아
             # failed 상태를 200 으로 응답한다. 예외 문구(SQL · DB 주소)는 로그에만 남긴다.
@@ -350,7 +364,7 @@ class RunOrchestrator:
                     logger.info("run=%s persona=%s 브라우저 시작 중단", run_id, persona_id)
                     return "cancelled"
                 agent = PersonaAgent(persona, task, driver, make_decider(run_id), hosts)
-                parse_failures = 0
+                no_action = 0
                 # 한 스텝 = observe → decide(LLM 1회) → act.
                 # Agent 가 done 을 내거나 max_steps 에 도달하면 종료.
                 for step_no in range(1, max_steps + 1):
@@ -415,18 +429,16 @@ class RunOrchestrator:
                         )
                         cancel_event.set()  # 같은 런의 다른 페르소나도 멈추게 한다.
                         return "cancelled"
-                    if step.result.error_code in PARSE_FAILURE_CODES:
-                        parse_failures += 1
-                        if parse_failures >= MAX_CONSECUTIVE_PARSE_FAILURES:
-                            logger.warning(
-                                "run=%s persona=%s %s consecutive parse failures",
-                                run_id,
-                                persona_id,
-                                parse_failures,
-                            )
-                            return "fail"
-                    else:
-                        parse_failures = 0
+                    no_action = no_action + 1 if step.action is None else 0
+                    if no_action >= MAX_CONSECUTIVE_NO_ACTION:
+                        logger.warning(
+                            "run=%s persona=%s %s consecutive steps without action (last %s)",
+                            run_id,
+                            persona_id,
+                            no_action,
+                            step.result.error_code,
+                        )
+                        return "fail"
                     if step.action is not None and step.action.kind == "done":
                         # Agent 가 스스로 과업 완료를 선언했다 = 성공 (메인 판정 기준, D21).
                         return "done"

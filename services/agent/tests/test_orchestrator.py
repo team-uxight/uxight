@@ -535,7 +535,7 @@ def parse_failure(code: str = "PARSE_FAILED") -> Decision:
     return Decision(None, error_code=code, error="Action JSON parsing failed")
 
 
-def test_three_consecutive_parse_failures_fail_persona(
+def test_three_consecutive_steps_without_action_fail_persona(
     fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # 성공한 step 이 끼면 다시 센다. 2 + (성공 1) + 3 → 6번째 step 에서 실패로 끝난다.
@@ -546,8 +546,8 @@ def test_three_consecutive_parse_failures_fail_persona(
             parse_failure("INVALID_ACTION"),
             Decision(Action(kind="scroll", value="down")),
             parse_failure(),
-            parse_failure("INVALID_ACTION"),
-            parse_failure(),
+            parse_failure("LLM_REQUEST_FAILED"),  # LLM 호출 실패도 센다 (키 만료 등)
+            parse_failure("LLM_REQUEST_TIMEOUT"),
         ),
     )
     snap = snapshot([persona(1)], max_steps=20)
