@@ -288,6 +288,19 @@ export type AuditLog = {
 	ts: string;
 };
 
+export type AdminExperiment = {
+	firstRunId: number;
+	projectTitle: string;
+	projectDeleted: boolean;
+	ownerEmail: string;
+	taskGoal: string;
+	mode: string;
+	round: number;
+	status: 'queued' | 'accepted' | 'running' | 'done' | 'failed' | 'cancelled';
+	createdAt: string;
+	finishedAt: string | null;
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null;
 }
@@ -354,6 +367,63 @@ export async function getAuditLogs(from: string, to: string, page = 0, size = 20
 			throw new Error('서버에서 올바르지 않은 감사 로그를 받았습니다.');
 		}
 		return { auditLogId: item.auditLogId, actor: item.actor, action: item.action, target: item.target, ts: item.ts };
+	});
+
+	return { content, page: body.page, size: body.size, totalElements: body.totalElements, totalPages: body.totalPages };
+}
+
+export async function getAdminExperiments(page = 0, size = 20): Promise<PageResponse<AdminExperiment>> {
+	const response = await authenticatedFetch(`${API_BASE_URL}/api/admin/runs?page=${page}&size=${size}`);
+	if (!response.ok) {
+		throw new Error(await apiErrorMessage(response, '최근 실행 목록을 불러오지 못했습니다.'));
+	}
+
+	const body: unknown = await response.json();
+	if (
+		!isRecord(body) ||
+		!Array.isArray(body.content) ||
+		typeof body.page !== 'number' ||
+		typeof body.size !== 'number' ||
+		typeof body.totalElements !== 'number' ||
+		typeof body.totalPages !== 'number'
+	) {
+		throw new Error('서버에서 올바르지 않은 최근 실행 목록을 받았습니다.');
+	}
+
+	const content = body.content.map((item): AdminExperiment => {
+		if (
+			!isRecord(item) ||
+			typeof item.firstRunId !== 'number' ||
+			typeof item.projectTitle !== 'string' ||
+			typeof item.projectDeleted !== 'boolean' ||
+			typeof item.ownerEmail !== 'string' ||
+			typeof item.taskGoal !== 'string' ||
+			typeof item.mode !== 'string' ||
+			typeof item.round !== 'number' ||
+			(item.status !== 'queued' &&
+				item.status !== 'accepted' &&
+				item.status !== 'running' &&
+				item.status !== 'done' &&
+				item.status !== 'failed' &&
+				item.status !== 'cancelled') ||
+			typeof item.createdAt !== 'string' ||
+			(item.finishedAt !== null && typeof item.finishedAt !== 'string')
+		) {
+			throw new Error('서버에서 올바르지 않은 실행 정보를 받았습니다.');
+		}
+
+		return {
+			firstRunId: item.firstRunId,
+			projectTitle: item.projectTitle,
+			projectDeleted: item.projectDeleted,
+			ownerEmail: item.ownerEmail,
+			taskGoal: item.taskGoal,
+			mode: item.mode,
+			round: item.round,
+			status: item.status,
+			createdAt: item.createdAt,
+			finishedAt: item.finishedAt,
+		};
 	});
 
 	return { content, page: body.page, size: body.size, totalElements: body.totalElements, totalPages: body.totalPages };
