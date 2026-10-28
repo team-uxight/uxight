@@ -3,7 +3,8 @@ name: deploy-dev
 # dev 서버(팀 전용) 자동 배포 — develop · fe 에 push 한 CI 가 성공하면, 서버가 따르는 브랜치를 다시 받아 빌드한다.
 # CI 가 실패한 push(테스트 · DB 마이그레이션이 깨진 것)는 배포하지 않는다. PR 의 CI 로는 배포하지 않는다.
 # 서버가 어느 브랜치를 따르는지는 서버 쪽 설정이 정한다 (지금 fe, FE 가 develop 에 병합되면 develop).
-# 그 브랜치에 새 커밋이 없으면 서버가 배포를 건너뛴다. Actions 탭의 Run workflow 는 새 커밋이 없어도 다시 빌드한다.
+# 서버에는 CI 가 통과한 브랜치 · 커밋을 넘긴다. 서버는 자기가 따르는 브랜치일 때만 그 커밋을 빌드하고, 아니면 건너뛴다(10/29 —
+# 10/28 develop push 가 CI 를 못 통과한 fe 커밋을 빌드하다 실패했다). Actions 탭의 Run workflow 는 새 커밋이 없어도 다시 빌드한다.
 # 키는 서버의 배포 스크립트 하나만 돌릴 수 있는 전용 키다.
 # 결과(배포됨 · 건너뜀 · CI 실패 · 배포 실패)는 Slack 으로 알린다 — PR · 바뀐 곳 · 서버 상태 · 버튼(.github/scripts/deploy-notify.sh).
 # 시크릿 SLACK_WEBHOOK_URL 이 없으면 알리지 않는다.
@@ -32,6 +33,7 @@ jobs:
       result: ${{ steps.deploy.outputs.result }}
       services: ${{ steps.deploy.outputs.services }}
       seconds: ${{ steps.deploy.outputs.seconds }}
+      failed: ${{ steps.deploy.outputs.failed }}
     steps:
       - name: dev 서버에 배포
         id: deploy
@@ -39,7 +41,9 @@ jobs:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
-          FORCE: ${{ github.event_name == 'workflow_dispatch' && ' force' || '' }}
+          FORCE: ${{ github.event_name == 'workflow_dispatch' && 'force' || '' }}
+          CI_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          CI_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -o pipefail   # tee 가 ssh 실패를 가리지 않게
           install -m 700 -d ~/.ssh
@@ -47,12 +51,17 @@ jobs:
           chmod 600 ~/.ssh/deploy
           printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
           start=$(date +%s)
-          ssh -i ~/.ssh/deploy -o BatchMode=yes -o ServerAliveInterval=30 "ubuntu@$DEPLOY_HOST" "deploy$FORCE" | tee out.txt
-          {
+          # 손 배포는 force, 자동 배포는 CI 가 통과한 브랜치와 커밋. 값은 서버가 다시 검사한다
+          if [ -n "$FORCE" ]; then args="deploy force"; else args="deploy $CI_BRANCH $CI_SHA"; fi
+          rc=0
+          ssh -i ~/.ssh/deploy -o BatchMode=yes -o ServerAliveInterval=30 "ubuntu@$DEPLOY_HOST" "$args" | tee out.txt || rc=$?
+          {   # 실패해도 결과 줄을 남긴다 — 알림이 어느 커밋 · 서비스에서 멈췄는지 보여 준다
             echo "result=$(sed -n 's/^DEPLOY_RESULT=//p' out.txt | tail -1)"
             echo "services=$(sed -n 's/^DEPLOY_SERVICES=//p' out.txt | tail -1)"
+            echo "failed=$(sed -n 's/^DEPLOY_FAILED=//p' out.txt | tail -1)"
             echo "seconds=$(( $(date +%s) - start ))"
           } >> "$GITHUB_OUTPUT"
+          exit "$rc"
 
   notify:
     needs: deploy
@@ -89,5 +98,6 @@ jobs:
           RESULT: ${{ needs.deploy.outputs.result }}
           SERVICES: ${{ needs.deploy.outputs.services }}
           SECONDS_TAKEN: ${{ needs.deploy.outputs.seconds }}
+          FAILED_SERVICE: ${{ needs.deploy.outputs.failed }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: bash .github/scripts/deploy-notify.sh
