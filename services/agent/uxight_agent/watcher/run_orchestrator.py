@@ -49,7 +49,10 @@ BLOCK_REASONS = {
     "PARSE_FAILED": "parse_failed",
     "INVALID_ACTION": "schema",
     "DOMAIN_BLOCKED": "domain",
+    "DESTRUCTIVE_ACTION_BLOCKED": "destructive",
 }
+# 가드가 막은 step — step 로그와 함께 감사 로그에도 남긴다 (architecture §9 L1 · L6).
+GUARD_BLOCK_CODES = ("DOMAIN_BLOCKED", "DESTRUCTIVE_ACTION_BLOCKED")
 
 # type 행동의 입력값은 로그에 이 글자로만 남긴다 (GACA-154).
 MASKED_TEXT = "***"
@@ -395,18 +398,18 @@ class RunOrchestrator:
                         ),
                     )
                     run_persona_repository.increment_steps(run_id, persona_id)
-                    if step.result.error_code == "DOMAIN_BLOCKED":
-                        # 차단은 step 로그와 감사 로그에 같이 남긴다 (architecture §9 L1 · L6).
+                    if step.result.error_code in GUARD_BLOCK_CODES:
                         audit_log_repository.add_blocked_action(
                             run_id,
                             persona_id,
                             {
                                 "persona_id": persona_id,
                                 "step": step_no,
-                                "reason": "domain",
+                                "reason": BLOCK_REASONS[step.result.error_code],
                                 "action": _action_log(step.action),
                                 "url": step.observation.url,
                                 "destination": step.result.destination,
+                                "error": step.result.error,
                             },
                         )
                     logger.info(

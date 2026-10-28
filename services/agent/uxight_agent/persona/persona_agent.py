@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from ..driver.base import ActionResult, Driver, Observation
+from ..guard.destructive import destructive_reason
 from ..guard.domain import blocked_destination, safe_destination
 from ..schemas import Action
 
@@ -88,6 +89,13 @@ class PersonaAgent:
                 error=f"Action blocked by domain policy: {safe}",
                 error_code="DOMAIN_BLOCKED",
                 destination=safe,
+            )
+        elif reason := destructive_reason(decision.action, observation):
+            # 되돌릴 수 없는 행동 — 마지막 클릭 직전에 막는다. 페이지는 그대로다.
+            result = ActionResult(
+                ok=False,
+                error=f"Action blocked as destructive: {reason}",
+                error_code="DESTRUCTIVE_ACTION_BLOCKED",
             )
         else:
             act_start = time.monotonic()

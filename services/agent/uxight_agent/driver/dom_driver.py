@@ -146,6 +146,10 @@ _COLLECT_ELEMENTS_JS = """
       // SVG 의 <a> 는 href 가 문자열이 아니다 (SVGAnimatedString) — 문서 주소에 대해 풀어 쓴다.
       url: typeof el.href === 'string' ? el.href
         : el.href?.baseVal ? new URL(el.href.baseVal, document.baseURI).href : null,
+      // 이 요소가 보내는 폼의 method (파괴적 행동 가드가 POST 제출을 막는 데 쓴다).
+      form_method: el.form
+        ? (el.getAttribute('formmethod') || el.form.getAttribute('method') || 'get').toLowerCase()
+        : null,
       options: tag === 'select'
         ? Array.from(el.options).map(o => ({ value: o.value, text: o.text.trim() }))
         : null,

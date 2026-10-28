@@ -99,6 +99,8 @@ def _history_text(history: list) -> str:
             outcome = "성공"
         elif step.result.error_code == "DOMAIN_BLOCKED":
             outcome = "차단됨 (허용 도메인 밖 링크)"
+        elif step.result.error_code == "DESTRUCTIVE_ACTION_BLOCKED":
+            outcome = "차단됨 (되돌릴 수 없는 행동)"
         else:
             outcome = "실패"
         lines.append(f"- {number}번째: {did} → {outcome}")

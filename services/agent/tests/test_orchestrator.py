@@ -600,3 +600,41 @@ def test_outside_link_click_is_blocked_logged_and_audited(
     assert detail["step"] == 1
     assert detail["destination"] == "https://evil.example/"
     assert isinstance(detail, dict)
+
+
+def test_destructive_click_is_blocked_and_audited(
+    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    acted: list[Action] = []
+
+    class ButtonPageDriver(Driver):
+        async def start(self, url: str) -> None:
+            pass
+
+        async def observe(self) -> Observation:
+            element = {"tag": "button", "type": "button", "text": "회원 탈퇴"}
+            return Observation(
+                url="https://example.com/", title="t", dom="", element_map={1: element}
+            )
+
+        async def act(self, action: Action) -> ActionResult:
+            acted.append(action)
+            return ActionResult(ok=True)
+
+        async def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(orchestrator_module, "DomDriver", ButtonPageDriver)
+    use_decider(
+        monkeypatch,
+        ScriptedDecider(
+            Decision(Action(kind="click", element_id=1)), Decision(Action(kind="done"))
+        ),
+    )
+
+    asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)], max_steps=5)))
+
+    assert acted == [Action(kind="done")]
+    ((_, _, detail),) = fakes.audits.rows
+    assert detail["reason"] == "destructive"
+    assert "탈퇴" in detail["error"]
