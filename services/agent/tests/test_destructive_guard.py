@@ -77,3 +77,25 @@ def test_blocked_click_leaves_page_untouched(fixture_server: str) -> None:
     assert "탈퇴" in step.result.error
     assert step.browser_ms == 0
     assert (title, page_url) == ("버튼", url)  # onclick 이 돌지 않았다
+
+
+def test_hidden_names_and_paths_are_checked(fixture_server: str) -> None:
+    observation = _observe(f"{fixture_server}/destructive_bypass.html")
+    verdicts = [
+        (
+            item["text"],
+            item.get("hint"),
+            destructive_reason(Action(kind="click", element_id=i), observation),
+        )
+        for i, item in observation.element_map.items()
+    ]
+    by_text = {text or hint: reason for text, hint, reason in verdicts}
+
+    assert by_text["삭제"] is not None  # 글 없는 링크 안 img alt (+ 경로 delete)
+    assert by_text["🗑"] is not None  # 보이는 글은 아이콘, aria-label '계정 삭제'
+    assert by_text["나가기"] is not None  # title '회원탈퇴'
+    assert by_text["글 정리"] == "path 'remove'"
+    assert by_text["검색"] is None  # POST 폼이어도 검색 버튼은 막지 않는다
+    assert by_text["구매입찰"] is None  # 다른 쪽으로 가는 메뉴 링크의 명사는 걸지 않는다
+    # 한계(docstring): POST 폼 안 스크립트 제출 링크는 글로만 본다.
+    assert by_text["확인"] is None

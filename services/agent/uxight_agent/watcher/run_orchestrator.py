@@ -107,13 +107,13 @@ class RunOrchestrator:
                     for persona in snapshot.personas
                 },
             )
-            # LLM 설정이 없으면 브라우저를 띄우기 전에 회차를 마감한다 — 띄운 뒤 모든 Persona 가
-            # 까닭 없이 fail 로 끝나지 않게.
             if (left := run_repository.daily_tokens_left()) is not None and left <= 0:
                 # 하루 예산을 다 썼으면 새 회차를 시작하지 않는다 (V4__policies.sql).
                 logger.warning("run=%s daily token budget spent, closing as failed", run_id)
                 self._fail_run(run_id, error="하루 토큰 예산 초과")
                 return None
+            # LLM 설정이 없으면 브라우저를 띄우기 전에 회차를 마감한다 — 띄운 뒤 모든 Persona 가
+            # 까닭 없이 fail 로 끝나지 않게.
             try:
                 llm_client()
             except KeyError:
@@ -391,6 +391,8 @@ class RunOrchestrator:
                 # Agent 가 done 을 내거나 max_steps 에 도달하면 종료.
                 for step_no in range(1, max_steps + 1):
                     # LLM 을 부르기 전에 토큰 한도를 본다. 넘었으면 이 Persona 를 끝낸다.
+                    # 동시에 도는 Persona 가 각자 step 하나씩 더 쓸 수 있어, 실제 사용량은 상한을
+                    # (동시 Persona 수 × step 하나 토큰)만큼 넘을 수 있다.
                     if limit := self._token_limit_reached(run_id):
                         logger.warning(
                             "run=%s persona=%s token limit reached: %s", run_id, persona_id, limit

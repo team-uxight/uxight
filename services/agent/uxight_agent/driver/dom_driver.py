@@ -146,10 +146,16 @@ _COLLECT_ELEMENTS_JS = """
       // SVG 의 <a> 는 href 가 문자열이 아니다 (SVGAnimatedString) — 문서 주소에 대해 풀어 쓴다.
       url: typeof el.href === 'string' ? el.href
         : el.href?.baseVal ? new URL(el.href.baseVal, document.baseURI).href : null,
-      // 이 요소가 보내는 폼의 method (파괴적 행동 가드가 POST 제출을 막는 데 쓴다).
+      // 이 요소가 보내는 폼의 method · action (파괴적 행동 가드가 POST 제출 · action 경로를 본다).
       form_method: el.form
         ? (el.getAttribute('formmethod') || el.form.getAttribute('method') || 'get').toLowerCase()
         : null,
+      form_action: el.form ? (el.getAttribute('formaction') || el.form.action) : null,
+      role: el.getAttribute('role'),
+      // 글 대신 붙인 이름(aria-label · title · 안의 img alt). 관측 글에는 넣지 않고 가드만 본다.
+      hint: [el.getAttribute('aria-label'), el.getAttribute('title'),
+        ...Array.from(el.querySelectorAll('img[alt]'), (img) => img.alt)]
+        .filter(Boolean).join(' ').slice(0, maxValueLength),
       options: tag === 'select'
         ? Array.from(el.options).map(o => ({ value: o.value, text: o.text.trim() }))
         : null,
