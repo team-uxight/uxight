@@ -1,8 +1,8 @@
 import asyncio
 import contextlib
+import hashlib
 import logging
 from collections.abc import AsyncIterator, Awaitable
-from dataclasses import asdict
 from typing import Literal, TypeVar
 
 from ..db import settings
@@ -14,6 +14,7 @@ from ..persona.persona_agent import Decider, PersonaAgent, StepResult
 from ..repositories.audit_log_repository import audit_log_repository
 from ..repositories.run_persona_repository import PersonaOutcome, run_persona_repository
 from ..repositories.run_repository import RunSnapshot, run_repository
+from ..schemas import Action
 from .step_log_writer import step_log_writer
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,17 @@ persona_slots = asyncio.Semaphore(settings.max_concurrent_personas)
 # (행동 로그 명세 2절 · architecture §5).
 MAX_CONSECUTIVE_PARSE_FAILURES = 3
 PARSE_FAILURE_CODES = ("PARSE_FAILED", "INVALID_ACTION")
+
+# 실행하지 않은 step 의 오류 코드 → 차단 사유 (행동 로그 명세 3.5 · 3.8).
+# LLM 호출 실패(LLM_REQUEST_*)는 차단이 아니다.
+BLOCK_REASONS = {
+    "PARSE_FAILED": "parse_failed",
+    "INVALID_ACTION": "schema",
+    "DOMAIN_BLOCKED": "domain",
+}
+
+# type 행동의 입력값은 로그에 이 글자로만 남긴다 (GACA-154).
+MASKED_TEXT = "***"
 
 # LLM 클라이언트는 첫 회차에서 만든다 — LLM 설정(env)이 없는 테스트 · 도구도 이 모듈을 불러오게.
 # 프로세스 안 모든 Persona 가 연결 하나를 나눠 쓴다.
@@ -353,8 +365,18 @@ class RunOrchestrator:
                         return "cancelled"
                     # 페르소나가 넘겨준 스텝 결과를 즉시 한 줄로 남긴다.
                     # 도중에 죽어도 그때까지의 스텝은 남는다.
+                    # 화면 그림을 먼저 쓰고 그다음 로그 줄을 쓴다 (행동 로그 명세 2절).
+                    screenshot = None
+                    if step.observation.screenshot is not None:
+                        screenshot = step_log_writer.write_screenshot(
+                            run_id, persona_id, step_no, step.observation.screenshot
+                        )
                     step_log_writer.append(
-                        run_id, persona_id, self._to_step_log(run_id, persona_id, step_no, step)
+                        run_id,
+                        persona_id,
+                        self._to_step_log(
+                            run_id, persona_id, step_no, step, task, driver.mode, screenshot
+                        ),
                     )
                     run_persona_repository.increment_steps(run_id, persona_id)
                     if step.result.error_code == "DOMAIN_BLOCKED":
@@ -366,19 +388,20 @@ class RunOrchestrator:
                                 "persona_id": persona_id,
                                 "step": step_no,
                                 "reason": "domain",
-                                "action": step.action.model_dump(),
+                                "action": _action_log(step.action),
                                 "url": step.observation.url,
                                 "error": step.result.error,
                             },
                         )
                     logger.info(
-                        "run=%s persona=%s step=%s url=%s action=%r result=%s",
+                        "run=%s persona=%s step=%s url=%s action=%s ok=%s error_code=%s",
                         run_id,
                         persona_id,
                         step_no,
                         step.observation.url,
-                        step.action,
-                        step.result,
+                        _action_log(step.action),
+                        step.result.ok,
+                        step.result.error_code,
                     )
                     # 취소 확인은 로그 저장 이후에 한다. 취소 이전 스텝의 로그를 보존하기 위해서다.
                     if run_repository.is_cancel_requested(run_id):
@@ -461,24 +484,69 @@ class RunOrchestrator:
         return False, None
 
     @staticmethod
-    def _to_step_log(run_id: int, persona_id: int, step_no: int, step: StepResult) -> dict:
-        # 로그 스키마는 미확정. DOM 전문은 크기가 커서 넣지 않고 요소 수와 행동 대상 요소만 남긴다.
-        target = step.observation.element_map.get(step.action.element_id) if step.action else None
+    def _to_step_log(
+        run_id: int,
+        persona_id: int,
+        step_no: int,
+        step: StepResult,
+        task: dict,
+        mode: str,
+        screenshot: str | None,
+    ) -> dict:
+        """step 하나를 행동 로그 명세(3절)의 14칸으로. 값이 없는 칸도 null 로 쓴다."""
+        decision = step.decision
+        error_code = step.result.error_code
+        if not step.result.ok and error_code is None:
+            error_code = "BROWSER_ACTION_FAILED"  # 드라이버가 따로 나누지 않은 브라우저 실패
+        url_after = step.result.url_after or step.observation.url
+        success_url = task.get("success_url")
         return {
             "run_id": run_id,
             "persona_id": persona_id,
             "step": step_no,
-            "started_at": step.started_at.isoformat(timespec="milliseconds"),
-            "finished_at": step.finished_at.isoformat(timespec="milliseconds"),
+            "ts": step.finished_at.isoformat(timespec="milliseconds"),
             "url": step.observation.url,
-            "title": step.observation.title,
-            "element_count": len(step.observation.element_map),
-            "action": step.action.model_dump() if step.action else None,
-            "target": {key: target.get(key) for key in ("tag", "type", "text", "href")}
-            if target
-            else None,
-            "result": asdict(step.result),
+            "observation": {
+                "mode": mode,
+                "screenshot": screenshot,
+                # 같은 화면이면 같은 값 — 화면 반복 탐지용. 관측 글(요소 줄) 전체로 만든다.
+                "elements_hash": hashlib.sha256(step.observation.dom.encode()).hexdigest()[:16],
+                "element_count": len(step.observation.element_map),
+            },
+            "reasoning": decision.reasoning,
+            "action": _action_log(step.action),
+            "result": {
+                "ok": step.result.ok,
+                "url_after": url_after,
+                "error": step.result.error,
+                "error_code": error_code,
+            },
+            "blocked": {"is": error_code in BLOCK_REASONS, "reason": BLOCK_REASONS.get(error_code)},
+            "latency_ms": {"llm": decision.llm_ms, "browser": step.browser_ms},
+            "tokens": {"prompt": decision.prompt_tokens, "completion": decision.completion_tokens},
+            "model": decision.model,
+            "task": {"url_reached": _same_url(url_after, success_url) if success_url else None},
         }
+
+
+def _action_log(action: Action | None) -> dict | None:
+    """행동을 로그 모양(kind · target · text · direction)으로. type 의 입력값은 가린다."""
+    if action is None:
+        return None
+    return {
+        "kind": action.kind,
+        "target": action.element_id if action.kind in ("click", "type") else None,
+        "text": MASKED_TEXT if action.kind == "type" and action.value is not None else None,
+        "direction": action.value if action.kind == "scroll" else None,
+    }
+
+
+def _same_url(url: str, success_url: str) -> bool:
+    # 조각(#…)과 끝의 / 는 같은 페이지로 본다.
+    def normalize(value: str) -> str:
+        return value.split("#", 1)[0].rstrip("/")
+
+    return normalize(url) == normalize(success_url)
 
 
 run_orchestrator = RunOrchestrator()

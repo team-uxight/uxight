@@ -1,7 +1,9 @@
+import dataclasses
 import json
 import re
 
 from playwright.async_api import Browser, Page, Playwright, async_playwright
+from playwright.async_api import Error as PlaywrightError
 
 from ..schemas import Action
 from .base import ActionResult, Driver, Observation
@@ -9,6 +11,17 @@ from .base import ActionResult, Driver, Observation
 NAVIGATION_TIMEOUT_MS = 15_000
 ACTION_TIMEOUT_MS = 5_000
 ID_ATTRIBUTE = "data-ux-id"
+
+# 화면 그림에서 값을 가릴 입력칸. 버튼 · 체크 계열 input 은 보이는 값이 사용자 입력이 아니라서 뺀다.
+MASK_SELECTOR = (
+    "textarea, input:not([type=submit]):not([type=button]):not([type=reset])"
+    ":not([type=image]):not([type=checkbox]):not([type=radio])"
+)
+# 가림 막 색. 블러가 아니라 단색이다 — 블러는 큰 글자를 가리지 못한다 (SomDriver 와 같은 색).
+MASK_COLOR = "#9e9e9e"
+# 스크린샷 한 장의 상한. 찍는 중 문서가 바뀌면 Playwright 기본값(30초)까지 멈춰
+# Persona 시간을 먹는다.
+SCREENSHOT_TIMEOUT_MS = 5_000
 
 # 관측에서 뺄 "사람 눈에 안 보이는" 글의 기준값 (관측 정제 L0.5, agent-safety §2.2 #4).
 # 요소가 아니라 글(글 조각 · 버튼 value · placeholder)에만 적용한다 — 투명 select를 씌운 드롭다운
@@ -158,6 +171,23 @@ class DomDriver(Driver):
         await self._page.goto(url, wait_until="domcontentloaded", timeout=NAVIGATION_TIMEOUT_MS)
 
     async def observe(self) -> Observation:
+        observation = await self._observe_page()
+        # step 로그용 화면 그림 (모델에는 글 관측만 간다). 입력칸은 단색 막으로 가린 채 찍는다.
+        # 찍지 못하면 그림 없이 진행한다 — 그 step 로그의 screenshot 은 null 이다.
+        page = self._require_page()
+        try:
+            screenshot = await page.screenshot(
+                mask=[page.locator(MASK_SELECTOR)],
+                mask_color=MASK_COLOR,
+                caret="initial",
+                timeout=SCREENSHOT_TIMEOUT_MS,
+            )
+        except PlaywrightError:
+            screenshot = None
+        return dataclasses.replace(observation, screenshot=screenshot)
+
+    async def _observe_page(self) -> Observation:
+        """요소 목록만 관측한다 (화면 그림 없음)."""
         page = self._require_page()
         items = await self._collect_elements(page)
         self._element_map = {item["id"]: item for item in items}
@@ -171,10 +201,12 @@ class DomDriver(Driver):
     async def act(self, action: Action) -> ActionResult:
         # 요구사항: 실패 시 예외 대신 결과를 반환한다. 어떤 예외든 여기서 결과로 바꾼다.
         try:
-            return await self._perform(action)
+            result = await self._perform(action)
         except Exception as e:
             first_line = str(e).splitlines()[0] if str(e) else ""
-            return ActionResult(ok=False, error=f"{type(e).__name__}: {first_line}")
+            result = ActionResult(ok=False, error=f"{type(e).__name__}: {first_line}")
+        # 행동 뒤 주소 (step 로그 result.url_after).
+        return dataclasses.replace(result, url_after=self._page.url if self._page else None)
 
     async def close(self) -> None:
         if self._browser is not None:
@@ -226,7 +258,11 @@ class DomDriver(Driver):
             return ActionResult(ok=True)
 
         if action.element_id not in self._element_map:
-            return ActionResult(ok=False, error=f"element_map에 없는 요소 ID: {action.element_id}")
+            return ActionResult(
+                ok=False,
+                error=f"element_map에 없는 요소 ID: {action.element_id}",
+                error_code="ELEMENT_NOT_FOUND",
+            )
         locator = page.locator(f'[{ID_ATTRIBUTE}="{action.element_id}"]')
 
         if action.kind == "click":

@@ -1,3 +1,4 @@
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
@@ -34,6 +35,7 @@ class StepResult:
     result: ActionResult
     started_at: datetime
     finished_at: datetime
+    browser_ms: int = 0  # 브라우저 행동 시간. 실행하지 않은 step 은 0
 
     @property
     def action(self) -> Action | None:
@@ -74,6 +76,7 @@ class PersonaAgent:
         decision = await self._decider.decide(
             self._persona, self._task, observation, list(self.history)
         )
+        browser_ms = 0
         if decision.action is None:
             # 행동을 얻지 못한 step 은 브라우저에서 아무것도 하지 않고 기록만 남긴다.
             result = ActionResult(ok=False, error=decision.error, error_code=decision.error_code)
@@ -85,13 +88,16 @@ class PersonaAgent:
                 error_code="DOMAIN_BLOCKED",
             )
         else:
+            act_start = time.monotonic()
             result = await self._driver.act(decision.action)
+            browser_ms = int((time.monotonic() - act_start) * 1000)
         step_result = StepResult(
             observation=observation,
             decision=decision,
             result=result,
             started_at=started_at,
             finished_at=datetime.now().astimezone(),
+            browser_ms=browser_ms,
         )
         self.history.append(step_result)
         return step_result
