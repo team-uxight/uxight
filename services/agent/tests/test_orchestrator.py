@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from uxight_agent.driver.base import ActionResult, Driver, Observation
-from uxight_agent.persona.persona_agent import Decider
+from uxight_agent.persona.persona_agent import Decider, Decision
 from uxight_agent.repositories.run_repository import RunSnapshot
 from uxight_agent.schemas import Action
 from uxight_agent.watcher import run_orchestrator as orchestrator_module
@@ -123,17 +123,17 @@ def fake_driver_class(browsers: Browsers) -> type[Driver]:
 class SleepyDecider(Decider):
     """LLM 대역. 페르소나의 step_seconds 만큼 걸리고 scroll 만 낸다 (done 을 내지 않는다)."""
 
-    async def decide(self, persona, task, observation, history) -> Action:
+    async def decide(self, persona, task, observation, history) -> Decision:
         await asyncio.sleep(persona["step_seconds"])
-        return Action(kind="scroll", value="down")
+        return Decision(Action(kind="scroll", value="down"))
 
 
 class InnerTimeoutDecider(Decider):
     """LLM 호출 하나에 건 상한(asyncio.wait_for)이 먼저 끊긴다 — 시간 상한과는 다른 시간 초과."""
 
-    async def decide(self, persona, task, observation, history) -> Action:
+    async def decide(self, persona, task, observation, history) -> Decision:
         await asyncio.wait_for(asyncio.sleep(HANG_SECONDS), 0.01)
-        return Action(kind="scroll", value="down")
+        return Decision(Action(kind="scroll", value="down"))
 
 
 @pytest.fixture
@@ -142,13 +142,17 @@ def fakes(monkeypatch: pytest.MonkeyPatch, tmp_path) -> SimpleNamespace:
     runs = FakeRunRepository()
     personas = FakeRunPersonaRepository()
     monkeypatch.setattr(orchestrator_module, "DomDriver", fake_driver_class(browsers))
-    monkeypatch.setattr(orchestrator_module, "decider", SleepyDecider())
+    use_decider(monkeypatch, SleepyDecider())
     monkeypatch.setattr(orchestrator_module, "step_log_writer", StepLogWriter(str(tmp_path)))
     monkeypatch.setattr(orchestrator_module, "run_repository", runs)
     monkeypatch.setattr(orchestrator_module, "run_persona_repository", personas)
     monkeypatch.setattr(orchestrator_module, "CANCEL_POLL_SECONDS", POLL_SECONDS)
     set_global_cap(monkeypatch, 3)
     return SimpleNamespace(browsers=browsers, runs=runs, personas=personas)
+
+
+def use_decider(monkeypatch: pytest.MonkeyPatch, decider: Decider) -> None:
+    monkeypatch.setattr(orchestrator_module, "make_decider", lambda run_id: decider)
 
 
 def set_global_cap(monkeypatch: pytest.MonkeyPatch, cap: int) -> None:
@@ -238,7 +242,7 @@ def test_timeout_inside_step_is_fail_not_max_seconds(
 ) -> None:
     # 스텝 안에서 난 내장 TimeoutError 는 실행 오류다. 시간 상한(timeout)으로 세면
     # 모두 실패한 회차가 failed 가 아니라 done(성공률 0%)으로 보인다.
-    monkeypatch.setattr(orchestrator_module, "decider", InnerTimeoutDecider())
+    use_decider(monkeypatch, InnerTimeoutDecider())
     snap = snapshot([persona(1), persona(2)], max_steps=3, max_seconds=HANG_SECONDS)
 
     asyncio.run(run(fakes, RUN_ID, snap))
@@ -500,3 +504,42 @@ def test_heartbeat_written_every_watch_cycle(fakes: SimpleNamespace) -> None:
     assert asyncio.run(watch()).is_set()
     assert runs.cancel_checks == 3
     assert runs.heartbeats == 3
+
+
+class ScriptedDecider(Decider):
+    """정해 둔 Decision 을 차례로 낸다. 다 쓰면 scroll 을 낸다."""
+
+    def __init__(self, *decisions: Decision) -> None:
+        self.decisions = list(decisions)
+
+    async def decide(self, persona, task, observation, history) -> Decision:
+        if self.decisions:
+            return self.decisions.pop(0)
+        return Decision(Action(kind="scroll", value="down"))
+
+
+def parse_failure(code: str = "PARSE_FAILED") -> Decision:
+    return Decision(None, error_code=code, error="Action JSON parsing failed")
+
+
+def test_three_consecutive_parse_failures_fail_persona(
+    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 성공한 step 이 끼면 다시 센다. 2 + (성공 1) + 3 → 6번째 step 에서 실패로 끝난다.
+    use_decider(
+        monkeypatch,
+        ScriptedDecider(
+            parse_failure(),
+            parse_failure("INVALID_ACTION"),
+            Decision(Action(kind="scroll", value="down")),
+            parse_failure(),
+            parse_failure("INVALID_ACTION"),
+            parse_failure(),
+        ),
+    )
+    snap = snapshot([persona(1)], max_steps=20)
+
+    asyncio.run(run(fakes, RUN_ID, snap))
+
+    assert fakes.personas.statuses == {1: "fail"}
+    assert fakes.personas.steps[1] == 6

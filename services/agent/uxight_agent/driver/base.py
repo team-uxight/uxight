@@ -6,10 +6,15 @@ from ..schemas import Action
 
 @dataclass(frozen=True)
 class ActionResult:
-    """act()의 수행 결과. 실패해도 예외 대신 ok=False와 error를 돌려준다."""
+    """act()의 수행 결과. 실패해도 예외 대신 ok=False와 error를 돌려준다.
+
+    error_code 는 step 로그의 오류 코드다 (행동 로그 명세 3.8). 실행하지 않은 step(파싱 실패 ·
+    차단 · LLM 호출 실패)도 이 결과로 남긴다.
+    """
 
     ok: bool
     error: str | None = None
+    error_code: str | None = None
 
 
 @dataclass(frozen=True)

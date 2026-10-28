@@ -4,7 +4,7 @@ from datetime import datetime
 
 from uxight_agent.driver.base import ActionResult, Observation
 from uxight_agent.guard.page_text import MARK_START
-from uxight_agent.persona.persona_agent import StepResult
+from uxight_agent.persona.persona_agent import Decision, StepResult
 from uxight_agent.persona.prompt import HISTORY_STEPS, PAGE_END, PAGE_START, build_messages
 from uxight_agent.schemas import Action
 
@@ -39,7 +39,7 @@ def _user_text(history: list | None = None, observation: Observation = OBSERVATI
 
 def _step(action: Action, ok: bool = True) -> StepResult:
     now = datetime.now().astimezone()
-    return StepResult(OBSERVATION, action, ActionResult(ok=ok), now, now)
+    return StepResult(OBSERVATION, Decision(action), ActionResult(ok=ok), now, now)
 
 
 def test_prompt_has_persona_task_and_numbered_elements() -> None:

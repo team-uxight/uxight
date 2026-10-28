@@ -7,7 +7,9 @@ from typing import Literal, TypeVar
 
 from ..db import settings
 from ..driver.dom_driver import DomDriver
-from ..persona.persona_agent import MockDecider, PersonaAgent, StepResult
+from ..llm import LLMClient
+from ..persona.llm_decider import LLMDecider
+from ..persona.persona_agent import Decider, PersonaAgent, StepResult
 from ..repositories.run_persona_repository import PersonaOutcome, run_persona_repository
 from ..repositories.run_repository import RunSnapshot, run_repository
 from .step_log_writer import step_log_writer
@@ -34,8 +36,22 @@ BROWSER_CLOSE_TIMEOUT_SECONDS = 5
 # 곱해져 RAM 상한이 무너진다 (architecture §3.1). 모든 회차의 Persona 가 이 자리를 나눠 쓴다.
 persona_slots = asyncio.Semaphore(settings.max_concurrent_personas)
 
-# Walking Skeleton: 실제 LLM 대신 규칙 기반 대역을 쓴다. 상태가 없어 페르소나끼리 공유한다.
-decider = MockDecider()
+# 행동을 얻지 못한 step(파싱 실패 · 스키마 밖)이 이만큼 이어지면 Persona 를 실패로 끝낸다
+# (행동 로그 명세 2절 · architecture §5).
+MAX_CONSECUTIVE_PARSE_FAILURES = 3
+PARSE_FAILURE_CODES = ("PARSE_FAILED", "INVALID_ACTION")
+
+# LLM 클라이언트는 첫 회차에서 만든다 — LLM 설정(env)이 없는 테스트 · 도구도 이 모듈을 불러오게.
+# 프로세스 안 모든 Persona 가 연결 하나를 나눠 쓴다.
+_llm: LLMClient | None = None
+
+
+def make_decider(run_id: int) -> Decider:
+    """Persona 하나의 판단기. 테스트는 이 함수를 바꿔 끼워 LLM 없이 돈다."""
+    global _llm
+    if _llm is None:
+        _llm = LLMClient()
+    return LLMDecider(_llm, run_id=run_id)
 
 
 class RunOrchestrator:
@@ -290,7 +306,7 @@ class RunOrchestrator:
         max_steps: int,
         max_seconds: float,
         cancel_event: asyncio.Event,
-    ) -> Literal["done", "max_steps", "timeout", "cancelled"]:
+    ) -> Literal["done", "max_steps", "timeout", "cancelled", "fail"]:
         persona_id = persona["persona_id"]
         step_log_writer.prepare(run_id, persona_id)
         # 어느 경로로 return하든 async with를 빠져나가며 브라우저(컨텍스트, 페이지 포함)를 폐기한다.
@@ -306,7 +322,8 @@ class RunOrchestrator:
                 if not started:
                     logger.info("run=%s persona=%s 브라우저 시작 중단", run_id, persona_id)
                     return "cancelled"
-                agent = PersonaAgent(persona, task, driver, decider)
+                agent = PersonaAgent(persona, task, driver, make_decider(run_id))
+                parse_failures = 0
                 # 한 스텝 = observe → decide(LLM 1회) → act.
                 # Agent 가 done 을 내거나 max_steps 에 도달하면 종료.
                 for step_no in range(1, max_steps + 1):
@@ -346,7 +363,19 @@ class RunOrchestrator:
                         )
                         cancel_event.set()  # 같은 런의 다른 페르소나도 멈추게 한다.
                         return "cancelled"
-                    if step.action.kind == "done":
+                    if step.result.error_code in PARSE_FAILURE_CODES:
+                        parse_failures += 1
+                        if parse_failures >= MAX_CONSECUTIVE_PARSE_FAILURES:
+                            logger.warning(
+                                "run=%s persona=%s %s consecutive parse failures",
+                                run_id,
+                                persona_id,
+                                parse_failures,
+                            )
+                            return "fail"
+                    else:
+                        parse_failures = 0
+                    if step.action is not None and step.action.kind == "done":
                         # Agent 가 스스로 과업 완료를 선언했다 = 성공 (메인 판정 기준, D21).
                         return "done"
         except TimeoutError:
@@ -407,7 +436,7 @@ class RunOrchestrator:
     @staticmethod
     def _to_step_log(run_id: int, persona_id: int, step_no: int, step: StepResult) -> dict:
         # 로그 스키마는 미확정. DOM 전문은 크기가 커서 넣지 않고 요소 수와 행동 대상 요소만 남긴다.
-        target = step.observation.element_map.get(step.action.element_id)
+        target = step.observation.element_map.get(step.action.element_id) if step.action else None
         return {
             "run_id": run_id,
             "persona_id": persona_id,
@@ -417,7 +446,7 @@ class RunOrchestrator:
             "url": step.observation.url,
             "title": step.observation.title,
             "element_count": len(step.observation.element_map),
-            "action": step.action.model_dump(),
+            "action": step.action.model_dump() if step.action else None,
             "target": {key: target.get(key) for key in ("tag", "type", "text", "href")}
             if target
             else None,
