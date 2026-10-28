@@ -210,13 +210,19 @@ export default function AdminAccounts() {
 				<div className="admin-table-wrap">
 					<table className="admin-table">
 						<thead>
-							<tr><th>이메일</th><th>역할</th><th>상태</th><th>가입 경로</th><th>마지막 로그인</th><th>누적 비용</th><th>관리</th></tr>
+							<tr><th>이름</th><th>이메일</th><th>역할</th><th>상태</th><th>가입 경로</th><th>마지막 로그인</th><th>누적 비용</th><th>관리</th></tr>
 						</thead>
 						<tbody>
-							{loading && <tr><td colSpan={7} className="admin-table-message">계정 목록을 불러오는 중입니다.</td></tr>}
-							{!loading && visibleAccounts.length === 0 && <tr><td colSpan={7} className="admin-table-message">조건에 맞는 계정이 없습니다.</td></tr>}
+							{loading && <tr><td colSpan={8} className="admin-table-message">계정 목록을 불러오는 중입니다.</td></tr>}
+							{!loading && visibleAccounts.length === 0 && <tr><td colSpan={8} className="admin-table-message">조건에 맞는 계정이 없습니다.</td></tr>}
 							{!loading && visibleAccounts.map((account) => (
 								<tr key={account.userId}>
+									<td>
+										<div className="admin-name-cell">
+											<span className="admin-avatar" aria-hidden="true">{account.name.charAt(0) || '?'}</span>
+											<strong>{account.name}</strong>
+										</div>
+									</td>
 									<td>{account.email}</td>
 									<td><span className={`admin-role-badge admin-role-badge--${account.role}`}>{roleLabels[account.role]}</span></td>
 									<td><span className={`admin-status${account.isActive ? ' is-active' : ' is-inactive'}`}>{account.isActive ? '활성' : '비활성'}</span></td>
