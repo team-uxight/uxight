@@ -19,7 +19,8 @@ function monthRange(month: string): { from: string; to: string } {
 	return { from: `${month}-01T00:00:00+09:00`, to: `${nextMonth}-01T00:00:00+09:00` };
 }
 
-const formatUsd = (value: number) => `$ ${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const KRW_PER_USD = 1400;
+const formatKrw = (usd: number) => `₩ ${Math.round(usd * KRW_PER_USD).toLocaleString('ko-KR')}`;
 const formatTime = (ts: string) => ts.replace('T', ' ').slice(0, 16);
 const runStatusLabels: Record<AdminExperiment['status'], string> = {
 	queued: '대기',
@@ -102,6 +103,10 @@ export default function AdminUsage() {
 	const maxCost = Math.max(...daily.map((day) => day.costUsd), 0);
 	const peakDay = daily.reduce<(typeof daily)[number] | null>((peak, day) => (!peak || day.costUsd > peak.costUsd ? day : peak), null);
 	const visibleRuns = runStatusFilter === 'all' ? runs : runs.filter((run) => run.status === runStatusFilter);
+	const statusCounts = runStatuses.reduce<Record<AdminExperiment['status'], number>>(
+		(counts, status) => ({ ...counts, [status]: runs.filter((run) => run.status === status).length }),
+		{ queued: 0, accepted: 0, running: 0, done: 0, failed: 0, cancelled: 0 },
+	);
 	const normalizedAuditQuery = auditQuery.trim().toLocaleLowerCase('ko-KR');
 	const visibleAuditLogs = normalizedAuditQuery
 		? auditLogs.filter((log) => `${log.action} ${log.actor} ${log.target}`.toLocaleLowerCase('ko-KR').includes(normalizedAuditQuery))
@@ -136,13 +141,17 @@ export default function AdminUsage() {
 			{usage && (
 				<>
 					<div className="admin-stat-grid admin-stat-grid--usage">
-						<article className="admin-stat-card"><span>월 비용</span><strong>{formatUsd(usage.total.costUsd)}</strong><small>runs 비용 합계(USD) · {usage.month}</small></article>
+						<article className="admin-stat-card"><span>월 비용</span><strong>{formatKrw(usage.total.costUsd)}</strong><small>runs 비용 합계(원화 환산) · {usage.month}</small></article>
 						<article className="admin-stat-card"><span>사용 토큰</span><strong>{usage.total.tokens.toLocaleString('ko-KR')}</strong><small>월 누적 토큰</small></article>
 						<article className="admin-stat-card"><span>회차 수</span><strong>{usage.total.runCount.toLocaleString('ko-KR')}</strong><small>월 누적 run 수</small></article>
-						<article className="admin-stat-card"><span>최대 비용 일</span><strong>{peakDay && peakDay.costUsd > 0 ? peakDay.date.slice(5) : '—'}</strong><small>{peakDay && peakDay.costUsd > 0 ? formatUsd(peakDay.costUsd) : '비용 기록 없음'}</small></article>
+						<article className="admin-stat-card"><span>최대 비용 일</span><strong>{peakDay && peakDay.costUsd > 0 ? peakDay.date.slice(5) : '—'}</strong><small>{peakDay && peakDay.costUsd > 0 ? formatKrw(peakDay.costUsd) : '비용 기록 없음'}</small></article>
 					</div>
+				</>
+			)}
 
-					<div className="admin-usage-overview">
+			<div className="admin-usage-layout">
+				<div className="admin-usage-main">
+					{usage && (
 						<section className="admin-panel admin-cost-panel">
 							<div className="admin-panel-heading"><h2>일별 비용</h2><span>{usage.month}</span></div>
 							{daily.length === 0 ? (
@@ -154,21 +163,18 @@ export default function AdminUsage() {
 											<div
 												className={`admin-bar${peakDay?.date === day.date && day.costUsd > 0 ? ' is-highlighted' : ''}`}
 												style={{ height: `${maxCost > 0 ? Math.max((day.costUsd / maxCost) * 100, 2) : 2}%` }}
-												title={`${day.date} · ${formatUsd(day.costUsd)} · ${day.runCount}회`}
+												title={`${day.date} · ${formatKrw(day.costUsd)} · ${day.runCount}회`}
 											/>
 											<span>{Number(day.date.slice(8))}일</span>
 										</div>
 									))}
 								</div>
 							)}
-							<p className="admin-chart-caption">일별 비용(USD) · 최대 {formatUsd(maxCost)} · 기간 합계 {formatUsd(usage.total.costUsd)}</p>
+							<p className="admin-chart-caption">일별 비용(원) · 최대 {formatKrw(maxCost)} · 기간 합계 {formatKrw(usage.total.costUsd)} · 환산 기준 1 USD = ₩{KRW_PER_USD.toLocaleString('ko-KR')}</p>
 						</section>
-					</div>
-				</>
-			)}
+					)}
 
-			<div className="admin-usage-details">
-				<section className="admin-panel admin-recent-runs">
+					<section className="admin-panel admin-recent-runs">
 					<div className="admin-panel-heading">
 						<div><h2>최근 실행</h2><span>최신 {runs.length}건 · 전체 {runsTotal}건</span></div>
 						<label className="admin-period-select">
@@ -204,6 +210,24 @@ export default function AdminUsage() {
 						</table>
 					</div>
 				</section>
+				</div>
+
+				<div className="admin-usage-side">
+				<section className="admin-panel admin-run-status-panel">
+					<div className="admin-panel-heading"><h2>상태</h2><span>최근 {runs.length}건 기준</span></div>
+					<dl>
+						{runStatuses.map((status) => (
+							<div key={status}>
+								<dt>{runStatusLabels[status]}</dt>
+								<dd>{statusCounts[status]}</dd>
+							</div>
+						))}
+					</dl>
+					<div className="admin-callout">
+						<strong>비고</strong>
+						<p>상태 집계는 아래 최근 실행 목록에 불러온 실행 기준이며, 전체 {runsTotal}건 중 일부일 수 있습니다.</p>
+					</div>
+				</section>
 
 				<section className="admin-panel admin-audit-panel">
 					<div className="admin-panel-heading">
@@ -228,6 +252,7 @@ export default function AdminUsage() {
 						</ul>
 					)}
 				</section>
+				</div>
 			</div>
 		</section>
 	);
