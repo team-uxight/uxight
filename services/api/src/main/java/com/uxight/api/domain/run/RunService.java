@@ -154,8 +154,11 @@ public class RunService {
     return runIds.size();
   }
 
-  // fire-and-forget: 응답을 기다리지 않는다. 결과는 비동기 스레드에서 dispatch_state 에만 기록한다(200 이면 그대로 둔다).
-  private void dispatch(Long runId) {
+  /**
+   * POST /runs — 회차를 커밋한 뒤에 부른다(실험 요청 · 다음 회차 승인 · 재전송이 함께 쓴다). fire-and-forget: 응답을 기다리지 않고,
+   * 결과는 비동기 스레드에서 dispatch_state 에만 기록한다. 닿지 않은 회차는 redispatchStaleQueuedRuns 가 다시 보낸다.
+   */
+  public void dispatch(Long runId) {
     agentClient.dispatch(runId)
         .thenAccept(dispatchState -> dispatchState.ifPresent(state -> runRepository.updateDispatchState(runId, state)));
   }
