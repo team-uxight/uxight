@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { CircleAlert } from 'lucide-react';
-import { getAuditLogs, getMonthlyUsage, type AuditLog, type MonthlyUsage } from '../auth';
+import { getAdminExperiments, getAuditLogs, getMonthlyUsage, type AdminExperiment, type AuditLog, type MonthlyUsage } from '../auth';
+
+type RunStatusFilter = 'all' | AdminExperiment['status'];
 
 function monthOptions(count = 6): string[] {
 	const now = new Date();
@@ -19,30 +21,54 @@ function monthRange(month: string): { from: string; to: string } {
 
 const formatUsd = (value: number) => `$ ${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const formatTime = (ts: string) => ts.replace('T', ' ').slice(0, 16);
+const runStatusLabels: Record<AdminExperiment['status'], string> = {
+	queued: '대기',
+	accepted: '접수',
+	running: '실행 중',
+	done: '완료',
+	failed: '오류',
+	cancelled: '취소',
+};
+const runStatuses: AdminExperiment['status'][] = ['queued', 'accepted', 'running', 'done', 'failed', 'cancelled'];
+
+function isRunStatus(value: string): value is AdminExperiment['status'] {
+	return runStatuses.some((status) => status === value);
+}
 
 export default function AdminUsage() {
 	const months = useMemo(() => monthOptions(), []);
 	const [month, setMonth] = useState(months[0]);
 	const [usage, setUsage] = useState<MonthlyUsage | null>(null);
+	const [runs, setRuns] = useState<AdminExperiment[]>([]);
+	const [runsTotal, setRunsTotal] = useState(0);
 	const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
 	const [auditTotal, setAuditTotal] = useState(0);
 	const [loading, setLoading] = useState(true);
+	const [runsLoading, setRunsLoading] = useState(true);
 	const [error, setError] = useState('');
+	const [runsError, setRunsError] = useState('');
+	const [runStatusFilter, setRunStatusFilter] = useState<RunStatusFilter>('all');
+	const [auditQuery, setAuditQuery] = useState('');
 
 	useEffect(() => {
 		let cancelled = false;
 		const { from, to } = monthRange(month);
-		setLoading(true);
-		setError('');
-		Promise.all([getMonthlyUsage(month), getAuditLogs(from, to, 0, 20)])
+		Promise.allSettled([getMonthlyUsage(month), getAuditLogs(from, to, 0, 20)])
 			.then(([usageResult, auditResult]) => {
 				if (cancelled) return;
-				setUsage(usageResult);
-				setAuditLogs(auditResult.content);
-				setAuditTotal(auditResult.totalElements);
-			})
-			.catch((reason: unknown) => {
-				if (!cancelled) setError(reason instanceof Error ? reason.message : '사용량·감사 정보를 불러오지 못했습니다.');
+				const errors: string[] = [];
+				if (usageResult.status === 'fulfilled') {
+					setUsage(usageResult.value);
+				} else {
+					errors.push(usageResult.reason instanceof Error ? usageResult.reason.message : '사용량을 불러오지 못했습니다.');
+				}
+				if (auditResult.status === 'fulfilled') {
+					setAuditLogs(auditResult.value.content);
+					setAuditTotal(auditResult.value.totalElements);
+				} else {
+					errors.push(auditResult.reason instanceof Error ? auditResult.reason.message : '감사 로그를 불러오지 못했습니다.');
+				}
+				setError(errors.join(' '));
 			})
 			.finally(() => {
 				if (!cancelled) setLoading(false);
@@ -52,9 +78,34 @@ export default function AdminUsage() {
 		};
 	}, [month]);
 
+	useEffect(() => {
+		let cancelled = false;
+		getAdminExperiments(0, 20)
+			.then((result) => {
+				if (cancelled) return;
+				setRuns(result.content);
+				setRunsTotal(result.totalElements);
+				setRunsError('');
+			})
+			.catch((reason: unknown) => {
+				if (!cancelled) setRunsError(reason instanceof Error ? reason.message : '최근 실행 목록을 불러오지 못했습니다.');
+			})
+			.finally(() => {
+				if (!cancelled) setRunsLoading(false);
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, []);
+
 	const daily = usage?.daily ?? [];
 	const maxCost = Math.max(...daily.map((day) => day.costUsd), 0);
 	const peakDay = daily.reduce<(typeof daily)[number] | null>((peak, day) => (!peak || day.costUsd > peak.costUsd ? day : peak), null);
+	const visibleRuns = runStatusFilter === 'all' ? runs : runs.filter((run) => run.status === runStatusFilter);
+	const normalizedAuditQuery = auditQuery.trim().toLocaleLowerCase('ko-KR');
+	const visibleAuditLogs = normalizedAuditQuery
+		? auditLogs.filter((log) => `${log.action} ${log.actor} ${log.target}`.toLocaleLowerCase('ko-KR').includes(normalizedAuditQuery))
+		: auditLogs;
 
 	return (
 		<section className="admin-page" aria-labelledby="admin-usage-title">
@@ -67,7 +118,11 @@ export default function AdminUsage() {
 				<div className="admin-page-actions">
 					<label className="admin-period-select">
 						<span className="sr-only">조회 월</span>
-						<select value={month} onChange={(event) => setMonth(event.target.value)}>
+						<select value={month} onChange={(event) => {
+							setLoading(true);
+							setError('');
+							setMonth(event.target.value);
+						}}>
 							{months.map((value) => <option key={value} value={value}>{value.replace('-', '.')}</option>)}
 						</select>
 					</label>
@@ -113,13 +168,58 @@ export default function AdminUsage() {
 			)}
 
 			<div className="admin-usage-details">
+				<section className="admin-panel admin-recent-runs">
+					<div className="admin-panel-heading">
+						<div><h2>최근 실행</h2><span>최신 {runs.length}건 · 전체 {runsTotal}건</span></div>
+						<label className="admin-period-select">
+							<span className="sr-only">실행 상태 필터</span>
+							<select value={runStatusFilter} onChange={(event) => {
+								const value = event.target.value;
+								if (value === 'all' || isRunStatus(value)) setRunStatusFilter(value);
+							}}>
+								<option value="all">모든 상태</option>
+								{Object.entries(runStatusLabels).map(([status, label]) => <option key={status} value={status}>{label}</option>)}
+							</select>
+						</label>
+					</div>
+					{runsError && <p role="alert">{runsError}</p>}
+					<div className="admin-table-wrap">
+						<table className="admin-table admin-runs-table">
+							<thead><tr><th>누가</th><th>언제</th><th>대상</th><th>비용</th><th>상태</th></tr></thead>
+							<tbody>
+								{visibleRuns.map((run) => (
+									<tr key={run.firstRunId}>
+										<td>{run.ownerEmail}</td>
+										<td>{formatTime(run.createdAt)}</td>
+										<td><strong>{run.projectTitle}{run.projectDeleted ? ' · 삭제된 프로젝트' : ''}</strong><small>{run.taskGoal || `실험 #${run.firstRunId}`}</small></td>
+										<td title="관리자 실행 목록 API에서 회차별 비용을 제공하지 않습니다.">—</td>
+										<td><span className={`admin-run-badge admin-run-badge--${run.status}`}>{runStatusLabels[run.status]}</span></td>
+									</tr>
+								))}
+								{runsLoading && runs.length === 0 && <tr><td colSpan={5} className="admin-table-message">실행 목록을 불러오는 중입니다.</td></tr>}
+								{!runsLoading && !runsError && visibleRuns.length === 0 && (
+									<tr><td colSpan={5} className="admin-table-message">{runs.length ? '선택한 상태의 실행이 없습니다.' : '실행 기록이 없습니다.'}</td></tr>
+								)}
+							</tbody>
+						</table>
+					</div>
+				</section>
+
 				<section className="admin-panel admin-audit-panel">
-					<div className="admin-panel-heading"><h2>감사 로그</h2><span>audit_log · 총 {auditTotal}건</span></div>
+					<div className="admin-panel-heading">
+						<div><h2>감사 로그</h2><span>조회 기간 내 총 {auditTotal}건 · 최근 {auditLogs.length}건</span></div>
+						<label className="admin-search-field admin-audit-search">
+							<span className="sr-only">감사 로그 검색</span>
+							<input value={auditQuery} onChange={(event) => setAuditQuery(event.target.value)} placeholder="행위·대상·사용자 검색" />
+						</label>
+					</div>
 					{auditLogs.length === 0 ? (
 						<p>이 기간의 감사 로그가 없습니다.</p>
+					) : visibleAuditLogs.length === 0 ? (
+						<p>최근 감사 로그에서 검색 결과가 없습니다.</p>
 					) : (
 						<ul className="admin-audit-list">
-							{auditLogs.map((log) => (
+							{visibleAuditLogs.map((log) => (
 								<li key={log.auditLogId}>
 									<span className="admin-audit-icon admin-audit-icon--warning"><CircleAlert size={15} aria-hidden="true" /></span>
 									<div><strong>{log.action} · {log.target}</strong><small>{log.actor} · {formatTime(log.ts)}</small></div>

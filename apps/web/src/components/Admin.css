@@ -376,6 +376,22 @@
 	font-size: 10px;
 }
 
+.admin-panel-heading select {
+	min-height: 35px;
+	padding: 0 28px 0 10px;
+	border: 1px solid #e5e5ee;
+	border-radius: 8px;
+	background: rgb(255 255 255 / 86%);
+	color: #555367;
+	font: inherit;
+	font-size: 10px;
+}
+
+.admin-audit-search {
+	max-width: 260px;
+	flex: 0 1 260px;
+}
+
 .admin-count-chip {
 	padding: 6px 9px;
 	border-radius: 999px;
@@ -1234,9 +1250,16 @@
 }
 
 .admin-run-badge--error,
-.admin-run-badge--blocked {
+.admin-run-badge--failed {
 	background: #fae7e5;
 	color: #a64b45;
+}
+
+.admin-run-badge--queued,
+.admin-run-badge--accepted,
+.admin-run-badge--cancelled {
+	background: #f0f0f3;
+	color: #666574;
 }
 
 .admin-runs-table td:nth-child(4) {
@@ -1411,6 +1434,11 @@
 	}
 
 	.admin-search-field {
+		flex-basis: 100%;
+	}
+
+	.admin-audit-search {
+		max-width: none;
 		flex-basis: 100%;
 	}
 }
