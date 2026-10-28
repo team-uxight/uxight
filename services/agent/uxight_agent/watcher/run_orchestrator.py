@@ -3,6 +3,7 @@ import contextlib
 import hashlib
 import logging
 from collections.abc import AsyncIterator, Awaitable
+from dataclasses import dataclass
 from typing import Literal, TypeVar
 
 from ..db import settings
@@ -75,7 +76,18 @@ def make_decider(run_id: int) -> Decider:
     return LLMDecider(llm_client(), run_id=run_id)
 
 
+@dataclass
+class RunTokens:
+    limit: int | None
+    used: int = 0
+
+
 class RunOrchestrator:
+    def __init__(self) -> None:
+        # 회차별 토큰 상한(policy max_tokens, 회차 당)과 지금까지 쓴 토큰.
+        # 회차 안 Persona 가 나눠 쓴다.
+        self._run_tokens: dict[int, RunTokens] = {}
+
     def try_accept_and_start(self, run_id: int) -> RunSnapshot | None:
         """queued 인 회차만 수락한다.
 
@@ -97,6 +109,11 @@ class RunOrchestrator:
             )
             # LLM 설정이 없으면 브라우저를 띄우기 전에 회차를 마감한다 — 띄운 뒤 모든 Persona 가
             # 까닭 없이 fail 로 끝나지 않게.
+            if (left := run_repository.daily_tokens_left()) is not None and left <= 0:
+                # 하루 예산을 다 썼으면 새 회차를 시작하지 않는다 (V4__policies.sql).
+                logger.warning("run=%s daily token budget spent, closing as failed", run_id)
+                self._fail_run(run_id, error="하루 토큰 예산 초과")
+                return None
             try:
                 llm_client()
             except KeyError:
@@ -158,6 +175,7 @@ class RunOrchestrator:
         policy = snapshot.policy
         max_steps = policy.get("max_steps") or DEFAULT_MAX_STEPS
         max_seconds = policy.get("max_seconds") or DEFAULT_MAX_SECONDS
+        self._run_tokens[run_id] = RunTokens(limit=policy.get("max_tokens"))
         # 회차 안 동시 수. 전역 자리(persona_slots)도 함께 잡으므로 실제 상한은 둘 중 작은 값이다.
         # 값이 없으면 회차 안 제한 없이 전역 상한만 따른다.
         run_slots = asyncio.Semaphore(policy.get("persona_concurrency") or len(personas))
@@ -187,6 +205,7 @@ class RunOrchestrator:
             )
         finally:
             watcher.cancel()
+            self._run_tokens.pop(run_id, None)
         unfinished = []
         for persona, result in zip(personas, results, strict=True):
             if isinstance(result, BaseException):
@@ -371,6 +390,15 @@ class RunOrchestrator:
                 # 한 스텝 = observe → decide(LLM 1회) → act.
                 # Agent 가 done 을 내거나 max_steps 에 도달하면 종료.
                 for step_no in range(1, max_steps + 1):
+                    # LLM 을 부르기 전에 토큰 한도를 본다. 넘었으면 이 Persona 를 끝낸다.
+                    if limit := self._token_limit_reached(run_id):
+                        logger.warning(
+                            "run=%s persona=%s token limit reached: %s", run_id, persona_id, limit
+                        )
+                        audit_log_repository.add_limit_reached(
+                            run_id, persona_id, {"persona_id": persona_id, "step": step_no, **limit}
+                        )
+                        return "max_steps"
                     finished, step = await self._run_unless_cancelled(agent.step(), cancel_event)
                     if not finished:
                         # 감시 태스크가 진행 중인 스텝을 중단했다.
@@ -397,7 +425,10 @@ class RunOrchestrator:
                             run_id, persona_id, step_no, step, task, driver.mode, screenshot
                         ),
                     )
-                    run_persona_repository.increment_steps(run_id, persona_id)
+                    tokens = step.decision.prompt_tokens + step.decision.completion_tokens
+                    if run_id in self._run_tokens:
+                        self._run_tokens[run_id].used += tokens
+                    run_persona_repository.increment_steps(run_id, persona_id, tokens)
                     if step.result.error_code in GUARD_BLOCK_CODES:
                         audit_log_repository.add_blocked_action(
                             run_id,
@@ -456,6 +487,17 @@ class RunOrchestrator:
             )
             return "timeout"
         return "max_steps"
+
+    def _token_limit_reached(self, run_id: int) -> dict | None:
+        """넘은 한도가 있으면 감사 로그에 남길 사유, 없으면 None."""
+        tokens = self._run_tokens.get(run_id)
+        if tokens and tokens.limit and tokens.used >= tokens.limit:
+            return {"reason": "max_tokens", "limit": tokens.limit, "used": tokens.used}
+        # 하루 예산은 매 LLM 호출 직전에 DB 의 지금 값으로 본다 (V4__policies.sql).
+        left = run_repository.daily_tokens_left()
+        if left is not None and left <= 0:
+            return {"reason": "daily_token_budget", "left": left}
+        return None
 
     async def _watch_cancel(self, run_id: int, cancel_event: asyncio.Event) -> None:
         # 한 스텝(페이지 로드 대기, 이후 LLM 호출 등)이 10초를 넘을 수 있어서,

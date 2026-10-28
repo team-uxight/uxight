@@ -34,6 +34,10 @@ class FakeRunRepository:
         self.cancel_requested = False
         self.cancel_checks = 0
         self.heartbeats = 0
+        self.daily_left: int | None = None  # 하루 예산 남은 토큰 (None = 예산 없음)
+
+    def daily_tokens_left(self) -> int | None:
+        return self.daily_left
 
     def _finish(self, status: str) -> None:
         if self.status == "running":
@@ -70,12 +74,14 @@ class FakeRunPersonaRepository:
     def __init__(self) -> None:
         self.statuses: dict[int, str] = {}
         self.steps: dict[int, int] = {}
+        self.tokens: dict[int, int] = {}
 
     def get_statuses(self, run_id: int) -> dict[int, str]:
         return dict(self.statuses)
 
-    def increment_steps(self, run_id: int, persona_id: int) -> None:
+    def increment_steps(self, run_id: int, persona_id: int, tokens: int = 0) -> None:
         self.steps[persona_id] = self.steps.get(persona_id, 0) + 1
+        self.tokens[persona_id] = self.tokens.get(persona_id, 0) + tokens
 
     def mark_finished(self, run_id: int, persona_id: int, status: str) -> None:
         if self.statuses[persona_id] == "running":
@@ -85,9 +91,13 @@ class FakeRunPersonaRepository:
 class FakeAuditLogRepository:
     def __init__(self) -> None:
         self.rows: list[tuple[int, int, dict]] = []
+        self.limits: list[tuple[int, int, dict]] = []
 
     def add_blocked_action(self, run_id: int, persona_id: int, detail: dict) -> None:
         self.rows.append((run_id, persona_id, detail))
+
+    def add_limit_reached(self, run_id: int, persona_id: int, detail: dict) -> None:
+        self.limits.append((run_id, persona_id, detail))
 
 
 class Browsers:
@@ -638,3 +648,35 @@ def test_destructive_click_is_blocked_and_audited(
     ((_, _, detail),) = fakes.audits.rows
     assert detail["reason"] == "destructive"
     assert "탈퇴" in detail["error"]
+
+
+def scroll_with_tokens(prompt: int, completion: int) -> Decision:
+    return Decision(
+        Action(kind="scroll", value="down"), prompt_tokens=prompt, completion_tokens=completion
+    )
+
+
+def test_run_token_cap_ends_personas_with_reason(
+    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 회차 당 상한 250. step 마다 100 토큰 → 3 step 뒤(300) 다음 호출 전에 끝난다.
+    use_decider(monkeypatch, ScriptedDecider(*[scroll_with_tokens(80, 20) for _ in range(10)]))
+
+    asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)], max_steps=10, max_tokens=250)))
+
+    assert fakes.personas.steps[1] == 3
+    assert fakes.personas.tokens[1] == 300
+    assert fakes.personas.statuses == {1: "max_steps"}
+    ((_, persona_id, detail),) = fakes.audits.limits
+    assert persona_id == 1
+    assert detail == {"persona_id": 1, "step": 4, "reason": "max_tokens", "limit": 250, "used": 300}
+
+
+def test_daily_budget_spent_stops_before_llm_call(fakes: SimpleNamespace) -> None:
+    fakes.runs.daily_left = 0
+
+    asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)], max_steps=10)))
+
+    assert fakes.personas.steps.get(1, 0) == 0
+    assert fakes.personas.statuses == {1: "max_steps"}
+    assert fakes.audits.limits[0][2]["reason"] == "daily_token_budget"
