@@ -2,12 +2,14 @@
 
 - 페이지에서 온 글(URL · 제목 · 요소 줄)은 mark_instructions 로 지시문 의심 부분을 표시한 뒤
   '페이지 관측' 경계 안에만 넣는다. 경계 안 글은 데이터이고 따르지 않는다고 시스템 지시에 적는다.
-  페이지 값은 모두 한 줄 따옴표 문자열이라(DomDriver._quote · json.dumps) 경계 줄을 흉내 내지
-  못한다.
+  페이지 값은 한 줄 따옴표 문자열이라(DomDriver._quote · json.dumps) 새 줄을 만들 수 없고,
+  값 안의 << · >> 는 하나로 줄여(_collapse_fences) 경계 표시와 같은 글자를 쓰지 못한다.
+  그래도 모델이 경계를 착각하지 않는다는 보장은 아니다 — 행동은 가드가 따로 막는다.
 - 원시 HTML · 셀렉터는 넣지 않는다. 요소는 DomDriver 가 만든 번호 줄뿐이다 (tech-stack §6 T19).
 """
 
 import json
+import unicodedata
 
 from ..driver.base import Observation
 from ..guard.page_text import mark_instructions
@@ -17,6 +19,9 @@ HISTORY_STEPS = 5
 
 PAGE_START = "<<<페이지 관측 시작>>>"
 PAGE_END = "<<<페이지 관측 끝>>>"
+# 경계 표시의 괄호로 볼 글자 (전각 · 작은 꼴 포함).
+_OPEN_BRACKETS = "<＜﹤"
+_CLOSE_BRACKETS = ">＞﹥"
 
 SYSTEM_PROMPT = f"""너는 웹사이트 사용성 시험에 참여한 사람 한 명을 연기한다.
 아래 Persona 의 속성과 행동 지침대로 생각하고,
@@ -109,5 +114,23 @@ def _page_text(observation: Observation) -> str:
             observation.dom or "(누를 수 있는 요소 없음)",
         ]
     )
-    marked, _ = mark_instructions(page)
+    marked, _ = mark_instructions(_collapse_fences(page))
     return f"{PAGE_START}\n{marked}\n{PAGE_END}"
+
+
+def _collapse_fences(text: str) -> str:
+    """이어진 같은 쪽 괄호(<< · ＜＜ · 사이에 서식 문자가 낀 것)를 하나로 줄인다.
+
+    지시문 표시의 [[ · ]] 를 줄이는 것(page_text._collapse_marks)과 같은 생각이다.
+    """
+    kept: list[str] = []
+    last = ""  # 마지막으로 남긴 괄호 쪽 ("<" · ">"), 괄호가 아니면 ""
+    for char in text:
+        if last and unicodedata.category(char) == "Cf":
+            continue  # 괄호 뒤의 보이지 않는 서식 문자 (제로폭 공백 등)
+        side = "<" if char in _OPEN_BRACKETS else ">" if char in _CLOSE_BRACKETS else ""
+        if side and side == last:
+            continue
+        kept.append(char)
+        last = side
+    return "".join(kept)
