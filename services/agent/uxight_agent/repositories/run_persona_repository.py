@@ -36,14 +36,24 @@ class RunPersonaRepository:
             )
             return {persona_id: status for persona_id, status in rows}
 
-    def increment_steps(self, run_id: int, persona_id: int) -> None:
+    def increment_steps(self, run_id: int, persona_id: int, tokens: int = 0) -> None:
+        # step 하나를 센다. 그 step 의 LLM 토큰은 Persona 와 회차 누적에 같이 더한다 —
+        # runs.tokens 의 당일 합계가 하루 예산 집행의 기준이다 (V4__policies.sql).
+        params = {"run_id": run_id, "persona_id": persona_id, "tokens": tokens}
         with engine.begin() as conn:
             conn.execute(
                 text(
-                    "UPDATE run_personas SET steps = steps + 1 "
+                    "UPDATE run_personas SET steps = steps + 1, "
+                    "tokens = COALESCE(tokens, 0) + :tokens "
                     "WHERE run_id = :run_id AND persona_id = :persona_id AND status = 'running'"
                 ),
-                {"run_id": run_id, "persona_id": persona_id},
+                params,
+            )
+            conn.execute(
+                text(
+                    "UPDATE runs SET tokens = COALESCE(tokens, 0) + :tokens WHERE run_id = :run_id"
+                ),
+                params,
             )
 
     def mark_finished(self, run_id: int, persona_id: int, status: PersonaOutcome) -> None:

@@ -1,7 +1,7 @@
 # services/agent — 에이전트 안내
 
 - 스택: Python 3.12 · uv · FastAPI(엔드포인트 1개 `POST /runs`) · Playwright(chromium) · SQLAlchemy Core · OpenAI-compatible SDK + pydantic. **LangChain 없음 (T15).**
-- 지금 있는 것: `main.py`(FastAPI) · `routers/runs.py`(`POST /runs`) · `watcher/`(회차 실행 · 취소 감시 · step 로그) · `persona/`(`MockDecider` — LLM 대역) · `driver/`(`DomDriver`) · `repositories/`(SQL) · `schemas.py`(Action 5종). **예정 구조**(architecture §2 · §5 · §10): `watcher`(스케줄러 · 세마포어 · 한도 · cancel) · `persona`(LLM 루프) · `driver`(Playwright, `observe()` / `act()`) · `guard`(행동 검증) · `detect` · `diagnose` · `improve` · `patch`. 새 모듈은 이 이름을 따른다.
+- 지금 있는 것: `main.py`(FastAPI) · `routers/runs.py`(`POST /runs`) · `watcher/`(회차 실행 · 취소 감시 · step 로그) · `persona/`(`LLMDecider` — 프롬프트 · LLM 1회 · 행동 검증) · `driver/`(`DomDriver`) · `repositories/`(SQL) · `schemas.py`(Action 5종). **예정 구조**(architecture §2 · §5 · §10): `watcher`(스케줄러 · 세마포어 · 한도 · cancel) · `persona`(LLM 루프) · `driver`(Playwright, `observe()` / `act()`) · `guard`(행동 검증) · `detect` · `diagnose` · `improve` · `patch`. 새 모듈은 이 이름을 따른다.
 - **LLM 이 낼 수 있는 행동은 `schemas.Action` 5종(click · type · scroll · back · done)뿐.** 셀렉터 · URL · 코드를 모델 출력에서 실행하지 않는다. 모든 액션은 `guard.check()` 를 거치고, 차단도 step 로그에 남긴다 (D18 · architecture §9).
 - LLM 호출은 `LLMClient` 하나를 통해서만 (`uxight_agent/llm.py` — 호출마다 사용량을 `data/llm-usage.jsonl` 에 남긴다. 직접 `openai` 를 부르면 비용 추적에서 빠진다). 출력 채널은 `response_format`(기본) 또는 `emit_action` function tool **하나**(대안) — `tools` 목록에 다른 도구를 넣지 않는다. 제공사 서버 실행 도구(web_search · computer use · code interpreter)는 어떤 제공자에서도 요청하지 않는다 (`docs/agent-safety.md` §2.4). 제공자 전환은 `LLM_PROVIDER` env 로.
 - 관측은 모델에 넣기 **전에** 정제한다 (숨김 요소 제거 · 지시문 마킹 · 페이지 텍스트는 데이터). 프롬프트 인젝션 방어는 가드가 아니라 여기다 (§9 L0.5).

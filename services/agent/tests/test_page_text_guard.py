@@ -79,7 +79,8 @@ def test_offscreen_injection_is_not_observed(before: tuple[Action, ...]) -> None
 )
 def test_hidden_checkbox_is_clicked_through_label(fixture: str, text: str) -> None:
     # 숨긴 체크박스는 보이는 라벨을 누른다. 화면 밖 체크박스를 직접 누르면 시간 초과로 실패한다.
-    assert click_by_text(fixture, text) == ActionResult(ok=True)
+    result = click_by_text(fixture, text)
+    assert (result.ok, result.error) == (True, None)
 
 
 def test_input_values_are_not_observed() -> None:
@@ -94,7 +95,7 @@ def test_input_values_are_not_observed() -> None:
             for element_id, item in before.element_map.items():
                 if item["name"] in typed:
                     action = Action(kind="type", element_id=element_id, value=typed[item["name"]])
-                    assert await driver.act(action) == ActionResult(ok=True)
+                    assert (await driver.act(action)).ok
             # 헛통과 방지: fixture 가 입력값을 정말 value 속성 · textarea 글 노드에 맞춰 두었다.
             page = driver._page
             assert await page.get_attribute("[name=pw]", "value") == "S3cret-PW!"

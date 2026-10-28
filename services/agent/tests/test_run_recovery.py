@@ -35,6 +35,10 @@ class FakeRunRepository:
         self.statuses = dict(statuses)
         self.errors: dict[int, str] = {}
         self.cancel_requested = set(cancel_requested)
+        self.daily_left: int | None = None  # 하루 예산 남은 토큰 (None = 예산 없음)
+
+    def daily_tokens_left(self) -> int | None:
+        return self.daily_left
 
     def accept_if_queued(self, run_id: int) -> bool:
         if self.statuses.get(run_id) != "queued":
@@ -202,4 +206,42 @@ def test_error_right_after_accept_closes_run_as_failed(
     assert runs.statuses[7] == "failed"
     assert runs.errors[7] == "실행 오류로 중단: RuntimeError"
     assert "running" not in personas.get_statuses(7).values()
+    assert started == []
+
+
+def test_missing_llm_settings_close_run_before_browsers(monkeypatch: pytest.MonkeyPatch) -> None:
+    # LLM 설정이 비면 브라우저를 띄우기 전에 짧은 사유로 마감한다.
+    runs, personas = install(monkeypatch, {7: "queued"})
+    started: list = []
+
+    async def fake_run_personas(run_id: int, snapshot: RunSnapshot) -> None:
+        started.append(run_id)
+
+    monkeypatch.setattr(runs_router.run_orchestrator, "run_personas", fake_run_personas)
+    monkeypatch.setattr(orchestrator_module, "_llm", None)
+    for name in ("LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL"):
+        monkeypatch.delenv(name, raising=False)
+
+    res = TestClient(main.app).post("/runs", json={"run_id": 7})
+
+    assert res.json() == {"run_id": 7, "status": "failed"}
+    assert runs.errors[7] == "LLM 설정 없음"
+    assert "running" not in personas.get_statuses(7).values()
+    assert started == []
+
+
+def test_spent_daily_budget_does_not_start_new_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    runs, personas = install(monkeypatch, {7: "queued"})
+    runs.daily_left = -5
+    started: list = []
+
+    async def fake_run_personas(run_id: int, snapshot: RunSnapshot) -> None:
+        started.append(run_id)
+
+    monkeypatch.setattr(runs_router.run_orchestrator, "run_personas", fake_run_personas)
+
+    res = TestClient(main.app).post("/runs", json={"run_id": 7})
+
+    assert res.json() == {"run_id": 7, "status": "failed"}
+    assert runs.errors[7] == "하루 토큰 예산 초과"
     assert started == []
