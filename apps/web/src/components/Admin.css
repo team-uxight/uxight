@@ -885,6 +885,70 @@
 	padding: 18px;
 }
 
+.admin-policy-column {
+	display: grid;
+	min-width: 0;
+	gap: 14px;
+	align-content: start;
+}
+
+.admin-policy-column .admin-policy-panel {
+	min-height: auto;
+	margin-bottom: 0;
+}
+
+.admin-policy-text {
+	margin: 0;
+	color: #666574;
+	font-size: 10px;
+	line-height: 1.55;
+}
+
+.admin-policy-kill {
+	justify-content: flex-end;
+	margin-top: 12px;
+}
+
+.admin-domain-row {
+	display: flex;
+	align-items: flex-end;
+	gap: 8px;
+}
+
+.admin-domain-row .admin-domain-field {
+	flex: 1;
+	margin-top: 0;
+}
+
+.admin-domain-chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin-top: 10px;
+}
+
+.admin-domain-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	padding: 4px 6px 4px 10px;
+	border: 1px solid #e7e6ee;
+	border-radius: 999px;
+	background: #fff;
+	color: #4d4b63;
+	font-size: 10px;
+}
+
+.admin-domain-chip button {
+	display: flex;
+	padding: 2px;
+	border: 0;
+	border-radius: 50%;
+	background: transparent;
+	color: #8b899a;
+	cursor: pointer;
+}
+
 .admin-section-title {
 	display: flex;
 	align-items: flex-start;
