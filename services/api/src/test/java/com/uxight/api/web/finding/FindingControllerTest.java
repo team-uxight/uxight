@@ -144,7 +144,8 @@ class FindingControllerTest {
         .andExpect(jsonPath("$.stats[0].*", hasSize(2)))
         .andExpect(jsonPath("$.stats[*].taxonomy").value(contains(
             "navigation_confusion", "interaction_failure", "task_failure", "excessive_steps")))
-        .andExpect(jsonPath("$.stats[*].count").value(contains(1, 1, 1, 0)));
+        // 진단 seed(navigation · interaction · task 1건씩) + 개선안 seed(interaction · task 1건씩, R__seed_local_improvements)
+        .andExpect(jsonPath("$.stats[*].count").value(contains(1, 2, 2, 0)));
     as(SEED_USER_ID, get("/api/findings/{findingId}/screenshots", interaction)
             .param("personaId", String.valueOf(seedPersona)).param("step", "6"))
         .andExpect(status().isOk())

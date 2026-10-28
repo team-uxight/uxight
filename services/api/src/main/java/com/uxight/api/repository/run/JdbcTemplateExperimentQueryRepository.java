@@ -35,16 +35,22 @@ public class JdbcTemplateExperimentQueryRepository implements ExperimentQueryRep
   // agent_unreachable: 마지막 회차가 queued 인데 POST /runs 가 닿지 않았다(unreachable · timeout) — 웹 배너용. status 를 함께 봐야
   //   timeout 뒤 AI 모듈이 실제로 받아 accepted 가 된 회차에 배너가 뜨지 않는다. 재전송이 닿으면 sent 가 되어 사라진다.
   // state 는 겹치지 않는 네 분류다. 진행 중은 취소 요청을 뺀 것이라 실험 요청의 409(진행 중인 실험) 범위와 다르다.
-  // TODO(승인): improvements · approvals 도입 때 state 에 awaiting_approval 을 넣는다 — 마지막 회차가 done 이고
-  //   취소 요청이 없으며 다음 회차 승인 가능 조건(design-decision 2.2)을 충족하는 개선안이 있으면 awaiting_approval,
-  //   아니면 completed. 개선안을 전부 반려해 끝난 실험의 완료 시각(finished_at)은 마지막 반려 시각으로 바꾼다.
-  //   지금은 done 이 모두 completed 다.
+  // awaiting_approval: 마지막 회차가 done 이고 취소 요청이 없으며 다음 회차 승인 가능 조건(design-decision 2.2)을 충족 —
+  //   mode loop · 회차 수 < loop_max · 이 회차에 승인된 개선안 없음 · 아직 결정하지 않은 개선안이 있음. 아니면 completed
+  //   (diagnose · improve, loop_max 도달, 개선안 없음, 전부 반려). 다음 회차 승인(ImprovementService)이 같은 조건을 잠금 안에서 다시 본다.
+  // finished_at: 개선안을 전부 반려해 끝난 실험은 마지막 반려 시각이 완료 시각이다 (회차의 finished_at 은 시뮬레이션이 끝난 시각).
   private static final String EXPERIMENTS_SQL = """
       SELECT r.first_run_id, r.run_id, r.status, r.mode, r.progress,
              (SELECT COUNT(*) FROM runs x WHERE x.first_run_id = r.first_run_id) AS round_no,
              CASE
                WHEN r.cancel_requested OR r.status IN ('failed', 'cancelled') THEN 'stopped'
                WHEN r.status IN ('queued', 'accepted', 'running') THEN 'in_progress'
+               WHEN r.mode = 'loop'
+                    AND (SELECT COUNT(*) FROM runs x WHERE x.first_run_id = r.first_run_id) < r.loop_max
+                    AND NOT EXISTS (SELECT 1 FROM improvements i JOIN approvals a ON a.improvement_id = i.improvement_id
+                                     WHERE i.run_id = r.run_id AND a.decision = 'approve')
+                    AND EXISTS (SELECT 1 FROM improvements i LEFT JOIN approvals a ON a.improvement_id = i.improvement_id
+                                 WHERE i.run_id = r.run_id AND a.approval_id IS NULL) THEN 'awaiting_approval'
                ELSE 'completed'
              END AS state,
              CASE
@@ -62,7 +68,15 @@ public class JdbcTemplateExperimentQueryRepository implements ExperimentQueryRep
              (SELECT SUM(TIMESTAMPDIFF(SECOND, COALESCE(x.started_at, x.created_at), COALESCE(x.finished_at, NOW())))
                 FROM runs x WHERE x.first_run_id = r.first_run_id) AS elapsed_seconds,
              (SELECT COALESCE(SUM(x.tokens), 0) FROM runs x WHERE x.first_run_id = r.first_run_id) AS tokens,
-             r.finished_at,
+             CASE
+               WHEN r.status = 'done' AND NOT r.cancel_requested
+                    AND EXISTS (SELECT 1 FROM improvements i WHERE i.run_id = r.run_id)
+                    AND NOT EXISTS (SELECT 1 FROM improvements i LEFT JOIN approvals a ON a.improvement_id = i.improvement_id
+                                     WHERE i.run_id = r.run_id AND (a.approval_id IS NULL OR a.decision = 'approve'))
+                 THEN (SELECT MAX(a.decided_at) FROM improvements i JOIN approvals a ON a.improvement_id = i.improvement_id
+                        WHERE i.run_id = r.run_id)
+               ELSE r.finished_at
+             END AS finished_at,
              f.created_at
         FROM runs r
         JOIN runs f ON f.run_id = r.first_run_id
