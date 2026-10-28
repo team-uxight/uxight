@@ -59,10 +59,15 @@ def record_usage(
 class LLMClient:
     """`chat()` 하나. `response_format` 을 주면 구조화 출력(parse), 없으면 일반 응답."""
 
-    def __init__(self, client: Any | None = None, model: str | None = None) -> None:
+    def __init__(
+        self, client: Any | None = None, model: str | None = None, max_retries: int = 2
+    ) -> None:
+        # max_retries: 실패한 호출을 SDK 가 다시 보내는 횟수 (SDK 기본 2).
         self.model = model or os.environ["LLM_MODEL"]
         self._client = client or AsyncOpenAI(
-            base_url=os.environ["LLM_BASE_URL"], api_key=os.environ["LLM_API_KEY"]
+            base_url=os.environ["LLM_BASE_URL"],
+            api_key=os.environ["LLM_API_KEY"],
+            max_retries=max_retries,
         )
 
     async def chat(
