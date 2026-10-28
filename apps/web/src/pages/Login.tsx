@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import BrandLogo from '../components/BrandLogo';
 import GoogleSignInButton from '../components/GoogleSignInButton';
-import { API_BASE_URL, apiErrorMessage, loginWithGoogle, setAccessToken } from '../auth';
+import { API_BASE_URL, apiErrorMessage, getCurrentUserRole, getRoleHomePath, loginWithGoogle, setAccessToken } from '../auth';
 import './Login.css';
 
 export default function Login() {
@@ -20,7 +20,8 @@ export default function Login() {
     setLoading(true);
     try {
       await loginWithGoogle(idToken);
-      navigate('/dashboard', { replace: true });
+      const role = await getCurrentUserRole();
+      navigate(getRoleHomePath(role), { replace: true });
     } finally {
       setLoading(false);
     }
@@ -54,7 +55,8 @@ export default function Login() {
         throw new Error('서버에서 올바르지 않은 인증 응답을 받았습니다.');
       }
       setAccessToken(body.accessToken);
-      navigate('/dashboard', { replace: true });
+      const role = await getCurrentUserRole();
+      navigate(getRoleHomePath(role), { replace: true });
     } catch (err: unknown) {
       setErrorMsg(err instanceof Error ? err.message : '로그인 중 오류가 발생했습니다.');
     } finally {

@@ -2605,3 +2605,19 @@
 		transition-duration: .01ms !important;
 	}
 }
+
+.rd-admin-link {
+	display: inline-flex;
+	min-height: 34px;
+	align-items: center;
+	justify-content: center;
+	padding: 0 12px;
+	border: 1px solid rgb(49 42 84 / 14%);
+	border-radius: 999px;
+	background: rgb(255 255 255 / 78%);
+	color: #343248;
+	font-size: 11px;
+	font-weight: 700;
+	text-decoration: none;
+	transition: background-color 150ms ease, transform 150ms ease;
+}

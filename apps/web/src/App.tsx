@@ -11,6 +11,10 @@ import RDiagnosis from './pages/R-Diagnosis';
 import RFixes from './pages/R-Fixes';
 import RReports from './pages/R-Reports';
 import DesignSystem from './pages/DesignSystem';
+import AdminLayout from './components/AdminLayout';
+import AdminAccounts from './pages/A-Accounts';
+import AdminPolicy from './pages/A-Policy';
+import AdminUsage from './pages/A-Usage';
 import SomViewerDemo from './pages/SomViewerDemo';
 
 export default function App() {
@@ -23,7 +27,7 @@ export default function App() {
         <Route path="/design-system" element={<DesignSystem />} />
         <Route path="/som-viewer-demo" element={<SomViewerDemo />} />
 
-        <Route element={<ProtectedRoute />}>
+        <Route element={<ProtectedRoute allowedRoles={['admin', 'maintainer', 'researcher']} />}>
           <Route element={<ResearcherLayout />}>
             <Route path="/dashboard" element={<RDashboard />} />
             <Route path="/run-setting" element={<RRunSetting />} />
@@ -33,6 +37,14 @@ export default function App() {
             <Route path="/fixes" element={<RFixes />} />
             <Route path="/reports" element={<RReports />} />
             <Route path="/history" element={<RReports />} />
+          </Route>
+        </Route>
+
+        <Route element={<ProtectedRoute allowedRoles={['admin', 'maintainer']} />}>
+          <Route element={<AdminLayout />}>
+            <Route path="/admin/accounts" element={<AdminAccounts />} />
+            <Route path="/admin/policy" element={<AdminPolicy />} />
+            <Route path="/admin/usage" element={<AdminUsage />} />
           </Route>
         </Route>
 

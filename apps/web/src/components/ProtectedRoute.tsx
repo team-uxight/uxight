@@ -1,29 +1,22 @@
 import { useEffect, useState } from 'react';
 import { Navigate, Outlet } from 'react-router-dom';
-import { API_BASE_URL, authenticatedFetch } from '../auth';
-
-type UserMe = { role: string };
+import { getCurrentUserRole, getRoleHomePath, type UserRole } from '../auth';
 
 interface ProtectedRouteProps {
-  allowedRoles?: string[];
+  allowedRoles?: UserRole[];
 }
 
 export default function ProtectedRoute({ allowedRoles }: ProtectedRouteProps) {
   const [authStatus, setAuthStatus] = useState<'checking' | 'authenticated' | 'unauthenticated'>('checking');
-  const [userRole, setUserRole] = useState<string | null>(null);
+  const [userRole, setUserRole] = useState<UserRole | null>(null);
 
   useEffect(() => {
     let active = true;
 
-    authenticatedFetch(`${API_BASE_URL}/api/users/me`)
-      .then(async (res) => {
-        if (!res.ok) {
-          throw new Error('Session is not authenticated');
-        }
-
-        const user = (await res.json()) as UserMe;
+    getCurrentUserRole()
+      .then((role) => {
         if (active) {
-          setUserRole(user.role);
+          setUserRole(role);
           setAuthStatus('authenticated');
         }
       })
@@ -47,9 +40,8 @@ export default function ProtectedRoute({ allowedRoles }: ProtectedRouteProps) {
     return <Navigate to="/login" replace />;
   }
 
-  if (allowedRoles && userRole && !allowedRoles.includes(userRole)) {
-    // 권한이 없으면 메인 대시보드로 이동
-    return <Navigate to="/dashboard" replace />;
+  if (allowedRoles && (!userRole || !allowedRoles.includes(userRole))) {
+    return <Navigate to={userRole ? getRoleHomePath(userRole) : '/login'} replace />;
   }
 
   return <Outlet />;

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 import BrandLogo from './BrandLogo';
-import { API_BASE_URL, apiErrorMessage, authenticatedFetch, clearAccessToken } from '../auth';
+import { API_BASE_URL, apiErrorMessage, authenticatedFetch, clearAccessToken, type UserRole } from '../auth';
 import '../pages/R-Dashboard.css';
 
 type IconName = 'dashboard' | 'monitor' | 'diagnosis' | 'fixes' | 'reports' | 'history' | 'search' | 'settings' | 'bell' | 'logout' | 'menu';
@@ -41,6 +41,7 @@ function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
 export default function ResearcherLayout() {
 	const navigate = useNavigate();
 	const [userName, setUserName] = useState('리서처');
+	const [userRole, setUserRole] = useState<UserRole | null>(null);
 	const [query, setQuery] = useState('');
 	const [notice, setNotice] = useState('');
 	const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -54,8 +55,18 @@ export default function ResearcherLayout() {
 					if (active) setNotice(await apiErrorMessage(response, '사용자 정보를 불러오지 못했습니다.'));
 					return;
 				}
-				const user = (await response.json()) as { name?: string };
-				if (active && user.name) setUserName(user.name);
+				const user: unknown = await response.json();
+				if (typeof user !== 'object' || user === null) {
+					throw new Error('서버에서 올바르지 않은 사용자 정보를 받았습니다.');
+				}
+				if ('name' in user && typeof user.name === 'string' && active) setUserName(user.name);
+				if (
+					'role' in user &&
+					(user.role === 'admin' || user.role === 'maintainer' || user.role === 'researcher') &&
+					active
+				) {
+					setUserRole(user.role);
+				}
 			})
 			.catch((error: unknown) => {
 				if (active) setNotice(error instanceof Error ? error.message : '사용자 정보를 불러오지 못했습니다.');
@@ -142,6 +153,11 @@ export default function ResearcherLayout() {
 						{new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric' }).format(new Date())}
 					</time>
 					<div className="rd-top-actions">
+						{(userRole === 'admin' || userRole === 'maintainer') && (
+							<Link className="rd-admin-link" to="/admin/accounts" onClick={() => setMobileNavOpen(false)}>
+								관리자 페이지
+							</Link>
+						)}
 						<button type="button" className="rd-icon-button" aria-label="설정" onClick={() => setNotice('설정은 준비 중입니다.')}><Icon name="settings" size={22} /></button>
 						<button type="button" className="rd-icon-button" aria-label="알림" onClick={() => setNotice('새 알림이 없습니다.')}><Icon name="bell" size={22} /></button>
 					</div>
