@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from ..driver.base import ActionResult, Driver, Observation
+from ..guard.domain import blocked_destination
 from ..schemas import Action
 
 
@@ -52,11 +53,19 @@ class Decider(ABC):
 class PersonaAgent:
     """Driver를 통해 대상 URL에서 태스크 목표를 수행하는 주체."""
 
-    def __init__(self, persona: dict, task: dict, driver: Driver, decider: Decider) -> None:
+    def __init__(
+        self,
+        persona: dict,
+        task: dict,
+        driver: Driver,
+        decider: Decider,
+        allowed_hosts: frozenset[str],
+    ) -> None:
         self._persona = persona
         self._task = task
         self._driver = driver
         self._decider = decider
+        self._allowed_hosts = allowed_hosts
         self.history: list[StepResult] = []
 
     async def step(self) -> StepResult:
@@ -68,6 +77,13 @@ class PersonaAgent:
         if decision.action is None:
             # 행동을 얻지 못한 step 은 브라우저에서 아무것도 하지 않고 기록만 남긴다.
             result = ActionResult(ok=False, error=decision.error, error_code=decision.error_code)
+        elif destination := blocked_destination(decision.action, observation, self._allowed_hosts):
+            # 가드 차단 — 실행하지 않는다. 페이지는 그대로다.
+            result = ActionResult(
+                ok=False,
+                error=f"Action blocked by domain policy: {destination[:200]}",
+                error_code="DOMAIN_BLOCKED",
+            )
         else:
             result = await self._driver.act(decision.action)
         step_result = StepResult(

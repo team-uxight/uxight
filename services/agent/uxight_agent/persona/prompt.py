@@ -90,7 +90,13 @@ def _history_text(history: list) -> str:
                 did += f" {action.element_id}번"
             if action.kind == "scroll":
                 did += f" {action.value}"
-        lines.append(f"- {number}번째: {did} → {'성공' if step.result.ok else '실패'}")
+        if step.result.ok:
+            outcome = "성공"
+        elif step.result.error_code == "DOMAIN_BLOCKED":
+            outcome = "차단됨 (허용 도메인 밖 링크)"
+        else:
+            outcome = "실패"
+        lines.append(f"- {number}번째: {did} → {outcome}")
     return "\n".join(lines)
 
 

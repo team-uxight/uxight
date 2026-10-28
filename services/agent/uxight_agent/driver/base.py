@@ -22,6 +22,7 @@ class Observation:
     """observe()가 돌려주는 현재 페이지 상태.
 
     dom은 LLM에게 보여줄 텍스트, element_map은 ID → 요소 정보.
+    링크 요소의 url 은 브라우저가 풀어 쓴 목적지다 — 도메인 가드가 이것으로 막는다.
     screenshot은 SoM 방식 드라이버가 찍은 PNG 바이트이고, DOM 방식에서는 None이다.
     SoM 방식도 입력칸을 가린 그림을 얻지 못하면 None이다 — 그 step은 글 관측(dom)만으로 진행한다.
     """

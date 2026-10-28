@@ -114,7 +114,7 @@ class RecordingDriver(Driver):
 def test_broken_reply_is_not_executed(scripted_llm) -> None:
     llm, _ = scripted_llm(BROKEN, NORMAL)
     driver = RecordingDriver()
-    agent = PersonaAgent(PERSONA, TASK, driver, LLMDecider(llm))
+    agent = PersonaAgent(PERSONA, TASK, driver, LLMDecider(llm), frozenset({"copy.example"}))
 
     first = asyncio.run(agent.step())
     second = asyncio.run(agent.step())

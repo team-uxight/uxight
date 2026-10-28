@@ -127,6 +127,9 @@ _COLLECT_ELEMENTS_JS = """
       // placeholder도 입력칸에 그려지는 글이라 글이 안 보이면 뺀다.
       placeholder: visibility === 'visible' ? el.getAttribute('placeholder') : null,
       href: el.getAttribute('href'),
+      // 브라우저가 풀어 쓴 링크 목적지(<base> · 역슬래시 · 스킴 생략까지 반영). 도메인 가드가 쓴다.
+      // 관측 글에는 넣지 않는다 (_format_element 는 href 속성만 쓴다).
+      url: typeof el.href === 'string' ? el.href : null,
       options: tag === 'select'
         ? Array.from(el.options).map(o => ({ value: o.value, text: o.text.trim() }))
         : null,

@@ -82,6 +82,14 @@ class FakeRunPersonaRepository:
             self.statuses[persona_id] = status
 
 
+class FakeAuditLogRepository:
+    def __init__(self) -> None:
+        self.rows: list[tuple[int, int, dict]] = []
+
+    def add_blocked_action(self, run_id: int, persona_id: int, detail: dict) -> None:
+        self.rows.append((run_id, persona_id, detail))
+
+
 class Browsers:
     """가짜 브라우저 집계 — 띄운 수 · 지금 열린 수 · 동시에 열린 최대 수."""
 
@@ -146,9 +154,13 @@ def fakes(monkeypatch: pytest.MonkeyPatch, tmp_path) -> SimpleNamespace:
     monkeypatch.setattr(orchestrator_module, "step_log_writer", StepLogWriter(str(tmp_path)))
     monkeypatch.setattr(orchestrator_module, "run_repository", runs)
     monkeypatch.setattr(orchestrator_module, "run_persona_repository", personas)
+    audits = FakeAuditLogRepository()
+    monkeypatch.setattr(orchestrator_module, "audit_log_repository", audits)
     monkeypatch.setattr(orchestrator_module, "CANCEL_POLL_SECONDS", POLL_SECONDS)
     set_global_cap(monkeypatch, 3)
-    return SimpleNamespace(browsers=browsers, runs=runs, personas=personas)
+    return SimpleNamespace(
+        browsers=browsers, runs=runs, personas=personas, audits=audits, log_dir=tmp_path
+    )
 
 
 def use_decider(monkeypatch: pytest.MonkeyPatch, decider: Decider) -> None:
@@ -543,3 +555,46 @@ def test_three_consecutive_parse_failures_fail_persona(
 
     assert fakes.personas.statuses == {1: "fail"}
     assert fakes.personas.steps[1] == 6
+
+
+def test_outside_link_click_is_blocked_logged_and_audited(
+    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    acted: list[Action] = []
+
+    class LinkPageDriver(Driver):
+        async def start(self, url: str) -> None:
+            pass
+
+        async def observe(self) -> Observation:
+            return Observation(
+                url="https://example.com/",
+                title="t",
+                dom='[1] <a href="https://evil.example/"> "밖"',
+                element_map={1: {"tag": "a", "url": "https://evil.example/"}},
+            )
+
+        async def act(self, action: Action) -> ActionResult:
+            acted.append(action)
+            return ActionResult(ok=True)
+
+        async def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(orchestrator_module, "DomDriver", LinkPageDriver)
+    use_decider(
+        monkeypatch,
+        ScriptedDecider(
+            Decision(Action(kind="click", element_id=1)), Decision(Action(kind="done"))
+        ),
+    )
+
+    asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)], max_steps=5)))
+
+    assert acted == [Action(kind="done")]  # 차단된 click 은 브라우저에 가지 않았다
+    assert fakes.personas.statuses == {1: "done"}
+    ((run_id, persona_id, detail),) = fakes.audits.rows
+    assert (run_id, persona_id) == (RUN_ID, 1)
+    assert detail["reason"] == "domain"
+    assert detail["step"] == 1
+    assert "https://evil.example/" in detail["error"]

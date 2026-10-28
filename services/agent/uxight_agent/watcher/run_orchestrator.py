@@ -7,9 +7,11 @@ from typing import Literal, TypeVar
 
 from ..db import settings
 from ..driver.dom_driver import DomDriver
+from ..guard.domain import allowed_hosts
 from ..llm import LLMClient
 from ..persona.llm_decider import LLMDecider
 from ..persona.persona_agent import Decider, PersonaAgent, StepResult
+from ..repositories.audit_log_repository import audit_log_repository
 from ..repositories.run_persona_repository import PersonaOutcome, run_persona_repository
 from ..repositories.run_repository import RunSnapshot, run_repository
 from .step_log_writer import step_log_writer
@@ -121,6 +123,7 @@ class RunOrchestrator:
 
     async def _run_all_personas(self, run_id: int, snapshot: RunSnapshot) -> None:
         target_url = snapshot.target_url
+        hosts = allowed_hosts(target_url, snapshot.allowed_domains)
         task = snapshot.task
         personas = snapshot.personas
         policy = snapshot.policy
@@ -141,6 +144,7 @@ class RunOrchestrator:
                     self._run_single_persona(
                         run_id,
                         target_url,
+                        hosts,
                         task,
                         persona,
                         max_steps,
@@ -221,6 +225,7 @@ class RunOrchestrator:
         self,
         run_id: int,
         target_url: str,
+        hosts: frozenset[str],
         task: dict,
         persona: dict,
         max_steps: int,
@@ -238,7 +243,14 @@ class RunOrchestrator:
             else:
                 try:
                     outcome = await self._drive_persona(
-                        run_id, target_url, task, persona, max_steps, max_seconds, cancel_event
+                        run_id,
+                        target_url,
+                        hosts,
+                        task,
+                        persona,
+                        max_steps,
+                        max_seconds,
+                        cancel_event,
                     )
                     if outcome == "cancelled":
                         # _drive_persona는 async with를 빠져나온 뒤 반환하므로
@@ -301,6 +313,7 @@ class RunOrchestrator:
         self,
         run_id: int,
         target_url: str,
+        hosts: frozenset[str],
         task: dict,
         persona: dict,
         max_steps: int,
@@ -322,7 +335,7 @@ class RunOrchestrator:
                 if not started:
                     logger.info("run=%s persona=%s 브라우저 시작 중단", run_id, persona_id)
                     return "cancelled"
-                agent = PersonaAgent(persona, task, driver, make_decider(run_id))
+                agent = PersonaAgent(persona, task, driver, make_decider(run_id), hosts)
                 parse_failures = 0
                 # 한 스텝 = observe → decide(LLM 1회) → act.
                 # Agent 가 done 을 내거나 max_steps 에 도달하면 종료.
@@ -344,6 +357,20 @@ class RunOrchestrator:
                         run_id, persona_id, self._to_step_log(run_id, persona_id, step_no, step)
                     )
                     run_persona_repository.increment_steps(run_id, persona_id)
+                    if step.result.error_code == "DOMAIN_BLOCKED":
+                        # 차단은 step 로그와 감사 로그에 같이 남긴다 (architecture §9 L1 · L6).
+                        audit_log_repository.add_blocked_action(
+                            run_id,
+                            persona_id,
+                            {
+                                "persona_id": persona_id,
+                                "step": step_no,
+                                "reason": "domain",
+                                "action": step.action.model_dump(),
+                                "url": step.observation.url,
+                                "error": step.result.error,
+                            },
+                        )
                     logger.info(
                         "run=%s persona=%s step=%s url=%s action=%r result=%s",
                         run_id,

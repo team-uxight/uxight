@@ -1,4 +1,8 @@
+import functools
+import http.server
 import json
+import threading
+from pathlib import Path
 
 import httpx
 import pytest
@@ -54,3 +58,22 @@ def scripted_llm(tmp_path, monkeypatch):
         return LLMClient(client=client, model="test-model"), requests
 
     return make
+
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+@pytest.fixture(scope="session")
+def fixture_server():
+    """tests/fixtures 를 http://127.0.0.1:<port>/ 로 띄운다 (도메인 가드는 http 주소로 본다)."""
+    handler = functools.partial(_QuietHandler, directory=str(FIXTURES))
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield f"http://127.0.0.1:{server.server_address[1]}"
+    server.shutdown()
+
+
+class _QuietHandler(http.server.SimpleHTTPRequestHandler):
+    def log_message(self, *args) -> None:
+        pass
