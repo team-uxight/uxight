@@ -145,7 +145,7 @@ BYPASS_PAGE = """<!doctype html><html><head><meta charset="utf-8"></head><body>
 <a href="javascript:location.href='{ext}'">js link</a>
 <svg width="200" height="40"><a href="{ext}"><text x="5" y="20">svg link</text></a></svg>
 <a href="/redir">redirect link</a>
-<form action="{ext}" method="get"><button type="submit">form submit</button></form>
+<form action="{ext}" method="get"><button type="submit">form go</button></form>
 <a href="/inside" onmousedown="this.href='{ext}'">rewrite link</a>
 </body></html>"""
 
@@ -198,7 +198,7 @@ def two_sites():
 
 
 @pytest.mark.parametrize(
-    "label", ["js link", "svg link", "redirect link", "form submit", "rewrite link"]
+    "label", ["js link", "svg link", "redirect link", "form go", "rewrite link"]
 )
 def test_navigation_outside_is_blocked_whatever_the_route(two_sites, label: str) -> None:
     target, ext, hits = two_sites

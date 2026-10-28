@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="ko">
+<head><meta charset="utf-8"><title>버튼</title></head>
+<body>
+  <!-- 위험: 누르면 제목이 바뀐다. 막히면 제목이 그대로다. -->
+  <button type="button" onclick="document.title='탈퇴됨'">회원 탈퇴</button>
+  <button type="button" onclick="document.title='결제됨'">결제하기</button>
+  <form method="get" action="#"><input type="submit" value="Delete account" onclick="document.title='삭제됨'; return false"></form>
+  <a href="#" onclick="document.title='확정됨'; return false">구매 확정</a>
+  <form method="post" action="#"><button onclick="document.title='등록됨'; return false">등록</button></form>
+  <!-- 안전 -->
+  <form method="get" action="#"><button onclick="return false">검색</button></form>
+  <a href="#notice">공지사항</a>
+  <button type="button">다음</button>
+  <form method="get" action="#"><input type="submit" value="Search" onclick="return false"></form>
+  <button type="button" aria-label="메뉴 열기"></button>
+</body>
+</html>
