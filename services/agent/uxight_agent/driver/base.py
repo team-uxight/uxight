@@ -16,6 +16,7 @@ class ActionResult:
     error: str | None = None
     error_code: str | None = None
     url_after: str | None = None  # 행동 뒤 페이지 주소. 모르면 None (로그엔 행동 전 주소)
+    destination: str | None = None  # DOMAIN_BLOCKED 일 때 막은 목적지 (쿼리 뺌, 200자 안)
 
 
 @dataclass(frozen=True)
@@ -45,6 +46,11 @@ class Driver(ABC):
 
     # 관측 방식 (step 로그 observation.mode). 화면 그림을 모델에 보내는 드라이버는 "som".
     mode = "dom"
+
+    def __init__(self, allowed_hosts: frozenset[str] = frozenset()) -> None:
+        # 허용 도메인('호스트:포트', guard.domain). 드라이버는 이 밖으로 이동하지 않는다.
+        # start(url) 의 주소는 늘 허용이다.
+        self._allowed_hosts = allowed_hosts
 
     @abstractmethod
     async def start(self, url: str) -> None:

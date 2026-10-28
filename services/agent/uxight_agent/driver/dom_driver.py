@@ -5,6 +5,7 @@ import re
 from playwright.async_api import Browser, Page, Playwright, async_playwright
 from playwright.async_api import Error as PlaywrightError
 
+from ..guard.domain import host_key, is_allowed, safe_destination
 from ..schemas import Action
 from .base import ActionResult, Driver, Observation
 
@@ -142,7 +143,9 @@ _COLLECT_ELEMENTS_JS = """
       href: el.getAttribute('href'),
       // 브라우저가 풀어 쓴 링크 목적지(<base> · 역슬래시 · 스킴 생략까지 반영). 도메인 가드가 쓴다.
       // 관측 글에는 넣지 않는다 (_format_element 는 href 속성만 쓴다).
-      url: typeof el.href === 'string' ? el.href : null,
+      // SVG 의 <a> 는 href 가 문자열이 아니다 (SVGAnimatedString) — 문서 주소에 대해 풀어 쓴다.
+      url: typeof el.href === 'string' ? el.href
+        : el.href?.baseVal ? new URL(el.href.baseVal, document.baseURI).href : null,
       options: tag === 'select'
         ? Array.from(el.options).map(o => ({ value: o.value, text: o.text.trim() }))
         : null,
@@ -157,7 +160,9 @@ _COLLECT_ELEMENTS_JS = """
 class DomDriver(Driver):
     """DOM 기반 Driver. 상호작용 요소에 ID를 붙여 텍스트로 보여주고, 그 ID로 행동한다."""
 
-    def __init__(self, headless: bool = True) -> None:
+    def __init__(self, headless: bool = True, allowed_hosts: frozenset[str] = frozenset()) -> None:
+        super().__init__(allowed_hosts)
+        self._blocked_url: str | None = None  # 이번 행동 중 끊은 이동의 목적지
         self._headless = headless
         self._playwright: Playwright | None = None
         self._browser: Browser | None = None
@@ -168,7 +173,29 @@ class DomDriver(Driver):
         self._playwright = await async_playwright().start()
         self._browser = await self._playwright.chromium.launch(headless=self._headless)
         self._page = await self._browser.new_page()
+        start_host = host_key(url)
+        if start_host:
+            self._allowed_hosts = self._allowed_hosts | {start_host}
+        # 새 창(target=_blank)도 같은 context 라 함께 막힌다.
+        await self._page.context.route("**/*", self._guard_navigation)
         await self._page.goto(url, wait_until="domcontentloaded", timeout=NAVIGATION_TIMEOUT_MS)
+
+    async def _guard_navigation(self, route) -> None:
+        """허용 밖으로 가는 top-level 이동 요청을 끊는다 (guard.domain 2단계).
+
+        이미지 · 스크립트 같은 하위 요청과 iframe 이동은 그대로 둔다 — 화면이 사람이 보는 것과
+        달라지지 않게. 'aborted' 로 끊으면 오류 화면 없이 지금 페이지에 머문다.
+        """
+        request = route.request
+        if (
+            request.is_navigation_request()
+            and request.frame.parent_frame is None
+            and not is_allowed(request.url, self._allowed_hosts)
+        ):
+            self._blocked_url = request.url
+            await route.abort("aborted")
+            return
+        await route.continue_()
 
     async def observe(self) -> Observation:
         observation = await self._observe_page()
@@ -200,13 +227,35 @@ class DomDriver(Driver):
 
     async def act(self, action: Action) -> ActionResult:
         # 요구사항: 실패 시 예외 대신 결과를 반환한다. 어떤 예외든 여기서 결과로 바꾼다.
+        page = self._require_page()
+        before = page.url
+        self._blocked_url = None
         try:
             result = await self._perform(action)
         except Exception as e:
             first_line = str(e).splitlines()[0] if str(e) else ""
             result = ActionResult(ok=False, error=f"{type(e).__name__}: {first_line}")
+        # 요청을 끊지 못한 이동(리다이렉트 등)으로 허용 밖에 와 있으면 행동 전 주소로 되돌린다
+        # (guard.domain 3단계).
+        outside = None if is_allowed(page.url, self._allowed_hosts) else page.url
+        if outside:
+            try:
+                await page.goto(
+                    before, wait_until="domcontentloaded", timeout=NAVIGATION_TIMEOUT_MS
+                )
+            except PlaywrightError:
+                pass  # 되돌리지 못해도 차단으로 기록한다. 다음 관측은 지금 주소를 본다.
+        destination = self._blocked_url or outside
+        if destination:
+            safe = safe_destination(destination)
+            result = ActionResult(
+                ok=False,
+                error=f"Action blocked by domain policy: {safe}",
+                error_code="DOMAIN_BLOCKED",
+                destination=safe,
+            )
         # 행동 뒤 주소 (step 로그 result.url_after).
-        return dataclasses.replace(result, url_after=self._page.url if self._page else None)
+        return dataclasses.replace(result, url_after=page.url)
 
     async def close(self) -> None:
         if self._browser is not None:

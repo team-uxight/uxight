@@ -103,7 +103,8 @@ class Browsers:
 
 def fake_driver_class(browsers: Browsers) -> type[Driver]:
     class FakeDriver(Driver):
-        def __init__(self) -> None:
+        def __init__(self, allowed_hosts: frozenset[str] = frozenset()) -> None:
+            super().__init__(allowed_hosts)
             self._started = False
 
         async def start(self, url: str) -> None:
@@ -597,4 +598,5 @@ def test_outside_link_click_is_blocked_logged_and_audited(
     assert (run_id, persona_id) == (RUN_ID, 1)
     assert detail["reason"] == "domain"
     assert detail["step"] == 1
-    assert "https://evil.example/" in detail["error"]
+    assert detail["destination"] == "https://evil.example/"
+    assert isinstance(detail, dict)

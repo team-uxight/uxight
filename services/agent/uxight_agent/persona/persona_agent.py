@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from ..driver.base import ActionResult, Driver, Observation
-from ..guard.domain import blocked_destination
+from ..guard.domain import blocked_destination, safe_destination
 from ..schemas import Action
 
 
@@ -82,10 +82,12 @@ class PersonaAgent:
             result = ActionResult(ok=False, error=decision.error, error_code=decision.error_code)
         elif destination := blocked_destination(decision.action, observation, self._allowed_hosts):
             # 가드 차단 — 실행하지 않는다. 페이지는 그대로다.
+            safe = safe_destination(destination)
             result = ActionResult(
                 ok=False,
-                error=f"Action blocked by domain policy: {destination[:200]}",
+                error=f"Action blocked by domain policy: {safe}",
                 error_code="DOMAIN_BLOCKED",
+                destination=safe,
             )
         else:
             act_start = time.monotonic()

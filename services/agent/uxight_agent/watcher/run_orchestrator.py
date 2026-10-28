@@ -299,9 +299,11 @@ class RunOrchestrator:
                     persona_slots.release()
 
     @contextlib.asynccontextmanager
-    async def _open_driver(self, run_id: int, persona_id: int) -> AsyncIterator[DomDriver]:
+    async def _open_driver(
+        self, run_id: int, persona_id: int, hosts: frozenset[str]
+    ) -> AsyncIterator[DomDriver]:
         """나갈 때 브라우저를 닫되 BROWSER_CLOSE_TIMEOUT_SECONDS 까지만 기다린다."""
-        driver = DomDriver()
+        driver = DomDriver(allowed_hosts=hosts)
         try:
             yield driver
         finally:
@@ -340,7 +342,7 @@ class RunOrchestrator:
         # 닫기 상한(BROWSER_CLOSE_TIMEOUT_SECONDS)만 따른다.
         deadline = asyncio.timeout(max_seconds)
         try:
-            async with self._open_driver(run_id, persona_id) as driver, deadline:
+            async with self._open_driver(run_id, persona_id, hosts) as driver, deadline:
                 started, _ = await self._run_unless_cancelled(
                     driver.start(target_url), cancel_event
                 )
@@ -390,7 +392,7 @@ class RunOrchestrator:
                                 "reason": "domain",
                                 "action": _action_log(step.action),
                                 "url": step.observation.url,
-                                "error": step.result.error,
+                                "destination": step.result.destination,
                             },
                         )
                     logger.info(
