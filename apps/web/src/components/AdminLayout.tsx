@@ -71,7 +71,7 @@ export default function AdminLayout() {
 				</nav>
 
 				<div className="admin-sidebar-bottom">
-					<button className="admin-utility-link" type="button" disabled>
+					<button className="admin-utility-link" type="button" onClick={() => setNotice('새 알림이 없습니다.')}>
 						<Bell size={18} aria-hidden="true" />
 						<span>알림</span>
 					</button>
@@ -89,20 +89,22 @@ export default function AdminLayout() {
 						<input
 							value={accountSearch}
 							onChange={(event) => setAccountSearch(event.target.value)}
-							placeholder="계정 이름 또는 이메일 검색"
-							aria-label="계정 이름 또는 이메일 검색"
+							placeholder="Search"
+							aria-label="Search"
 						/>
 					</label>
 					<div className="admin-topbar-date"><CalendarDays size={15} aria-hidden="true" />{new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric' }).format(new Date())}</div>
-					<div className="admin-user-profile" aria-label={`${user?.name ?? '사용자'} · ${user?.role ?? '권한 확인 중'}`}>
+					<div className="admin-top-actions">
 						<Link className="admin-researcher-link" to="/dashboard">리서처 페이지</Link>
-						<svg className="admin-user-avatar" viewBox="0 0 40 40" role="img" aria-label="기본 프로필">
-							<circle className="admin-user-avatar-ring" cx="20" cy="20" r="17" />
-							<circle className="admin-user-avatar-head" cx="20" cy="15" r="6" />
-							<path className="admin-user-avatar-body" d="M9 33c.8-6.2 4.8-9.4 11-9.4s10.2 3.2 11 9.4" />
-						</svg>
-						<span className="admin-user-name">{user?.name ?? '불러오는 중'}</span>
-						<span className="admin-role-chip">{user?.role === 'maintainer' ? 'Maintainer' : user?.role === 'admin' ? 'Admin' : '권한 확인 중'}</span>
+						<div className="admin-user-profile" aria-label={`${user?.name ?? '사용자'} · ${user?.role ?? '권한 확인 중'}`}>
+							<svg className="admin-user-avatar" viewBox="0 0 40 40" role="img" aria-label="기본 프로필">
+								<circle className="admin-user-avatar-ring" cx="20" cy="20" r="17" />
+								<circle className="admin-user-avatar-head" cx="20" cy="15" r="6" />
+								<path className="admin-user-avatar-body" d="M9 33c.8-6.2 4.8-9.4 11-9.4s10.2 3.2 11 9.4" />
+							</svg>
+							<span className="admin-user-name">{user?.name ?? '불러오는 중'}</span>
+							<span className="admin-role-chip">{user?.role === 'maintainer' ? 'Maintainer' : user?.role === 'admin' ? 'Admin' : '권한 확인 중'}</span>
+						</div>
 					</div>
 				</header>
 				{notice && (

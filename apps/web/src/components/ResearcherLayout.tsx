@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { Bell, CalendarDays, LogOut } from 'lucide-react';
 import BrandLogo from './BrandLogo';
 import { API_BASE_URL, apiErrorMessage, authenticatedFetch, clearAccessToken, type UserRole } from '../auth';
 import '../pages/R-Dashboard.css';
 
-type IconName = 'dashboard' | 'monitor' | 'diagnosis' | 'fixes' | 'reports' | 'history' | 'search' | 'settings' | 'bell' | 'logout' | 'menu';
+type IconName = 'dashboard' | 'monitor' | 'diagnosis' | 'fixes' | 'reports' | 'compare' | 'search';
 
 const navigation: { label: string; icon: IconName; to: string }[] = [
 	{ label: 'Dashboard', icon: 'dashboard', to: '/dashboard' },
@@ -12,7 +13,7 @@ const navigation: { label: string; icon: IconName; to: string }[] = [
 	{ label: 'Diagnosis', icon: 'diagnosis', to: '/diagnosis' },
 	{ label: 'Fixes', icon: 'fixes', to: '/fixes' },
 	{ label: 'Reports', icon: 'reports', to: '/reports' },
-	{ label: 'History', icon: 'history', to: '/history' },
+	{ label: 'Compare', icon: 'compare', to: '/compare' },
 ];
 
 function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
@@ -22,18 +23,13 @@ function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
 		diagnosis: 'M12 3a7 7 0 0 0-4 12.7V19h8v-3.3A7 7 0 0 0 12 3ZM9 22h6M12 7v4l2 1',
 		fixes: 'M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z',
 		reports: 'M6 3h12v18H6zM9 7h6M9 11h6M9 15h3M4 6v15h12',
-		history: 'M3 12a9 9 0 1 0 2.6-6.4L3 8M3 3v5h5M12 7v5l3 2',
+		compare: 'M8 5H5a2 2 0 0 0-2 2v3m0 4v3a2 2 0 0 0 2 2h3m8-14h3a2 2 0 0 1 2 2v3m0 4v3a2 2 0 0 1-2 2h-3M8 12h8m-4-4v8',
 		search: 'm20 20-4.5-4.5M18 10.5a7.5 7.5 0 1 1-15 0 7.5 7.5 0 0 1 15 0Z',
-		settings: 'M19.14 12.94a7.3 7.3 0 0 0 0-1.88l2.03-1.58-2-3.46-2.4.97a7.2 7.2 0 0 0-1.63-.94L14.78 3.5h-4l-.36 2.55c-.58.22-1.12.54-1.63.94l-2.4-.97-2 3.46 2.03 1.58a7.3 7.3 0 0 0 0 1.88l-2.03 1.58 2 3.46 2.4-.97c.5.4 1.05.72 1.63.94l.36 2.55h4l.36-2.55a7.2 7.2 0 0 0 1.63-.94l2.4.97 2-3.46-2.03-1.58Z',
-		bell: 'M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4',
-		logout: 'M10 17l5-5-5-5M15 12H3M21 4v16',
-		menu: 'M4 6h16M4 12h16M4 18h16',
 	};
 
 	return (
 		<svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
 			<path d={paths[name]} />
-			{name === 'settings' && <circle cx="12.78" cy="12" r="2.5" />}
 		</svg>
 	);
 }
@@ -44,7 +40,6 @@ export default function ResearcherLayout() {
 	const [userRole, setUserRole] = useState<UserRole | null>(null);
 	const [query, setQuery] = useState('');
 	const [notice, setNotice] = useState('');
-	const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
 	useEffect(() => {
 		let active = true;
@@ -98,24 +93,10 @@ export default function ResearcherLayout() {
 
 	return (
 		<main className="rd-shell">
-			<aside className={`rd-sidebar${mobileNavOpen ? ' is-open' : ''}`} aria-label="주 메뉴">
-				<div className="rd-sidebar-top">
-					<button className="rd-avatar" type="button" aria-label="프로필" onClick={() => setNotice('프로필 설정은 준비 중입니다.')}>
-						<svg className="rd-profile-icon" viewBox="0 0 64 64" aria-hidden="true">
-							<defs>
-								<clipPath id="rd-profile-clip"><circle cx="32" cy="32" r="24.5" /></clipPath>
-							</defs>
-							<g clipPath="url(#rd-profile-clip)">
-								<circle cx="32" cy="24" r="9" />
-								<path d="M8 60v-7c1.5-10.3 12.2-16 24-16s22.5 5.7 24 16v7H8Z" />
-							</g>
-							<circle className="rd-profile-ring" cx="32" cy="32" r="27" />
-						</svg>
-					</button>
-					<button className="rd-collapse" type="button" aria-label="메뉴 접기" onClick={() => setMobileNavOpen(false)}>
-						<Icon name="menu" />
-					</button>
-				</div>
+			<aside className="rd-sidebar" aria-label="주 메뉴">
+				<NavLink className="rd-brand" to="/dashboard" aria-label="UXight 리서처 대시보드">
+					<BrandLogo variant="light-bg" size="nav" />
+				</NavLink>
 
 				<nav className="rd-nav">
 					{navigation.map((item) => (
@@ -123,7 +104,6 @@ export default function ResearcherLayout() {
 							className={({ isActive }) => `rd-nav-item${isActive ? ' is-active' : ''}`}
 							key={item.label}
 							to={item.to}
-							onClick={() => setMobileNavOpen(false)}
 						>
 							<Icon name={item.icon} />
 							<span>{item.label}</span>
@@ -131,35 +111,46 @@ export default function ResearcherLayout() {
 					))}
 				</nav>
 
-				<button className="rd-logout" type="button" aria-label="로그아웃" onClick={logout}>
-					<Icon name="logout" size={24} />
-				</button>
+				<div className="rd-sidebar-bottom">
+					<button className="rd-utility-link" type="button" onClick={() => setNotice('새 알림이 없습니다.')}>
+						<Bell size={18} aria-hidden="true" />
+						<span>알림</span>
+					</button>
+					<button className="rd-utility-link" type="button" onClick={logout}>
+						<LogOut size={18} aria-hidden="true" />
+						<span>로그아웃</span>
+					</button>
+				</div>
 			</aside>
 
 			<section className="rd-main">
 				<header className="rd-topbar">
-					<button className="rd-mobile-menu" type="button" aria-label="메뉴 열기" onClick={() => setMobileNavOpen(!mobileNavOpen)}>
-						<Icon name="menu" />
-					</button>
-					<NavLink className="rd-brand" to="/dashboard" aria-label="UXight 대시보드">
-						<BrandLogo variant="light-bg" size="nav" />
-					</NavLink>
 					<label className="rd-search">
-						<Icon name="search" size={17} />
+						<Icon name="search" size={16} />
 						<input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search" aria-label="검색" />
 						{query && <button type="button" aria-label="검색 지우기" onClick={() => setQuery('')}>×</button>}
 					</label>
 					<time className="rd-date" dateTime={new Date().toISOString()}>
+						<CalendarDays size={15} aria-hidden="true" />
 						{new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric' }).format(new Date())}
 					</time>
 					<div className="rd-top-actions">
 						{(userRole === 'admin' || userRole === 'maintainer') && (
-							<Link className="rd-admin-link" to="/admin/accounts" onClick={() => setMobileNavOpen(false)}>
+							<Link className="rd-admin-link" to="/admin/accounts">
 								관리자 페이지
 							</Link>
 						)}
-						<button type="button" className="rd-icon-button" aria-label="설정" onClick={() => setNotice('설정은 준비 중입니다.')}><Icon name="settings" size={22} /></button>
-						<button type="button" className="rd-icon-button" aria-label="알림" onClick={() => setNotice('새 알림이 없습니다.')}><Icon name="bell" size={22} /></button>
+						<div className="rd-user-profile" aria-label={`${userName} · ${userRole ?? '권한 확인 중'}`}>
+							<svg className="rd-user-avatar" viewBox="0 0 40 40" role="img" aria-label="기본 프로필">
+								<circle className="rd-user-avatar-ring" cx="20" cy="20" r="17" />
+								<circle className="rd-user-avatar-head" cx="20" cy="15" r="6" />
+								<path className="rd-user-avatar-body" d="M9 33c.8-6.2 4.8-9.4 11-9.4s10.2 3.2 11 9.4" />
+							</svg>
+							<span className="rd-user-name">{userName}</span>
+							<span className="rd-role-chip">
+								{userRole === 'researcher' ? 'Researcher' : userRole === 'admin' ? 'Admin' : userRole === 'maintainer' ? 'Maintainer' : '권한 확인 중'}
+							</span>
+						</div>
 					</div>
 				</header>
 

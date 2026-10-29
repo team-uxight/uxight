@@ -1,0 +1,593 @@
+/* =========================================
+   UXight Admin Layout
+   Figma: A1 - 계정·권한 (1440 × 1024)
+   ========================================= */
+
+.admin-layout {
+  --admin-navy: #1f1d3d;
+  --admin-mint: #35d4c8;
+  --admin-text: #24233f;
+  --admin-muted: #6b7280;
+  --admin-sidebar-width: 239px;
+
+  position: relative;
+  display: flex;
+  min-height: 100vh;
+  width: 100%;
+  overflow-x: hidden;
+
+  font-family: "Pretendard", "Noto Sans KR", sans-serif;
+  color: var(--admin-text);
+
+  background:
+    radial-gradient(
+      ellipse at 80% 20%,
+      rgba(206, 203, 246, 0.65) 0%,
+      transparent 48%
+    ),
+    radial-gradient(
+      ellipse at 27% 85%,
+      rgba(159, 225, 203, 0.25) 0%,
+      transparent 43%
+    ),
+    linear-gradient(135deg, #e4e7ee 0%, #e9eaf4 48%, #e3edf0 100%);
+}
+
+.admin-layout *,
+.admin-layout *::before,
+.admin-layout *::after {
+  box-sizing: border-box;
+}
+
+.admin-layout button,
+.admin-layout input {
+  font: inherit;
+}
+
+.admin-layout button {
+  cursor: pointer;
+}
+
+/* =========================================
+   1. Sidebar
+   ========================================= */
+
+.admin-sidebar {
+  position: fixed;
+  top: 28px;
+  left: 35px;
+  bottom: 28px;
+  z-index: 30;
+
+  display: flex;
+  flex-direction: column;
+
+  width: var(--admin-sidebar-width);
+  padding: 36px 28px 32px;
+
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  border-radius: 24px;
+
+  box-shadow:
+    0 12px 40px rgba(43, 39, 88, 0.08),
+    0 2px 12px rgba(43, 39, 88, 0.04);
+
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+}
+
+/* UXight Logo */
+
+.admin-sidebar-logo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  min-height: 42px;
+  margin-bottom: 40px;
+  padding-left: 14px;
+}
+
+.admin-logo-link {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+.admin-logo-link:hover {
+  opacity: 0.9;
+}
+
+/* Navigation */
+
+.admin-sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.admin-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+
+  width: 100%;
+  min-height: 48px;
+  padding: 12px 16px;
+
+  border-radius: 12px;
+  color: #6b7280;
+
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 24px;
+  text-decoration: none;
+
+  transition:
+    background-color 0.18s ease,
+    color 0.18s ease,
+    transform 0.18s ease;
+}
+
+.admin-nav-item svg {
+  flex-shrink: 0;
+}
+
+.admin-nav-item:hover:not(.admin-nav-active) {
+  background: rgba(31, 29, 61, 0.06);
+  color: var(--admin-navy);
+}
+
+/* Figma active navigation */
+
+.admin-nav-active {
+  background: var(--admin-navy);
+  border-radius: 30px;
+
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.admin-nav-active:hover {
+  background: #302d52;
+  color: #ffffff;
+}
+
+/* Bottom navigation */
+
+.admin-sidebar-bottom {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+
+  margin-top: auto;
+}
+
+.admin-bottom-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+
+  width: 100%;
+  min-height: 48px;
+  padding: 12px 16px;
+
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  color: #6b7280;
+
+  font-size: 16px;
+  font-weight: 500;
+  text-align: left;
+
+  transition:
+    background-color 0.18s ease,
+    color 0.18s ease;
+}
+
+.admin-bottom-item:hover {
+  background: rgba(31, 29, 61, 0.06);
+  color: var(--admin-navy);
+}
+
+.admin-bottom-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.admin-sidebar-close,
+.admin-mobile-menu {
+  display: none;
+}
+
+/* =========================================
+   2. Main Area
+   ========================================= */
+
+.admin-main {
+  flex: 1;
+  min-width: 0;
+
+  margin-left: 274px;
+  padding: 0 50px 48px;
+}
+
+/* =========================================
+   3. Header
+   ========================================= */
+
+.admin-header {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+
+  width: 100%;
+  min-height: 47px;
+  margin-top: 59px;
+  margin-bottom: 40px;
+}
+
+.admin-header-search {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+
+  width: 509px;
+  max-width: 46%;
+  height: 47px;
+  padding: 0 24px;
+
+  background: rgba(255, 255, 255, 0.48);
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  border-radius: 30px;
+
+  box-shadow: 0 8px 24px rgba(86, 84, 147, 0.06);
+
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.admin-header-search svg {
+  flex-shrink: 0;
+  color: #58585b;
+}
+
+.admin-header-search input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+
+  padding: 0;
+
+  background: transparent;
+  border: 0;
+  outline: 0;
+
+  color: var(--admin-text);
+  font-size: 18px;
+  font-weight: 400;
+}
+
+.admin-header-search input::placeholder {
+  color: #58585b;
+  opacity: 1;
+}
+
+.admin-header-search:focus-within {
+  border-color: rgba(53, 212, 200, 0.7);
+  box-shadow: 0 0 0 3px rgba(53, 212, 200, 0.12);
+}
+
+.admin-header-date {
+  flex-shrink: 0;
+
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--admin-navy);
+  white-space: nowrap;
+}
+
+/* User profile */
+
+.admin-header-profile {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+
+  margin-left: auto;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.admin-profile-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+
+  border-radius: 50%;
+
+  background: linear-gradient(135deg, #cfc5ff 0%, #b6f3eb 100%);
+
+  color: #554ab1;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.admin-profile-name {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+  color: #24233f;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.admin-profile-chevron {
+  flex-shrink: 0;
+  color: #9ca0b3;
+}
+
+/* =========================================
+   4. Page Content
+   ========================================= */
+
+.admin-content {
+  width: 100%;
+  min-width: 0;
+}
+
+.admin-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+
+  margin-bottom: 20px;
+  padding: 12px 16px;
+
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid #e6e5f2;
+  border-radius: 12px;
+
+  color: var(--admin-navy);
+  font-size: 13px;
+}
+
+.admin-notice button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  padding: 4px;
+  border: 0;
+  background: transparent;
+  color: #6b7280;
+}
+
+/* Keyboard accessibility */
+
+.admin-nav-item:focus-visible,
+.admin-bottom-item:focus-visible,
+.admin-logo-link:focus-visible,
+.admin-notice button:focus-visible {
+  outline: 3px solid var(--admin-mint);
+  outline-offset: 3px;
+}
+
+/* =========================================
+   5. Responsive
+   ========================================= */
+
+@media (max-width: 1200px) {
+  .admin-main {
+    padding-right: 30px;
+    padding-left: 30px;
+  }
+
+  .admin-header {
+    gap: 18px;
+  }
+
+  .admin-header-search {
+    max-width: 42%;
+  }
+}
+
+@media (max-width: 900px) {
+  .admin-sidebar {
+    left: 16px;
+    top: 16px;
+    bottom: 16px;
+
+    width: 240px;
+    transform: translateX(-290px);
+    transition: transform 0.25s ease;
+  }
+
+  .admin-sidebar.is-open {
+    transform: translateX(0);
+  }
+
+  .admin-sidebar-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 25;
+
+    border: 0;
+    background: rgba(20, 19, 40, 0.4);
+  }
+
+  .admin-sidebar-close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    width: 32px;
+    height: 32px;
+
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--admin-navy);
+  }
+
+  .admin-mobile-menu {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    width: 40px;
+    height: 40px;
+    flex-shrink: 0;
+
+    border: 0;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.65);
+    color: var(--admin-navy);
+  }
+
+  .admin-main {
+    margin-left: 0;
+    padding: 0 24px 40px;
+  }
+
+  .admin-header {
+    margin-top: 24px;
+    margin-bottom: 30px;
+  }
+
+  .admin-header-search {
+    flex: 1;
+    width: auto;
+    max-width: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .admin-main {
+    padding: 0 16px 32px;
+  }
+
+  .admin-header {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .admin-header-search {
+    order: 3;
+    flex-basis: 100%;
+    height: 44px;
+  }
+
+  .admin-header-search input {
+    font-size: 15px;
+  }
+
+  .admin-header-date {
+    display: none;
+  }
+
+  .admin-header-profile {
+    margin-left: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-layout *,
+  .admin-layout *::before,
+  .admin-layout *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+
+/* ==========================================
+   관리자 화면 스크롤 구조 수정
+   - 사이드바 고정
+   - 상단 검색창 / 날짜 / 프로필 고정
+   - 계정·권한 콘텐츠만 스크롤
+   ========================================== */
+
+/* 전체 화면 높이를 브라우저에 고정 */
+.admin-layout {
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 오른쪽 영역을 세로 Flex 구조로 */
+.admin-main {
+  display: flex;
+  flex-direction: column;
+
+  height: 100%;
+  min-height: 0;
+
+  padding-bottom: 0;
+}
+
+/* 상단 헤더는 스크롤 영역 밖에 유지 */
+.admin-header {
+  flex-shrink: 0;
+  position: relative;
+  z-index: 5;
+}
+
+/* 계정·권한 화면만 스크롤 */
+.admin-content {
+  flex: 1;
+  min-height: 0;
+
+  overflow-y: auto;
+  overflow-x: hidden;
+
+  padding-bottom: 48px;
+
+  scrollbar-width: thin;
+  scrollbar-color: #cbc8dc transparent;
+}
+
+/* 스크롤바 디자인 */
+.admin-content::-webkit-scrollbar {
+  width: 7px;
+}
+
+.admin-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.admin-content::-webkit-scrollbar-thumb {
+  background: #cbc8dc;
+  border-radius: 10px;
+}
+
+.admin-content::-webkit-scrollbar-thumb:hover {
+  background: #a9a4c6;
+}
+
+/* 현재 페이지 메뉴만 활성화 */
+
+.admin-sidebar-nav .admin-nav-item {
+  background: transparent;
+  color: #77788c;
+}
+
+.admin-sidebar-nav .admin-nav-item.admin-nav-active {
+  background: #1f1d3d;
+  color: #ffffff;
+}
+
+/* 비활성 메뉴에 마우스를 올렸을 때 */
+.admin-sidebar-nav .admin-nav-item:not(.admin-nav-active):hover {
+  background: rgba(31, 29, 61, 0.06);
+  color: #1f1d3d;
+}

@@ -92,11 +92,6 @@
 	cursor: pointer;
 }
 
-.admin-utility-link:disabled {
-	color: #858493;
-	cursor: default;
-}
-
 .admin-main {
 	flex: 1;
 	min-width: 0;
@@ -153,6 +148,12 @@
 	color: #343248;
 	font-weight: 600;
 	white-space: nowrap;
+}
+
+.admin-top-actions {
+	display: flex;
+	align-items: center;
+	gap: 12px;
 }
 
 .admin-user-profile {
