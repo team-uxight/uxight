@@ -1,15 +1,21 @@
 import asyncio
 import contextlib
+import hashlib
 import logging
 from collections.abc import AsyncIterator, Awaitable
-from dataclasses import asdict
+from dataclasses import dataclass
 from typing import Literal, TypeVar
 
 from ..db import settings
 from ..driver.dom_driver import DomDriver
-from ..persona.persona_agent import MockDecider, PersonaAgent, StepResult
+from ..guard.domain import allowed_hosts
+from ..llm import LLMClient
+from ..persona.llm_decider import STEP_MAX_RETRIES, LLMDecider
+from ..persona.persona_agent import Decider, PersonaAgent, StepResult
+from ..repositories.audit_log_repository import audit_log_repository
 from ..repositories.run_persona_repository import PersonaOutcome, run_persona_repository
 from ..repositories.run_repository import RunSnapshot, run_repository
+from ..schemas import Action
 from .step_log_writer import step_log_writer
 
 logger = logging.getLogger(__name__)
@@ -34,11 +40,54 @@ BROWSER_CLOSE_TIMEOUT_SECONDS = 5
 # 곱해져 RAM 상한이 무너진다 (architecture §3.1). 모든 회차의 Persona 가 이 자리를 나눠 쓴다.
 persona_slots = asyncio.Semaphore(settings.max_concurrent_personas)
 
-# Walking Skeleton: 실제 LLM 대신 규칙 기반 대역을 쓴다. 상태가 없어 페르소나끼리 공유한다.
-decider = MockDecider()
+# 행동을 얻지 못한 step(파싱 실패 · 스키마 밖 · LLM 호출 실패)이 이만큼 이어지면 Persona 를
+# 실패로 끝낸다 (행동 로그 명세 2절 · architecture §5). 키가 만료돼도 max_steps 까지 헛돌지 않게.
+MAX_CONSECUTIVE_NO_ACTION = 3
+
+# 실행하지 않은 step 의 오류 코드 → 차단 사유 (행동 로그 명세 3.5 · 3.8).
+# LLM 호출 실패(LLM_REQUEST_*)는 차단이 아니다.
+BLOCK_REASONS = {
+    "PARSE_FAILED": "parse_failed",
+    "INVALID_ACTION": "schema",
+    "DOMAIN_BLOCKED": "domain",
+    "DESTRUCTIVE_ACTION_BLOCKED": "destructive",
+}
+# 가드가 막은 step — step 로그와 함께 감사 로그에도 남긴다 (architecture §9 L1 · L6).
+GUARD_BLOCK_CODES = ("DOMAIN_BLOCKED", "DESTRUCTIVE_ACTION_BLOCKED")
+
+# type 행동의 입력값은 로그에 이 글자로만 남긴다 (GACA-154).
+MASKED_TEXT = "***"
+
+# LLM 클라이언트는 첫 회차를 수락할 때 만든다 — LLM 설정(env)이 없는 테스트 · 도구도 이 모듈을
+# 불러오게. 프로세스 안 모든 Persona 가 연결 하나를 나눠 쓴다.
+_llm: LLMClient | None = None
+
+
+def llm_client() -> LLMClient:
+    """LLM 설정(LLM_BASE_URL · LLM_API_KEY · LLM_MODEL)이 비면 KeyError."""
+    global _llm
+    if _llm is None:
+        _llm = LLMClient(max_retries=STEP_MAX_RETRIES)
+    return _llm
+
+
+def make_decider(run_id: int) -> Decider:
+    """Persona 하나의 판단기. 테스트는 이 함수를 바꿔 끼워 LLM 없이 돈다."""
+    return LLMDecider(llm_client(), run_id=run_id)
+
+
+@dataclass
+class RunTokens:
+    limit: int | None
+    used: int = 0
 
 
 class RunOrchestrator:
+    def __init__(self) -> None:
+        # 회차별 토큰 상한(policy max_tokens, 회차 당)과 지금까지 쓴 토큰.
+        # 회차 안 Persona 가 나눠 쓴다.
+        self._run_tokens: dict[int, RunTokens] = {}
+
     def try_accept_and_start(self, run_id: int) -> RunSnapshot | None:
         """queued 인 회차만 수락한다.
 
@@ -58,6 +107,21 @@ class RunOrchestrator:
                     for persona in snapshot.personas
                 },
             )
+            if (left := run_repository.daily_tokens_left()) is not None and left <= 0:
+                # 하루 예산을 다 썼으면 새 회차를 시작하지 않는다 (V4__policies.sql).
+                logger.warning("run=%s daily token budget spent, closing as failed", run_id)
+                self._fail_run(run_id, error="하루 토큰 예산 초과")
+                return None
+            # LLM 설정이 없으면 브라우저를 띄우기 전에 회차를 마감한다 — 띄운 뒤 모든 Persona 가
+            # 까닭 없이 fail 로 끝나지 않게.
+            try:
+                llm_client()
+            except KeyError:
+                logger.error(
+                    "run=%s LLM settings missing (LLM_BASE_URL, LLM_API_KEY, LLM_MODEL)", run_id
+                )
+                self._fail_run(run_id, error="LLM 설정 없음")
+                return None
         except Exception as exc:
             # 수락한 회차를 accepted · running 으로 남기지 않는다. 호출한 쪽은 None 을 받아
             # failed 상태를 200 으로 응답한다. 예외 문구(SQL · DB 주소)는 로그에만 남긴다.
@@ -105,11 +169,13 @@ class RunOrchestrator:
 
     async def _run_all_personas(self, run_id: int, snapshot: RunSnapshot) -> None:
         target_url = snapshot.target_url
+        hosts = allowed_hosts(target_url, snapshot.allowed_domains)
         task = snapshot.task
         personas = snapshot.personas
         policy = snapshot.policy
         max_steps = policy.get("max_steps") or DEFAULT_MAX_STEPS
         max_seconds = policy.get("max_seconds") or DEFAULT_MAX_SECONDS
+        self._run_tokens[run_id] = RunTokens(limit=policy.get("max_tokens"))
         # 회차 안 동시 수. 전역 자리(persona_slots)도 함께 잡으므로 실제 상한은 둘 중 작은 값이다.
         # 값이 없으면 회차 안 제한 없이 전역 상한만 따른다.
         run_slots = asyncio.Semaphore(policy.get("persona_concurrency") or len(personas))
@@ -125,6 +191,7 @@ class RunOrchestrator:
                     self._run_single_persona(
                         run_id,
                         target_url,
+                        hosts,
                         task,
                         persona,
                         max_steps,
@@ -138,6 +205,7 @@ class RunOrchestrator:
             )
         finally:
             watcher.cancel()
+            self._run_tokens.pop(run_id, None)
         unfinished = []
         for persona, result in zip(personas, results, strict=True):
             if isinstance(result, BaseException):
@@ -205,6 +273,7 @@ class RunOrchestrator:
         self,
         run_id: int,
         target_url: str,
+        hosts: frozenset[str],
         task: dict,
         persona: dict,
         max_steps: int,
@@ -222,7 +291,14 @@ class RunOrchestrator:
             else:
                 try:
                     outcome = await self._drive_persona(
-                        run_id, target_url, task, persona, max_steps, max_seconds, cancel_event
+                        run_id,
+                        target_url,
+                        hosts,
+                        task,
+                        persona,
+                        max_steps,
+                        max_seconds,
+                        cancel_event,
                     )
                     if outcome == "cancelled":
                         # _drive_persona는 async with를 빠져나온 뒤 반환하므로
@@ -259,9 +335,11 @@ class RunOrchestrator:
                     persona_slots.release()
 
     @contextlib.asynccontextmanager
-    async def _open_driver(self, run_id: int, persona_id: int) -> AsyncIterator[DomDriver]:
+    async def _open_driver(
+        self, run_id: int, persona_id: int, hosts: frozenset[str]
+    ) -> AsyncIterator[DomDriver]:
         """나갈 때 브라우저를 닫되 BROWSER_CLOSE_TIMEOUT_SECONDS 까지만 기다린다."""
-        driver = DomDriver()
+        driver = DomDriver(allowed_hosts=hosts)
         try:
             yield driver
         finally:
@@ -285,12 +363,13 @@ class RunOrchestrator:
         self,
         run_id: int,
         target_url: str,
+        hosts: frozenset[str],
         task: dict,
         persona: dict,
         max_steps: int,
         max_seconds: float,
         cancel_event: asyncio.Event,
-    ) -> Literal["done", "max_steps", "timeout", "cancelled"]:
+    ) -> Literal["done", "max_steps", "timeout", "cancelled", "fail"]:
         persona_id = persona["persona_id"]
         step_log_writer.prepare(run_id, persona_id)
         # 어느 경로로 return하든 async with를 빠져나가며 브라우저(컨텍스트, 페이지 포함)를 폐기한다.
@@ -299,17 +378,29 @@ class RunOrchestrator:
         # 닫기 상한(BROWSER_CLOSE_TIMEOUT_SECONDS)만 따른다.
         deadline = asyncio.timeout(max_seconds)
         try:
-            async with self._open_driver(run_id, persona_id) as driver, deadline:
+            async with self._open_driver(run_id, persona_id, hosts) as driver, deadline:
                 started, _ = await self._run_unless_cancelled(
                     driver.start(target_url), cancel_event
                 )
                 if not started:
                     logger.info("run=%s persona=%s 브라우저 시작 중단", run_id, persona_id)
                     return "cancelled"
-                agent = PersonaAgent(persona, task, driver, decider)
+                agent = PersonaAgent(persona, task, driver, make_decider(run_id), hosts)
+                no_action = 0
                 # 한 스텝 = observe → decide(LLM 1회) → act.
                 # Agent 가 done 을 내거나 max_steps 에 도달하면 종료.
                 for step_no in range(1, max_steps + 1):
+                    # LLM 을 부르기 전에 토큰 한도를 본다. 넘었으면 이 Persona 를 끝낸다.
+                    # 동시에 도는 Persona 가 각자 step 하나씩 더 쓸 수 있어, 실제 사용량은 상한을
+                    # (동시 Persona 수 × step 하나 토큰)만큼 넘을 수 있다.
+                    if limit := self._token_limit_reached(run_id):
+                        logger.warning(
+                            "run=%s persona=%s token limit reached: %s", run_id, persona_id, limit
+                        )
+                        audit_log_repository.add_limit_reached(
+                            run_id, persona_id, {"persona_id": persona_id, "step": step_no, **limit}
+                        )
+                        return "max_steps"
                     finished, step = await self._run_unless_cancelled(agent.step(), cancel_event)
                     if not finished:
                         # 감시 태스크가 진행 중인 스텝을 중단했다.
@@ -323,18 +414,46 @@ class RunOrchestrator:
                         return "cancelled"
                     # 페르소나가 넘겨준 스텝 결과를 즉시 한 줄로 남긴다.
                     # 도중에 죽어도 그때까지의 스텝은 남는다.
+                    # 화면 그림을 먼저 쓰고 그다음 로그 줄을 쓴다 (행동 로그 명세 2절).
+                    screenshot = None
+                    if step.observation.screenshot is not None:
+                        screenshot = step_log_writer.write_screenshot(
+                            run_id, persona_id, step_no, step.observation.screenshot
+                        )
                     step_log_writer.append(
-                        run_id, persona_id, self._to_step_log(run_id, persona_id, step_no, step)
+                        run_id,
+                        persona_id,
+                        self._to_step_log(
+                            run_id, persona_id, step_no, step, task, driver.mode, screenshot
+                        ),
                     )
-                    run_persona_repository.increment_steps(run_id, persona_id)
+                    tokens = step.decision.prompt_tokens + step.decision.completion_tokens
+                    if run_id in self._run_tokens:
+                        self._run_tokens[run_id].used += tokens
+                    run_persona_repository.increment_steps(run_id, persona_id, tokens)
+                    if step.result.error_code in GUARD_BLOCK_CODES:
+                        audit_log_repository.add_blocked_action(
+                            run_id,
+                            persona_id,
+                            {
+                                "persona_id": persona_id,
+                                "step": step_no,
+                                "reason": BLOCK_REASONS[step.result.error_code],
+                                "action": _action_log(step.action),
+                                "url": step.observation.url,
+                                "destination": step.result.destination,
+                                "error": step.result.error,
+                            },
+                        )
                     logger.info(
-                        "run=%s persona=%s step=%s url=%s action=%r result=%s",
+                        "run=%s persona=%s step=%s url=%s action=%s ok=%s error_code=%s",
                         run_id,
                         persona_id,
                         step_no,
                         step.observation.url,
-                        step.action,
-                        step.result,
+                        _action_log(step.action),
+                        step.result.ok,
+                        step.result.error_code,
                     )
                     # 취소 확인은 로그 저장 이후에 한다. 취소 이전 스텝의 로그를 보존하기 위해서다.
                     if run_repository.is_cancel_requested(run_id):
@@ -346,7 +465,17 @@ class RunOrchestrator:
                         )
                         cancel_event.set()  # 같은 런의 다른 페르소나도 멈추게 한다.
                         return "cancelled"
-                    if step.action.kind == "done":
+                    no_action = no_action + 1 if step.action is None else 0
+                    if no_action >= MAX_CONSECUTIVE_NO_ACTION:
+                        logger.warning(
+                            "run=%s persona=%s %s consecutive steps without action (last %s)",
+                            run_id,
+                            persona_id,
+                            no_action,
+                            step.result.error_code,
+                        )
+                        return "fail"
+                    if step.action is not None and step.action.kind == "done":
                         # Agent 가 스스로 과업 완료를 선언했다 = 성공 (메인 판정 기준, D21).
                         return "done"
         except TimeoutError:
@@ -360,6 +489,17 @@ class RunOrchestrator:
             )
             return "timeout"
         return "max_steps"
+
+    def _token_limit_reached(self, run_id: int) -> dict | None:
+        """넘은 한도가 있으면 감사 로그에 남길 사유, 없으면 None."""
+        tokens = self._run_tokens.get(run_id)
+        if tokens and tokens.limit and tokens.used >= tokens.limit:
+            return {"reason": "max_tokens", "limit": tokens.limit, "used": tokens.used}
+        # 하루 예산은 매 LLM 호출 직전에 DB 의 지금 값으로 본다 (V4__policies.sql).
+        left = run_repository.daily_tokens_left()
+        if left is not None and left <= 0:
+            return {"reason": "daily_token_budget", "left": left}
+        return None
 
     async def _watch_cancel(self, run_id: int, cancel_event: asyncio.Event) -> None:
         # 한 스텝(페이지 로드 대기, 이후 LLM 호출 등)이 10초를 넘을 수 있어서,
@@ -405,24 +545,69 @@ class RunOrchestrator:
         return False, None
 
     @staticmethod
-    def _to_step_log(run_id: int, persona_id: int, step_no: int, step: StepResult) -> dict:
-        # 로그 스키마는 미확정. DOM 전문은 크기가 커서 넣지 않고 요소 수와 행동 대상 요소만 남긴다.
-        target = step.observation.element_map.get(step.action.element_id)
+    def _to_step_log(
+        run_id: int,
+        persona_id: int,
+        step_no: int,
+        step: StepResult,
+        task: dict,
+        mode: str,
+        screenshot: str | None,
+    ) -> dict:
+        """step 하나를 행동 로그 명세(3절)의 14칸으로. 값이 없는 칸도 null 로 쓴다."""
+        decision = step.decision
+        error_code = step.result.error_code
+        if not step.result.ok and error_code is None:
+            error_code = "BROWSER_ACTION_FAILED"  # 드라이버가 따로 나누지 않은 브라우저 실패
+        url_after = step.result.url_after or step.observation.url
+        success_url = task.get("success_url")
         return {
             "run_id": run_id,
             "persona_id": persona_id,
             "step": step_no,
-            "started_at": step.started_at.isoformat(timespec="milliseconds"),
-            "finished_at": step.finished_at.isoformat(timespec="milliseconds"),
+            "ts": step.finished_at.isoformat(timespec="milliseconds"),
             "url": step.observation.url,
-            "title": step.observation.title,
-            "element_count": len(step.observation.element_map),
-            "action": step.action.model_dump(),
-            "target": {key: target.get(key) for key in ("tag", "type", "text", "href")}
-            if target
-            else None,
-            "result": asdict(step.result),
+            "observation": {
+                "mode": mode,
+                "screenshot": screenshot,
+                # 같은 화면이면 같은 값 — 화면 반복 탐지용. 관측 글(요소 줄) 전체로 만든다.
+                "elements_hash": hashlib.sha256(step.observation.dom.encode()).hexdigest()[:16],
+                "element_count": len(step.observation.element_map),
+            },
+            "reasoning": decision.reasoning,
+            "action": _action_log(step.action),
+            "result": {
+                "ok": step.result.ok,
+                "url_after": url_after,
+                "error": step.result.error,
+                "error_code": error_code,
+            },
+            "blocked": {"is": error_code in BLOCK_REASONS, "reason": BLOCK_REASONS.get(error_code)},
+            "latency_ms": {"llm": decision.llm_ms, "browser": step.browser_ms},
+            "tokens": {"prompt": decision.prompt_tokens, "completion": decision.completion_tokens},
+            "model": decision.model,
+            "task": {"url_reached": _same_url(url_after, success_url) if success_url else None},
         }
+
+
+def _action_log(action: Action | None) -> dict | None:
+    """행동을 로그 모양(kind · target · text · direction)으로. type 의 입력값은 가린다."""
+    if action is None:
+        return None
+    return {
+        "kind": action.kind,
+        "target": action.element_id if action.kind in ("click", "type") else None,
+        "text": MASKED_TEXT if action.kind == "type" and action.value is not None else None,
+        "direction": action.value if action.kind == "scroll" else None,
+    }
+
+
+def _same_url(url: str, success_url: str) -> bool:
+    # 조각(#…)과 끝의 / 는 같은 페이지로 본다.
+    def normalize(value: str) -> str:
+        return value.split("#", 1)[0].rstrip("/")
+
+    return normalize(url) == normalize(success_url)
 
 
 run_orchestrator = RunOrchestrator()
