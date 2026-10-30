@@ -316,26 +316,35 @@ class DomDriver(Driver):
 
         이미지 · 스크립트 같은 하위 요청과 iframe 이동은 그대로 둔다 — 화면이 사람이 보는 것과
         달라지지 않게. 'aborted' 로 끊으면 오류 화면 없이 지금 페이지에 머문다.
+        주 창(self._page)이 아닌 창, 곧 새 창의 이동은 주소와 상관없이 끊는다. 허용된 주소도
+        리다이렉트로 허용 밖 주소에 닿을 수 있고(route 는 리다이렉트를 보지 못한다), 새 창에는
+        3단계 되돌리기가 없다. Agent 는 새 창을 보지 않는다.
         이 처리기는 예외를 내면 안 된다. 낸 예외는 Playwright 가 다음 API 호출(관측의 page.evaluate
         등)에서 대신 던지고, 그 요청은 이어지지도 끊기지도 않은 채 멈춘다 (GACA-223).
+        그래서 판정하지 못한 이동은 끊고, 끊기 · 잇기에서 난 오류는 밖으로 내지 않는다.
         """
         request = route.request
-        if request.is_navigation_request():
-            outside = not is_allowed(request.url, self._allowed_hosts)
-            try:
+        block = outside = False
+        try:
+            if request.is_navigation_request():
+                outside = not is_allowed(request.url, self._allowed_hosts)
                 frame = request.frame
-            except PlaywrightError:
-                # 새 창(target=_blank · window.open)의 첫 이동 요청은 Playwright 가 그 창을 알기
-                # 전에 와서 request.frame 이 오류를 낸다. 이 요청은 주소와 상관없이 끊는다.
-                # 허용된 주소도 리다이렉트로 허용 밖 주소에 닿을 수 있고(route 는 리다이렉트를
-                # 보지 못한다), 새 창에는 3단계 되돌리기가 없다. Agent 는 새 창을 보지 않는다.
-                frame = None
-            if frame is None or (outside and frame.parent_frame is None):
+                block = frame.page is not self._page or (outside and frame.parent_frame is None)
+        except Exception:
+            # 주소를 넘겨 연 새 창(target=_blank · window.open)은 첫 이동부터 끊기므로 Playwright 가
+            # 끝내 그 창을 모른다. 그래서 그 창의 모든 이동에서 request.frame 이 오류를 낸다.
+            block = True
+        try:
+            if block:
                 if outside:
                     self._blocked_url = request.url
                 await route.abort("aborted")
-                return
-        await route.continue_()
+            else:
+                await route.continue_()
+        except PlaywrightError:
+            # 창 · 브라우저가 닫히는 중이거나, 다른 곳에서 난 오류를 Playwright 가 여기서 대신
+            # 던졌다. 끊거나 잇지 못한 요청은 멈춘 채 진행되지 않는다.
+            pass
 
     async def observe(self) -> Observation:
         observation = await self._observe_page()

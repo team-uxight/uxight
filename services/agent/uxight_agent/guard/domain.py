@@ -8,6 +8,7 @@ http · https 가 아닌 주소(javascript: · mailto: 등)는 모두 밖으로 
 1. 클릭 전: 링크 목적지(브라우저가 풀어 쓴 element_map 의 url)를 본다 — PersonaAgent.
 2. 이동 요청: 허용 밖으로 가는 top-level 이동 요청을 브라우저에서 끊는다 — DomDriver(route).
    스크립트 · 폼 제출 · 누르는 순간 바뀐 링크처럼 클릭 전에 목적지를 알 수 없는 이동도 막힌다.
+   새 창(target=_blank · window.open 등)의 이동은 주소와 상관없이 끊는다 (GACA-223).
 3. 행동 뒤: 그래도 허용 밖 주소에 와 있으면(리다이렉트 등) 행동 전 주소로 되돌린다 — DomDriver.
 """
 
