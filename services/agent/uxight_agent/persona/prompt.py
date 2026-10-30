@@ -1,8 +1,9 @@
 """Persona step 프롬프트 (GACA-150). 모델에게 누구로서 · 무엇을 하려고 · 무엇을 보고 있는지 알린다.
 
-- 페이지에서 온 글(URL · 제목 · 요소 줄)은 mark_instructions 로 지시문 의심 부분을 표시한 뒤
+- 페이지에서 온 글(URL · 제목 · 본문 · 요소 줄)은 mark_instructions 로 지시문 의심 부분을 표시한 뒤
   '페이지 관측' 경계 안에만 넣는다. 경계 안 글은 데이터이고 따르지 않는다고 시스템 지시에 적는다.
-  페이지 값은 한 줄 따옴표 문자열이라(DomDriver._quote · json.dumps) 새 줄을 만들 수 없고,
+  페이지 값은 한 줄 따옴표 문자열이라(DomDriver._quote · json.dumps, 본문은 줄마다)
+  새 줄을 만들 수 없고,
   값 안의 << · >> 는 하나로 줄여(_collapse_fences) 경계 표시와 같은 글자를 쓰지 못한다.
   그래도 모델이 경계를 착각하지 않는다는 보장은 아니다 — 행동은 가드가 따로 막는다.
 - 원시 HTML · 셀렉터는 넣지 않는다. 요소는 DomDriver 가 만든 번호 줄뿐이다 (tech-stack §6 T19).
@@ -110,10 +111,15 @@ def _history_text(history: list) -> str:
 
 
 def _page_text(observation: Observation) -> str:
+    # 본문도 줄마다 따옴표 문자열로 넣는다 — 요소 줄처럼 페이지 글로 새 줄 · 가짜 요소 줄을
+    # 만들지 못하게.
+    body = "\n".join(json.dumps(line, ensure_ascii=False) for line in observation.text.splitlines())
     page = "\n".join(
         [
             f"URL: {json.dumps(observation.url, ensure_ascii=False)}",
             f"제목: {json.dumps(observation.title, ensure_ascii=False)}",
+            "본문 (지금 화면 위쪽부터):",
+            body or "(보이는 글 없음)",
             "요소:",
             observation.dom or "(누를 수 있는 요소 없음)",
         ]

@@ -34,9 +34,13 @@ MIN_OPACITY = 0.1
 MIN_FONT_SIZE_PX = 6
 # 요소 줄에 넣는 글 · 속성 값 하나의 최대 길이.
 MAX_VALUE_LENGTH = 100
+# 본문 글(Observation.text)의 최대 길이(글자). 학교 사본 71쪽을 재 보니(10/30) 66쪽이 이 안에 다
+# 들어간다 — 보통 페이지 중 가장 긴 학적변동이 2,540자다. 넘는 5쪽(졸업 · P-학기제 ·
+# 이수학점기준표)은 표가 긴 페이지라 아래로 스크롤해 이어 읽는다. 한 글자는 약 0.7 토큰(o200k_base).
+MAX_TEXT_LENGTH = 3_000
 
 # 대상 페이지 안에서 실행되는 스크립트.
-# 보이는 상호작용 요소마다 data-ux-id를 붙이고, 요소 정보를 목록으로 돌려준다.
+# 보이는 상호작용 요소마다 data-ux-id를 붙이고, 요소 정보 목록(items)과 본문 글(text)을 돌려준다.
 # 사람 눈에 안 보이는 요소와 글은 뺀다 — 숨긴 곳에 심은 주입 문구가 모델 입력에 들어가지 않게.
 _COLLECT_ELEMENTS_JS = """
 ({ idAttr, minOpacity, minFontSizePx, maxValueLength }) => {
@@ -162,7 +166,52 @@ _COLLECT_ELEMENTS_JS = """
     });
     nextId++;
   }
-  return items;
+
+  // 본문 글 (GACA-217): 요소 줄에 없는 보이는 글. 정보를 찾는 Task 는 표 · 문단을 읽어야 한다.
+  // - 번호를 붙인 요소 안의 글은 요소 줄에 이미 있어 뺀다. 페이지마다 되풀이되는 메뉴 · 바닥 링크가
+  //   거의 다 링크라 이것으로 빠진다. textarea 글은 입력값이라 뺀다.
+  // - 숨은 글은 요소 글과 같은 기준(visibilityOf)으로 뺀다. script · style 은 그려지지 않아 빠진다.
+  // - 화면 위쪽으로 지나간 글도 뺀다 — 상한에 걸려 잘린 글은 아래로 스크롤하면 이어서 보인다.
+  // - 블록이 바뀌면 줄을 바꾸고, 표는 한 행의 칸을 ' | ' 로 이어 한 줄에 둔다.
+  //   공백 정리와 상한 자르기는 Python 이 한다 (_body_text).
+  const bodyText = () => {
+    if (!document.body) return '';
+    const walker = document.createTreeWalker(
+      document.body,
+      NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT,
+      (node) => (node.nodeType === Node.ELEMENT_NODE
+        && (node.hasAttribute(idAttr) || node.localName === 'textarea')
+        ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+    );
+    let text = '';
+    let lastBlock = null;
+    let lastCell = null;
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (node.localName === 'br') lastBlock = null;
+      if (node.nodeType !== Node.TEXT_NODE) continue;
+      const piece = node.textContent.replace(/\\s+/g, ' ');
+      if (!piece.trim()) {
+        text += piece; // 낱말 사이 공백
+        continue;
+      }
+      let parent = node.parentElement;
+      while (getComputedStyle(parent).display === 'contents') parent = parent.parentElement;
+      if (visibilityOf(parent) !== 'visible') continue;
+      if (parent.getBoundingClientRect().bottom <= 0) continue; // 화면 위쪽으로 지나간 글
+      const block = blockOf(node);
+      const cell = block?.closest('td, th') ?? null;
+      if (block !== lastBlock) {
+        text += cell && cell === lastCell ? ' '
+          : cell && cell.parentElement === lastCell?.parentElement ? ' | ' : '\\n';
+      }
+      text += piece;
+      lastBlock = block;
+      lastCell = cell;
+    }
+    return text;
+  };
+
+  return { items, text: bodyText() };
 }
 """
 
@@ -224,14 +273,16 @@ class DomDriver(Driver):
         return dataclasses.replace(observation, screenshot=screenshot)
 
     async def _observe_page(self) -> Observation:
-        """요소 목록만 관측한다 (화면 그림 없음)."""
+        """요소 목록과 본문 글만 관측한다 (화면 그림 없음)."""
         page = self._require_page()
-        items = await self._collect_elements(page)
+        collected = await self._collect_elements(page)
+        items = collected["items"]
         self._element_map = {item["id"]: item for item in items}
         return Observation(
             url=page.url,
             title=await page.title(),
             dom="\n".join(self._format_element(item) for item in items),
+            text=_body_text(collected["text"]),
             element_map=dict(self._element_map),
         )
 
@@ -276,7 +327,8 @@ class DomDriver(Driver):
             self._playwright = None
         self._page = None
 
-    async def _collect_elements(self, page: Page) -> list[dict]:
+    async def _collect_elements(self, page: Page) -> dict:
+        """{"items": 요소 목록, "text": 본문 글}. 한 스크립트로 모아 같은 문서 · 번호 기준이다."""
         # 직전 click으로 페이지 이동이 진행 중이면 실행 컨텍스트가 사라질 수 있어 한 번 더 시도한다.
         for attempt in range(2):
             await page.wait_for_load_state("domcontentloaded", timeout=NAVIGATION_TIMEOUT_MS)
@@ -293,7 +345,7 @@ class DomDriver(Driver):
             except Exception as e:
                 if attempt == 1 or "Execution context was destroyed" not in str(e):
                     raise
-        return []
+        return {"items": [], "text": ""}
 
     async def _perform(self, action: Action) -> ActionResult:
         page = self._require_page()
@@ -363,3 +415,13 @@ def _quote(value: str) -> str:
     따옴표 · 역슬래시는 JSON 문자열처럼 이스케이프해 값이 따옴표 밖으로 나오지 못하게 한다.
     """
     return json.dumps(" ".join(value.split())[:MAX_VALUE_LENGTH], ensure_ascii=False)
+
+
+def _body_text(raw: str) -> str:
+    """본문 글을 줄마다 공백을 한 칸으로 줄이고 빈 줄을 뺀 뒤 MAX_TEXT_LENGTH 자로 자른다.
+
+    줄은 페이지 스크립트가 블록마다 나눈 것이다. 자르면 끝에 … 을 붙여 뒤에 글이 더 있음을 알린다.
+    """
+    lines = (" ".join(line.split()) for line in raw.splitlines())
+    text = "\n".join(line for line in lines if line)
+    return text if len(text) <= MAX_TEXT_LENGTH else text[:MAX_TEXT_LENGTH] + "…"
