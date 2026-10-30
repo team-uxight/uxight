@@ -49,9 +49,10 @@ def test_prompt_has_persona_task_and_numbered_elements() -> None:
     assert "web_skill: low" in text
     assert "- 대메뉴부터 하위 메뉴까지 계층을 차례로 확인한다." in text
     assert "목표: 학사일정을 찾는다" in text
-    assert "완료 기준: 학사일정 페이지에 도달" in text
     assert '[1] <a href="/kor/schedule.do"> "학사일정"' in text
-    # 성공 URL 은 모델에게 주지 않는다.
+    # 성공 기준 · 성공 URL 은 모델에게 주지 않는다 — 판정에만 쓴다.
+    assert "완료 기준" not in text
+    assert TASK["success_rule"] not in text
     assert TASK["success_url"] not in text
     assert "없음 (첫 화면)" in text
 
