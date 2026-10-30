@@ -110,9 +110,11 @@ class LLMDecider(Decider):
         )
 
     def _measures(self, start: float, usage) -> dict:
+        in_details = getattr(usage, "prompt_tokens_details", None)
         return {
             "llm_ms": int((time.monotonic() - start) * 1000),
             "prompt_tokens": getattr(usage, "prompt_tokens", 0) or 0,
+            "cached_tokens": getattr(in_details, "cached_tokens", 0) or 0,
             "completion_tokens": getattr(usage, "completion_tokens", 0) or 0,
             "model": self._llm.model,
         }

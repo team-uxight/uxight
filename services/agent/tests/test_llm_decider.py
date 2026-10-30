@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -50,6 +51,7 @@ def test_normal_reply_becomes_action(scripted_llm) -> None:
     assert decision.reasoning == "학사 메뉴를 누른다."
     assert decision.error_code is None
     assert (decision.prompt_tokens, decision.completion_tokens) == (11, 7)
+    assert decision.cached_tokens == 0  # 응답에 캐시 내역이 없으면 0
     assert decision.model == "test-model"
     # 답은 구조화 출력 하나로만 받는다. 도구는 넘기지 않는다 (agent-safety §2.4).
     body = requests[0]
@@ -118,6 +120,29 @@ def test_step_call_has_timeout() -> None:
 
     assert decision.error_code == "LLM_REQUEST_TIMEOUT"
     assert llm.kwargs["timeout"] == STEP_TIMEOUT_SECONDS
+
+
+def test_cached_tokens_are_read_from_usage() -> None:
+    class CachedLLM:
+        model = "openai/gpt-6-luna"
+
+        async def chat(self, messages, **kwargs):
+            usage = SimpleNamespace(
+                prompt_tokens=100,
+                completion_tokens=50,
+                prompt_tokens_details=SimpleNamespace(cached_tokens=40),
+            )
+            choice = SimpleNamespace(message=SimpleNamespace(content=NORMAL), finish_reason="stop")
+            return SimpleNamespace(usage=usage, choices=[choice])
+
+    decision = decide(CachedLLM())
+
+    # 입력 100 안에 캐시된 40 이 들어 있다 — 비용은 이 셋으로 센다.
+    assert (decision.prompt_tokens, decision.cached_tokens, decision.completion_tokens) == (
+        100,
+        40,
+        50,
+    )
 
 
 def test_llm_request_failure_is_recorded_not_raised(scripted_llm) -> None:

@@ -11,11 +11,12 @@ from ..driver.dom_driver import DomDriver
 from ..guard.domain import allowed_hosts
 from ..llm import LLMClient
 from ..persona.llm_decider import STEP_MAX_RETRIES, LLMDecider
-from ..persona.persona_agent import Decider, PersonaAgent, StepResult
+from ..persona.persona_agent import Decider, Decision, PersonaAgent, StepResult
 from ..repositories.audit_log_repository import audit_log_repository
 from ..repositories.run_persona_repository import PersonaOutcome, run_persona_repository
 from ..repositories.run_repository import RunSnapshot, run_repository
 from ..schemas import Action
+from ..usage_report import cost_usd, price_table
 from .step_log_writer import step_log_writer
 
 logger = logging.getLogger(__name__)
@@ -372,6 +373,7 @@ class RunOrchestrator:
     ) -> Literal["done", "max_steps", "timeout", "cancelled", "fail"]:
         persona_id = persona["persona_id"]
         step_log_writer.prepare(run_id, persona_id)
+        spent = 0.0  # 이 Persona 가 쓴 LLM 비용(USD)의 정확한 합계 — 반올림하지 않은 값
         # 어느 경로로 return하든 async with를 빠져나가며 브라우저(컨텍스트, 페이지 포함)를 폐기한다.
         # 시간 상한은 자리를 잡은 뒤 브라우저 시작부터 잰다. 넘으면 진행 중인 스텝을 끊고
         # TimeoutError 로 빠져나간다. 브라우저 닫기는 시간 상한이 풀린 뒤라 그 상한에는 끊기지 않고
@@ -430,7 +432,14 @@ class RunOrchestrator:
                     tokens = step.decision.prompt_tokens + step.decision.completion_tokens
                     if run_id in self._run_tokens:
                         self._run_tokens[run_id].used += tokens
-                    run_persona_repository.increment_steps(run_id, persona_id, tokens)
+                    step_cost = _step_cost_usd(step.decision)
+                    cost_to_add = None  # 단가 없는 모델이면 비용 칸은 건드리지 않는다
+                    if step_cost is not None:
+                        # DB 칸이 소수 4자리라 step 마다 반올림해 더하면 오차가 쌓인다.
+                        # 정확한 합계를 들고 있다가, 반올림한 합계가 늘어난 만큼만 더한다.
+                        before, spent = spent, spent + step_cost
+                        cost_to_add = round(spent, 4) - round(before, 4)
+                    run_persona_repository.increment_steps(run_id, persona_id, tokens, cost_to_add)
                     if step.result.error_code in GUARD_BLOCK_CODES:
                         audit_log_repository.add_blocked_action(
                             run_id,
@@ -588,6 +597,19 @@ class RunOrchestrator:
             "model": decision.model,
             "task": {"url_reached": _same_url(url_after, success_url) if success_url else None},
         }
+
+
+def _step_cost_usd(decision: Decision) -> float | None:
+    """step 하나의 LLM 비용(USD). 단가표(usage_report)에 없는 모델이면 None — 토큰만 센다."""
+    return cost_usd(
+        {
+            "model": decision.model,
+            "input_tokens": decision.prompt_tokens,
+            "cached_tokens": decision.cached_tokens,
+            "output_tokens": decision.completion_tokens,
+        },
+        price_table(),
+    )
 
 
 def _action_log(action: Action | None) -> dict | None:

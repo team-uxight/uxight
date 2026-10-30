@@ -4,12 +4,16 @@
 """
 
 import asyncio
+import itertools
 import time
 from types import SimpleNamespace
 
 import pytest
 
+from uxight_agent import usage_report
 from uxight_agent.driver.base import ActionResult, Driver, Observation
+from uxight_agent.llm import record_usage
+from uxight_agent.persona.llm_decider import LLMDecider
 from uxight_agent.persona.persona_agent import Decider, Decision
 from uxight_agent.repositories.run_repository import RunSnapshot
 from uxight_agent.schemas import Action
@@ -75,13 +79,21 @@ class FakeRunPersonaRepository:
         self.statuses: dict[int, str] = {}
         self.steps: dict[int, int] = {}
         self.tokens: dict[int, int] = {}
+        # 비용은 실제 SQL 처럼 None 이면 건드리지 않고, 처음 값이 오면 0 에서 시작해 더한다.
+        self.costs: dict[int, float | None] = {}
+        self.cost_added: dict[int, list[float | None]] = {}  # step 마다 더한 값
 
     def get_statuses(self, run_id: int) -> dict[int, str]:
         return dict(self.statuses)
 
-    def increment_steps(self, run_id: int, persona_id: int, tokens: int = 0) -> None:
+    def increment_steps(
+        self, run_id: int, persona_id: int, tokens: int = 0, cost_usd: float | None = None
+    ) -> None:
         self.steps[persona_id] = self.steps.get(persona_id, 0) + 1
         self.tokens[persona_id] = self.tokens.get(persona_id, 0) + tokens
+        self.cost_added.setdefault(persona_id, []).append(cost_usd)
+        if cost_usd is not None:
+            self.costs[persona_id] = (self.costs.get(persona_id) or 0.0) + cost_usd
 
     def mark_finished(self, run_id: int, persona_id: int, status: str) -> None:
         if self.statuses[persona_id] == "running":
@@ -670,6 +682,112 @@ def test_run_token_cap_ends_personas_with_reason(
     ((_, persona_id, detail),) = fakes.audits.limits
     assert persona_id == 1
     assert detail == {"persona_id": 1, "step": 4, "reason": "max_tokens", "limit": 250, "used": 300}
+
+
+def luna_step(prompt: int, completion: int, cached: int = 0, model: str = "gpt-6-luna") -> Decision:
+    return Decision(
+        Action(kind="scroll", value="down"),
+        prompt_tokens=prompt,
+        completion_tokens=completion,
+        cached_tokens=cached,
+        model=model,
+    )
+
+
+def test_step_cost_is_added_every_step_without_rounding_drift(
+    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # step 하나가 $0.00064 (입력 5,000 × $0.10 + 출력 280 × $0.50, 100만 토큰당). DB 칸은 소수
+    # 4자리라 step 마다 반올림해 더하면 10 step 이 $0.0060 이 된다 — 실제 합계는 $0.0064 다.
+    use_decider(monkeypatch, ScriptedDecider(*[luna_step(5_000, 280) for _ in range(10)]))
+
+    asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)], max_steps=10)))
+
+    added = fakes.personas.cost_added[1]
+    assert len(added) == 10  # step 마다 한 번씩 더한다
+    # 더한 값은 소수 4자리이고, 그때까지의 합은 그 시점 실제 합계를 4자리로 반올림한 값이다.
+    assert all(round(x, 4) == pytest.approx(x) for x in added)
+    expected = [round(0.00064 * n, 4) for n in range(1, 11)]
+    assert list(itertools.accumulate(added)) == pytest.approx(expected)
+    assert fakes.personas.costs[1] == pytest.approx(0.0064)
+
+
+def test_step_cost_bills_cached_tokens_at_cache_price(
+    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 캐시된 40만 × $0.01 + 나머지 입력 60만 × $0.10 + 출력 100만 × $0.50 = $0.564
+    use_decider(monkeypatch, ScriptedDecider(luna_step(1_000_000, 1_000_000, cached=400_000)))
+
+    asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)], max_steps=1)))
+
+    assert fakes.personas.costs[1] == pytest.approx(0.564)
+
+
+def test_unpriced_model_counts_tokens_but_leaves_cost_empty(
+    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    use_decider(
+        monkeypatch,
+        ScriptedDecider(*[luna_step(80, 20, model="other/model") for _ in range(2)]),
+    )
+
+    asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)], max_steps=2)))
+
+    assert fakes.personas.tokens[1] == 200
+    assert fakes.personas.cost_added[1] == [None, None]
+    assert 1 not in fakes.personas.costs
+
+
+def test_cost_added_to_db_equals_cost_from_usage_log(
+    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    # 한 응답에서 두 값이 나온다 — 사용량 기록(llm-usage.jsonl)으로 계산한 비용과 DB 에 더한 비용.
+    # 둘이 같아야 한다.
+    log = tmp_path / "llm-usage.jsonl"
+    monkeypatch.setenv("LLM_USAGE_LOG", str(log))
+    monkeypatch.delenv("LLM_PRICES", raising=False)
+    # (입력, 출력, 캐시된 입력) — 입력 47,080 · 출력 4,588 인 dev 회차 9 의 모양에 캐시를 섞었다.
+    usages = iter(
+        [(1_900, 410, 0), (3_100, 520, 0), (3_800, 380, 1_000), (4_400, 450, 2_000),
+         (4_900, 470, 0), (5_300, 500, 3_000), (5_600, 440, 0), (5_800, 460, 4_000),
+         (5_900, 480, 0), (6_380, 478, 5_000)]
+    )  # fmt: skip
+    reply = '{"reasoning": "r", "action": {"kind": "scroll", "element_id": null, "value": "down"}}'
+
+    class UsageLLM:
+        model = "openai/gpt-6-luna"
+
+        async def chat(self, messages, *, role, run_id=None, persona_id=None, **kwargs):
+            inp, out, cached = next(usages)
+            response = SimpleNamespace(
+                usage=SimpleNamespace(
+                    prompt_tokens=inp,
+                    completion_tokens=out,
+                    completion_tokens_details=SimpleNamespace(reasoning_tokens=int(out * 0.9)),
+                    prompt_tokens_details=SimpleNamespace(cached_tokens=cached),
+                ),
+                choices=[
+                    SimpleNamespace(message=SimpleNamespace(content=reply), finish_reason="stop")
+                ],
+            )
+            record_usage(
+                response,
+                role=role,
+                model=self.model,
+                latency_ms=1,
+                run_id=run_id,
+                persona_id=persona_id,
+            )
+            return response
+
+    use_decider(monkeypatch, LLMDecider(UsageLLM(), run_id=RUN_ID))
+
+    asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)], max_steps=10)))
+
+    rows = usage_report.load(log)
+    from_log = sum(usage_report.cost_usd(row, usage_report.price_table()) for row in rows)
+    assert len(rows) == 10
+    assert fakes.personas.costs[1] == pytest.approx(round(from_log, 4))
 
 
 def test_daily_budget_spent_stops_before_llm_call(fakes: SimpleNamespace) -> None:
