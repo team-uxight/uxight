@@ -22,8 +22,9 @@ class Decision:
     error_code: str | None = None
     error: str | None = None
     llm_ms: int = 0
-    prompt_tokens: int = 0
-    completion_tokens: int = 0
+    prompt_tokens: int = 0  # 캐시된 토큰을 포함한 입력 토큰
+    cached_tokens: int = 0  # prompt_tokens 중 캐시에서 읽은 만큼 (비용 계산용)
+    completion_tokens: int = 0  # 추론 토큰을 포함한 출력 토큰
     model: str | None = None
 
 

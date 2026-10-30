@@ -11,11 +11,12 @@ from ..driver.dom_driver import DomDriver
 from ..guard.domain import allowed_hosts
 from ..llm import LLMClient
 from ..persona.llm_decider import STEP_MAX_RETRIES, LLMDecider
-from ..persona.persona_agent import Decider, PersonaAgent, StepResult
+from ..persona.persona_agent import Decider, Decision, PersonaAgent, StepResult
 from ..repositories.audit_log_repository import audit_log_repository
 from ..repositories.run_persona_repository import PersonaOutcome, run_persona_repository
 from ..repositories.run_repository import RunSnapshot, run_repository
 from ..schemas import Action
+from ..usage_report import PriceTable, cost_usd, price_table
 from .step_log_writer import step_log_writer
 
 logger = logging.getLogger(__name__)
@@ -87,6 +88,8 @@ class RunOrchestrator:
         # 회차별 토큰 상한(policy max_tokens, 회차 당)과 지금까지 쓴 토큰.
         # 회차 안 Persona 가 나눠 쓴다.
         self._run_tokens: dict[int, RunTokens] = {}
+        # 회차별 단가표. 수락할 때 LLM_PRICES 를 검사하며 만든 것을 회차가 끝날 때까지 쓴다.
+        self._run_prices: dict[int, PriceTable] = {}
 
     def try_accept_and_start(self, run_id: int) -> RunSnapshot | None:
         """queued 인 회차만 수락한다.
@@ -121,6 +124,14 @@ class RunOrchestrator:
                     "run=%s LLM settings missing (LLM_BASE_URL, LLM_API_KEY, LLM_MODEL)", run_id
                 )
                 self._fail_run(run_id, error="LLM 설정 없음")
+                return None
+            # 단가표(LLM_PRICES)도 같은 이유로 지금 검사한다. 여기서 만든 표를 이 회차의 step 이
+            # 쓴다 — step 마다 env 를 다시 읽지 않는다.
+            try:
+                self._run_prices[run_id] = price_table()
+            except ValueError as exc:
+                logger.error("run=%s LLM_PRICES invalid: %s", run_id, exc)
+                self._fail_run(run_id, error="LLM_PRICES 형식 오류")
                 return None
         except Exception as exc:
             # 수락한 회차를 accepted · running 으로 남기지 않는다. 호출한 쪽은 None 을 받아
@@ -166,6 +177,8 @@ class RunOrchestrator:
             # 자세한 내용은 로그에만 남긴다 — 예외 문구에는 SQL · DB 주소가 섞일 수 있다.
             logger.exception("run=%s failed, closing as failed", run_id)
             self._fail_run(run_id, error=f"실행 오류로 중단: {type(exc).__name__}")
+        finally:
+            self._run_prices.pop(run_id, None)
 
     async def _run_all_personas(self, run_id: int, snapshot: RunSnapshot) -> None:
         target_url = snapshot.target_url
@@ -176,6 +189,8 @@ class RunOrchestrator:
         max_steps = policy.get("max_steps") or DEFAULT_MAX_STEPS
         max_seconds = policy.get("max_seconds") or DEFAULT_MAX_SECONDS
         self._run_tokens[run_id] = RunTokens(limit=policy.get("max_tokens"))
+        if run_id not in self._run_prices:  # 수락(try_accept_and_start)을 거치지 않은 호출
+            self._run_prices[run_id] = price_table()
         # 회차 안 동시 수. 전역 자리(persona_slots)도 함께 잡으므로 실제 상한은 둘 중 작은 값이다.
         # 값이 없으면 회차 안 제한 없이 전역 상한만 따른다.
         run_slots = asyncio.Semaphore(policy.get("persona_concurrency") or len(personas))
@@ -372,6 +387,8 @@ class RunOrchestrator:
     ) -> Literal["done", "max_steps", "timeout", "cancelled", "fail"]:
         persona_id = persona["persona_id"]
         step_log_writer.prepare(run_id, persona_id)
+        prices = self._run_prices[run_id]
+        spent = 0.0  # 이 Persona 가 쓴 LLM 비용(USD)의 정확한 합계 — 반올림하지 않은 값
         # 어느 경로로 return하든 async with를 빠져나가며 브라우저(컨텍스트, 페이지 포함)를 폐기한다.
         # 시간 상한은 자리를 잡은 뒤 브라우저 시작부터 잰다. 넘으면 진행 중인 스텝을 끊고
         # TimeoutError 로 빠져나간다. 브라우저 닫기는 시간 상한이 풀린 뒤라 그 상한에는 끊기지 않고
@@ -430,7 +447,14 @@ class RunOrchestrator:
                     tokens = step.decision.prompt_tokens + step.decision.completion_tokens
                     if run_id in self._run_tokens:
                         self._run_tokens[run_id].used += tokens
-                    run_persona_repository.increment_steps(run_id, persona_id, tokens)
+                    step_cost = _step_cost_usd(step.decision, prices)
+                    cost_to_add = None  # 단가 없는 모델이면 비용 칸은 건드리지 않는다
+                    if step_cost is not None:
+                        # DB 칸이 소수 4자리라 step 마다 반올림해 더하면 오차가 쌓인다.
+                        # 정확한 합계를 들고 있다가, 반올림한 합계가 늘어난 만큼만 더한다.
+                        before, spent = spent, spent + step_cost
+                        cost_to_add = round(spent, 4) - round(before, 4)
+                    run_persona_repository.increment_steps(run_id, persona_id, tokens, cost_to_add)
                     if step.result.error_code in GUARD_BLOCK_CODES:
                         audit_log_repository.add_blocked_action(
                             run_id,
@@ -588,6 +612,19 @@ class RunOrchestrator:
             "model": decision.model,
             "task": {"url_reached": _same_url(url_after, success_url) if success_url else None},
         }
+
+
+def _step_cost_usd(decision: Decision, prices: PriceTable) -> float | None:
+    """step 하나의 LLM 비용(USD). 단가표에 없는 모델이면 None — 토큰만 센다."""
+    return cost_usd(
+        {
+            "model": decision.model,
+            "input_tokens": decision.prompt_tokens,
+            "cached_tokens": decision.cached_tokens,
+            "output_tokens": decision.completion_tokens,
+        },
+        prices,
+    )
 
 
 def _action_log(action: Action | None) -> dict | None:

@@ -94,6 +94,99 @@ def test_report_cost_and_unpriced(log, monkeypatch) -> None:
     assert summary["total"]["usd"] == pytest.approx(4.40)
 
 
+# dev 회차 9 의 실제 합계: 입력 47,080 · 출력 4,588 · 캐시 0, 호출 10번. 호출별 나눔은 어림이다.
+DEV_RUN_9_CALLS = [
+    (1_900, 410), (3_100, 520), (3_800, 380), (4_400, 450), (4_900, 470),
+    (5_300, 500), (5_600, 440), (5_800, 460), (5_900, 480), (6_380, 478),
+]  # fmt: skip
+
+
+@pytest.mark.parametrize("model", ["openai/gpt-6-luna", "gpt-6-luna"])
+def test_gpt_6_luna_cost_of_dev_run_9(log, model: str) -> None:
+    for inp, out in DEV_RUN_9_CALLS:
+        record_usage(_resp(inp, out, 0), role="persona_step", model=model, latency_ms=1, run_id=9)
+
+    summary = usage_report.summarize(usage_report.load(log), "run", usage_report.price_table())
+
+    # 입력 47,080 × $0.10 + 출력 4,588 × $0.50 (100만 토큰당) = 0.004708 + 0.002294
+    assert summary["groups"]["9"]["usd"] == pytest.approx(0.007002)
+    assert round(summary["total"]["usd"], 4) == 0.0070
+    assert summary["unpriced"] == 0
+    # 리포트는 소수 4자리로 보여 준다 — DB 의 cost_usd 칸과 같은 자리라 견주어 볼 수 있다.
+    report = usage_report.render(summary, "run", "t")
+    assert report.splitlines()[2].endswith(" 0.0070")
+    assert report.splitlines()[3].endswith("약 $0.0070")
+
+
+def test_cached_input_is_billed_at_cache_price(log) -> None:
+    resp = _resp(1_000_000, 1_000_000, 0)
+    resp.usage.prompt_tokens_details = SimpleNamespace(cached_tokens=400_000)
+
+    row = record_usage(resp, role="persona_step", model="openai/gpt-6-luna", latency_ms=1)
+
+    # 캐시된 40만 × $0.01 + 나머지 입력 60만 × $0.10 + 출력 100만 × $0.50 (100만 토큰당)
+    assert row["cached_tokens"] == 400_000
+    assert usage_report.cost_usd(row, usage_report.price_table()) == pytest.approx(0.564)
+
+
+def test_reasoning_tokens_are_not_billed_twice(log) -> None:
+    # 출력 1,660 안에 추론 1,559 가 들어 있다 (실제 기록의 모양) — 출력 단가는 1,660 에만 곱한다.
+    row = record_usage(_resp(0, 1660, 1559), role="persona_step", model="gpt-6-luna", latency_ms=1)
+
+    assert row["reasoning_tokens"] <= row["output_tokens"]
+    expected = 1660 * 0.50 / 1_000_000
+    assert usage_report.cost_usd(row, usage_report.price_table()) == pytest.approx(expected)
+
+
+def test_cache_price_in_env_is_optional(monkeypatch) -> None:
+    monkeypatch.setenv("LLM_PRICES", '{"a/with": [1, 2, 0.5], "a/without": [1, 2]}')
+    table = usage_report.price_table()
+    cached_call = {"input_tokens": 1_000_000, "cached_tokens": 1_000_000, "output_tokens": 0}
+
+    assert usage_report.cost_usd({"model": "a/with", **cached_call}, table) == pytest.approx(0.5)
+    # 캐시 단가를 안 주면 캐시된 입력도 입력 단가로 센다
+    assert usage_report.cost_usd({"model": "a/without", **cached_call}, table) == pytest.approx(1.0)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        '{"a/b": [1]}',  # 값 1개
+        '{"a/b": 0.1}',  # 숫자 하나 (목록이 아님)
+        "not json",
+        '{"a/b": [-1, 2]}',  # 음수
+        '{"a/b": [1, 2, 3, 4]}',
+        '{"a/b": [NaN, 2]}',
+        '{"a/b": [1, Infinity]}',
+        '{"a/b": ["1", 2]}',
+        '{"a/b": [true, 2]}',
+        '{"a/b": null}',
+        "[1, 2]",
+    ],
+)
+def test_malformed_prices_env_is_value_error(monkeypatch, value: str) -> None:
+    monkeypatch.setenv("LLM_PRICES", value)
+
+    with pytest.raises(ValueError):
+        usage_report.price_table()
+
+
+def test_prices_env_accepts_two_or_three_numbers_and_zero(monkeypatch) -> None:
+    monkeypatch.setenv("LLM_PRICES", '{"a/free": [0, 0], "a/full": [1, 2.5, 0]}')
+
+    table = usage_report.price_table()
+
+    assert table["a/free"] == (0.0, 0.0, 0.0)
+    assert table["a/full"] == (1.0, 2.5, 0.0)
+    assert table["gpt-6-luna"] == usage_report.GPT_6_LUNA_PRICES  # 기본표는 그대로 남는다
+
+
+def test_blank_prices_env_means_not_set(monkeypatch) -> None:
+    monkeypatch.setenv("LLM_PRICES", "")
+
+    assert usage_report.price_table() == usage_report.DEFAULT_PRICES
+
+
 def test_slack_text_warns_over_threshold(log) -> None:
     record_usage(
         _resp(1_000_000, 1_000_000, 0), role="judge", model="openai/gpt-5.6-luna", latency_ms=1
