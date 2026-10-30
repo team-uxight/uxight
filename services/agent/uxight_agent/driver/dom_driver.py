@@ -187,6 +187,9 @@ _COLLECT_ELEMENTS_JS = """
   //   빠진다. 요소 줄은 이 기준을 쓰지 않는다 — text-indent 로 숨긴 아이콘 버튼 이름
   //   ('검색창 열기')은 사람이 아이콘을 보고 아는 뜻이다.
   // - 블록이 바뀌면 줄을 바꾸고, 표는 한 행의 칸을 ' | ' 로 이어 한 줄에 둔다.
+  // - 글이 있는 칸 · 블록 뒤에는 그 안 번호 요소의 번호를 ' [n]' 으로 붙인다 (GACA-222).
+  //   글만 보이면 모델은 그 칸의 링크를 누를 번호를 모른다.
+  //   요소 줄과 같은 번호만 쓰므로, 화면 밖 · 숨김처럼 번호가 없는 요소는 붙지 않는다.
   // - 공백을 뺀 글자 수가 maxTextLength 를 넘으면 그만 모은다. 넘게 모아야 Python 이 잘린 것을 알고
   //   … 을 붙인다. 공백 정리와 자르기는 Python 이 한다 (_body_text).
   const alphaOf = (color) => { // 계산된 색('rgba(0, 0, 0, 0.5)' · 'oklch(0 0 0 / 50%)')의 투명도
@@ -229,6 +232,22 @@ _COLLECT_ELEMENTS_JS = """
     && r.top < innerHeight && r.bottom > 0 && r.left < innerWidth && r.right > 0;
   const overlaps = (r, clip) => r.right > clip.left && r.left < clip.right
     && r.bottom > clip.top && r.top < clip.bottom;
+  // 칸 · 블록 → 그 안 번호 요소의 번호(문서 순서).
+  // 표 칸 안의 요소는 그 칸에 두고, 아니면 감싼 블록에 둔다.
+  const idsByUnit = new Map();
+  for (const el of document.querySelectorAll(`[${idAttr}]`)) {
+    const unit = el.closest('td, th') ?? blockOf(el);
+    if (!unit) continue;
+    if (!idsByUnit.has(unit)) idsByUnit.set(unit, []);
+    idsByUnit.get(unit).push(el.getAttribute(idAttr));
+  }
+  // 글을 마친 칸 · 블록의 번호를 ' [n]' 꼴로 꺼내고 비운다.
+  // 바깥 글이 안쪽 블록으로 갈려 같은 칸 · 블록이 다시 나와도 번호는 한 번만 붙는다.
+  const takeIds = (unit) => {
+    const ids = idsByUnit.get(unit) ?? [];
+    idsByUnit.delete(unit);
+    return ids.map((id) => ` [${id}]`).join('');
+  };
   // 표 한 행에서 from 부터 to 앞까지 칸의 자리. 글이 안 잡힌 칸(링크만 든 칸 · 빈칸)도
   // ' | ' 자리를 남겨 머리 줄과 열을 맞추고, 링크가 든 칸에는 그 요소 번호를 넣어
   // 행과 요소 줄을 잇는다.
@@ -255,6 +274,7 @@ _COLLECT_ELEMENTS_JS = """
     let size = 0; // 모은 글자 수 (공백 빼고)
     let lastBlock = null;
     let lastCell = null;
+    let lastUnit = null; // 방금 글의 칸(표 안이면) 또는 블록 — 번호를 붙일 자리
     for (let node = walker.nextNode(); node && size <= maxTextLength; node = walker.nextNode()) {
       if (node.localName === 'br') lastBlock = null;
       if (node.nodeType !== Node.TEXT_NODE) continue;
@@ -269,6 +289,9 @@ _COLLECT_ELEMENTS_JS = """
       const box = boxOf(node);
       if (!box.shown || !rects.some((r) => box.clips.every((clip) => overlaps(r, clip)))) continue;
       if (box.block !== lastBlock) {
+        const unit = box.cell ?? box.block;
+        if (unit !== lastUnit) text += takeIds(lastUnit);
+        lastUnit = unit;
         const row = box.cell?.parentElement;
         text += box.cell && box.cell === lastCell ? ' '
           : row && row === lastCell?.parentElement
@@ -280,7 +303,7 @@ _COLLECT_ELEMENTS_JS = """
       lastBlock = box.block;
       lastCell = box.cell;
     }
-    return text;
+    return text + takeIds(lastUnit);
   };
 
   return { items, text: bodyText() };

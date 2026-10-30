@@ -2,10 +2,12 @@
 
 LLM 없이 tests/fixtures 의 본문 페이지(body_*.html)를 Playwright 로 띄워 DomDriver 관측과
 step 프롬프트를 본다. body_text.html 은 학교 사본 '졸업' 페이지의 표를 줄인 것이다.
+body_links.html 은 글과 링크가 한 칸 · 한 문단에 같이 든 경우다 (GACA-222).
 """
 
 import asyncio
 import json
+import re
 import unicodedata
 from pathlib import Path
 
@@ -20,6 +22,8 @@ FIXTURES = Path(__file__).parent / "fixtures"
 PERSONA = {"persona_id": 1, "name": "계층 우선-desktop-01", "profile": {}}
 TASK = {"task_id": 9, "goal": "26학번 졸업 이수학점 기준을 찾는다"}
 BODY_LABEL = "본문 (지금 화면에 보이는 글):"
+# 학번 표는 학교 사본 그대로라 칸에 링크가 없어 요소 번호도 없다.
+# 사본은 칸을 누르면 스크립트가 새 창을 연다.
 TABLE_ROW = "23학번 (별표29) | 24학번 (별표30) | 25학번 (별표31) | 26학번 (별표32)"
 SCROLL_DOWN = Action(kind="scroll", value="down")
 
@@ -84,6 +88,54 @@ def test_skipped_cells_keep_their_place() -> None:
         '[3] <a href="/bbs/2645"> "장학금 신청 안내"',
         '[4] <a href="/bbs/notice"> "공지"',
     ]
+
+
+def test_cell_with_text_and_link_gets_element_number() -> None:
+    obs = observe("body_links.html")
+
+    # 글과 링크가 같이 든 칸은 글 뒤에 그 링크의 요소 번호가 붙는다. 번호는 요소 줄의 번호다.
+    assert obs.text.splitlines()[0] == "25학번 (별표31) [1] | 26학번 (별표32) [2]"
+    assert obs.dom.splitlines()[:2] == [
+        '[1] <a href="/kor/10723/subview.do"> "보기"',
+        '[2] <a href="/kor/12490/subview.do"> "보기"',
+    ]
+
+
+def test_numbers_follow_cells_and_paragraphs() -> None:
+    obs = observe("body_links.html")
+
+    assert obs.text.splitlines() == [
+        "25학번 (별표31) [1] | 26학번 (별표32) [2]",  # 글 + 링크 칸
+        "NO | 제목 | 등록일",  # 링크 없음: 그대로
+        "2645 | [3] | 2026-10-30 [4]",  # 링크만 든 칸은 번호만, 글 + 링크 칸은 글 뒤에
+        "2646 [5] | 신청 [6] [7]",  # 링크가 글보다 앞이어도 글 뒤, 링크가 둘이면 문서 순서로
+        "졸업 요건은 에서 본다. [8]",  # 문단
+        "2026-10-29 [9]",  # 목록 항목
+        "앞 글 [10]",  # 안쪽 블록으로 갈린 바깥 글은 첫 줄에 한 번만
+        "가운데 글 [11]",  # 안쪽 블록의 링크는 안쪽 글에
+        "뒤 글",
+        "보이는 글",  # 화면 밖 · 숨긴 링크는 번호가 없다
+    ]
+
+
+def test_body_numbers_match_element_numbers() -> None:
+    obs = observe("body_links.html")
+
+    numbers = {int(number) for number in re.findall(r"\[(\d+)\]", obs.text)}
+    # 본문의 번호는 모두 요소 줄에 있는 번호다. 링크만 든 블록(메뉴 12 · 13)은 본문에 줄이 없다.
+    assert numbers == set(range(1, 12))
+    assert numbers < obs.element_map.keys()
+    # 화면 밖 · 숨긴 링크는 요소 번호가 없으니 본문에도 없다.
+    hrefs = {item["href"] for item in obs.element_map.values()}
+    assert not hrefs & {"/off-left", "/off-top", "/off-none"}
+
+
+def test_cell_numbers_reach_prompt() -> None:
+    lines = page_lines(observe("body_links.html"))
+
+    # 번호는 본문 줄(따옴표 문자열) 안의 글자이고, 누르는 곳은 요소 줄의 같은 번호다.
+    assert '"25학번 (별표31) [1] | 26학번 (별표32) [2]"' in body_lines(lines)
+    assert '[2] <a href="/kor/12490/subview.do"> "보기"' in lines
 
 
 def test_menu_text_stays_in_element_lines() -> None:
