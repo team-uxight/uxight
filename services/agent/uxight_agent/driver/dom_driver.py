@@ -1,6 +1,7 @@
 import dataclasses
 import json
 import re
+import unicodedata
 
 from playwright.async_api import Browser, Page, Playwright, async_playwright
 from playwright.async_api import Error as PlaywrightError
@@ -34,12 +35,17 @@ MIN_OPACITY = 0.1
 MIN_FONT_SIZE_PX = 6
 # 요소 줄에 넣는 글 · 속성 값 하나의 최대 길이.
 MAX_VALUE_LENGTH = 100
+# 본문 글(Observation.text)의 안전 상한(글자). 본문은 지금 화면 안의 글뿐이라 보통 이보다 훨씬
+# 짧다 — 학교 사본 71쪽을 끝까지 한 화면씩 내려 보니(10/30) 가장 긴 화면이 957자(졸업)였다.
+# 글자가 아주 작거나 빽빽한 화면에서 프롬프트가 커지지 않게 막는다.
+# 한 글자는 약 0.7 토큰이다(o200k_base).
+MAX_TEXT_LENGTH = 3_000
 
 # 대상 페이지 안에서 실행되는 스크립트.
-# 보이는 상호작용 요소마다 data-ux-id를 붙이고, 요소 정보를 목록으로 돌려준다.
+# 보이는 상호작용 요소마다 data-ux-id를 붙이고, 요소 정보 목록(items)과 본문 글(text)을 돌려준다.
 # 사람 눈에 안 보이는 요소와 글은 뺀다 — 숨긴 곳에 심은 주입 문구가 모델 입력에 들어가지 않게.
 _COLLECT_ELEMENTS_JS = """
-({ idAttr, minOpacity, minFontSizePx, maxValueLength }) => {
+({ idAttr, minOpacity, minFontSizePx, maxValueLength, maxTextLength }) => {
   document.querySelectorAll(`[${idAttr}]`).forEach(el => el.removeAttribute(idAttr));
 
   // 사람 눈에 보이는 정도.
@@ -60,11 +66,17 @@ _COLLECT_ELEMENTS_JS = """
     for (let node = el; node; node = node.parentElement) {
       const style = getComputedStyle(node);
       opacity *= parseFloat(style.opacity);
+      // filter 의 opacity() 도 같은 효과라 곱한다.
+      for (const [, value, percent] of style.filter.matchAll(/opacity\\(([\\d.]+)(%?)\\)/g)) {
+        opacity *= value / (percent ? 100 : 1);
+      }
       fixed ||= style.position === 'fixed';
     }
     // 화면 밖: 가로는 뷰포트 밖(가로 스크롤은 사람도 Agent도 거의 하지 않는다),
     // 세로는 문서 위쪽 바깥(스크롤로도 닿지 않는다). 아래쪽은 스크롤하면 보이므로 남긴다.
-    if (rect.right <= 0 || rect.left >= innerWidth || rect.bottom + (fixed ? 0 : scrollY) <= 0) {
+    // 단 고정 위치(fixed) 요소는 스크롤해도 움직이지 않아, 화면 아래에 두면 끝내 안 보인다.
+    if (rect.right <= 0 || rect.left >= innerWidth || rect.bottom + (fixed ? 0 : scrollY) <= 0
+      || (fixed && rect.top >= innerHeight)) {
       return 'hidden';
     }
     const fontSize = parseFloat(getComputedStyle(el).fontSize);
@@ -162,7 +174,116 @@ _COLLECT_ELEMENTS_JS = """
     });
     nextId++;
   }
-  return items;
+
+  // 본문 글 (GACA-217): 요소 줄에 없고 지금 화면 안에 보이는 글. 정보를 찾는 Task 는 표 · 문단을
+  // 읽어야 한다. 화면 아래 글은 사람처럼 스크롤해야 보인다 (PM 결정 10/30).
+  // - 번호를 붙인 요소 안의 글은 요소 줄에 이미 있어 뺀다. 페이지마다 되풀이되는 메뉴 · 바닥 링크가
+  //   거의 다 링크라 이것으로 빠진다. textarea 글은 입력값이라 뺀다.
+  // - 보이는지는 요소 글보다 엄격하게 본다. 아래를 모두 지켜야 한다.
+  //   1) 감싼 요소가 보인다(visibilityOf).
+  //   2) 글 조각의 사각형(Range)이 화면 안이고, overflow hidden · clip 조상의 상자와 겹친다.
+  //   3) 글자색이 투명하지 않다.
+  //   그래서 text-indent 로 밀어낸 글 · 접힌 상자 · 캐러셀의 다른 슬라이드 · canvas 대체 글이
+  //   빠진다. 요소 줄은 이 기준을 쓰지 않는다 — text-indent 로 숨긴 아이콘 버튼 이름
+  //   ('검색창 열기')은 사람이 아이콘을 보고 아는 뜻이다.
+  // - 블록이 바뀌면 줄을 바꾸고, 표는 한 행의 칸을 ' | ' 로 이어 한 줄에 둔다.
+  // - 공백을 뺀 글자 수가 maxTextLength 를 넘으면 그만 모은다. 넘게 모아야 Python 이 잘린 것을 알고
+  //   … 을 붙인다. 공백 정리와 자르기는 Python 이 한다 (_body_text).
+  const alphaOf = (color) => { // 계산된 색('rgba(0, 0, 0, 0.5)' · 'oklch(0 0 0 / 50%)')의 투명도
+    const inner = color.slice(color.indexOf('(') + 1, color.lastIndexOf(')'));
+    const alpha = inner.includes('/') ? inner.split('/')[1] : inner.split(',')[3];
+    return alpha === undefined ? 1 : parseFloat(alpha) / (alpha.trim().endsWith('%') ? 100 : 1);
+  };
+  // 글 조각을 감싼 요소마다 한 번만 잰다 — 같은 요소 안의 글 조각마다 조상을 다시 오르지 않게.
+  // - shown: 보이는가
+  // - clips: 글을 자르는 overflow hidden · clip 조상의 상자
+  // - block · cell: 줄 나눔용
+  const boxes = new Map();
+  const boxOf = (node) => {
+    let box = boxes.get(node.parentElement);
+    if (box) return box;
+    // display:contents는 상자가 없어 크기가 0이므로 상자가 있는 조상으로 판정한다.
+    let el = node.parentElement;
+    while (getComputedStyle(el).display === 'contents') el = el.parentElement;
+    const style = getComputedStyle(el);
+    const clips = [];
+    for (let up = el; up && up !== document.body; up = up.parentElement) {
+      const upStyle = getComputedStyle(up);
+      if (/hidden|clip/.test(`${upStyle.overflowX} ${upStyle.overflowY}`)) {
+        clips.push(up.getBoundingClientRect());
+      }
+      if (upStyle.position === 'fixed') break; // 고정 위치 요소는 그 위 조상의 상자에 잘리지 않는다
+    }
+    const block = blockOf(node);
+    box = {
+      shown: visibilityOf(el) === 'visible'
+        && Math.min(alphaOf(style.color), alphaOf(style.webkitTextFillColor)) >= minOpacity,
+      clips,
+      block,
+      cell: block?.closest('td, th') ?? null,
+    };
+    boxes.set(node.parentElement, box);
+    return box;
+  };
+  const inView = (r) => r.width > 0 && r.height > 0
+    && r.top < innerHeight && r.bottom > 0 && r.left < innerWidth && r.right > 0;
+  const overlaps = (r, clip) => r.right > clip.left && r.left < clip.right
+    && r.bottom > clip.top && r.top < clip.bottom;
+  // 표 한 행에서 from 부터 to 앞까지 칸의 자리. 글이 안 잡힌 칸(링크만 든 칸 · 빈칸)도
+  // ' | ' 자리를 남겨 머리 줄과 열을 맞추고, 링크가 든 칸에는 그 요소 번호를 넣어
+  // 행과 요소 줄을 잇는다.
+  const skippedCells = (row, from, to) => {
+    let out = '';
+    for (let i = from; i < to; i++) {
+      const cell = row.cells[i];
+      const el = cell?.hasAttribute(idAttr) ? cell : cell?.querySelector(`[${idAttr}]`);
+      out += `${el ? `[${el.getAttribute(idAttr)}]` : ''} | `;
+    }
+    return out;
+  };
+  const bodyText = () => {
+    if (!document.body) return '';
+    const walker = document.createTreeWalker(
+      document.body,
+      NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT,
+      (node) => (node.nodeType === Node.ELEMENT_NODE
+        && (node.hasAttribute(idAttr) || node.localName === 'textarea')
+        ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+    );
+    const range = document.createRange();
+    let text = '';
+    let size = 0; // 모은 글자 수 (공백 빼고)
+    let lastBlock = null;
+    let lastCell = null;
+    for (let node = walker.nextNode(); node && size <= maxTextLength; node = walker.nextNode()) {
+      if (node.localName === 'br') lastBlock = null;
+      if (node.nodeType !== Node.TEXT_NODE) continue;
+      const piece = node.textContent.replace(/\\s+/g, ' ');
+      if (!piece.trim()) {
+        if (!text.endsWith(' ')) text += ' '; // 낱말 사이 공백
+        continue;
+      }
+      range.selectNodeContents(node);
+      const rects = Array.from(range.getClientRects()).filter(inView);
+      if (!rects.length) continue; // 화면 밖이거나 그려지지 않은 글 (canvas 대체 글 등)
+      const box = boxOf(node);
+      if (!box.shown || !rects.some((r) => box.clips.every((clip) => overlaps(r, clip)))) continue;
+      if (box.block !== lastBlock) {
+        const row = box.cell?.parentElement;
+        text += box.cell && box.cell === lastCell ? ' '
+          : row && row === lastCell?.parentElement
+            ? ` | ${skippedCells(row, lastCell.cellIndex + 1, box.cell.cellIndex)}`
+            : `\\n${row ? skippedCells(row, 0, box.cell.cellIndex) : ''}`;
+      }
+      text += piece;
+      size += piece.replaceAll(' ', '').length;
+      lastBlock = box.block;
+      lastCell = box.cell;
+    }
+    return text;
+  };
+
+  return { items, text: bodyText() };
 }
 """
 
@@ -224,14 +345,16 @@ class DomDriver(Driver):
         return dataclasses.replace(observation, screenshot=screenshot)
 
     async def _observe_page(self) -> Observation:
-        """요소 목록만 관측한다 (화면 그림 없음)."""
+        """요소 목록과 본문 글만 관측한다 (화면 그림 없음)."""
         page = self._require_page()
-        items = await self._collect_elements(page)
+        collected = await self._collect_elements(page)
+        items = collected["items"]
         self._element_map = {item["id"]: item for item in items}
         return Observation(
             url=page.url,
-            title=await page.title(),
+            title=_clean(await page.title()),
             dom="\n".join(self._format_element(item) for item in items),
+            text=_body_text(collected["text"]),
             element_map=dict(self._element_map),
         )
 
@@ -276,7 +399,8 @@ class DomDriver(Driver):
             self._playwright = None
         self._page = None
 
-    async def _collect_elements(self, page: Page) -> list[dict]:
+    async def _collect_elements(self, page: Page) -> dict:
+        """{"items": 요소 목록, "text": 본문 글}. 한 스크립트로 모아 둘이 같은 문서를 본다."""
         # 직전 click으로 페이지 이동이 진행 중이면 실행 컨텍스트가 사라질 수 있어 한 번 더 시도한다.
         for attempt in range(2):
             await page.wait_for_load_state("domcontentloaded", timeout=NAVIGATION_TIMEOUT_MS)
@@ -288,12 +412,13 @@ class DomDriver(Driver):
                         "minOpacity": MIN_OPACITY,
                         "minFontSizePx": MIN_FONT_SIZE_PX,
                         "maxValueLength": MAX_VALUE_LENGTH,
+                        "maxTextLength": MAX_TEXT_LENGTH,
                     },
                 )
             except Exception as e:
                 if attempt == 1 or "Execution context was destroyed" not in str(e):
                     raise
-        return []
+        return {"items": [], "text": ""}
 
     async def _perform(self, action: Action) -> ActionResult:
         page = self._require_page()
@@ -357,9 +482,30 @@ class DomDriver(Driver):
 
 
 def _quote(value: str) -> str:
-    """요소 줄에 넣을 값을 정리해 따옴표로 감싼다.
+    """요소 줄에 넣을 값을 정리해(_clean) MAX_VALUE_LENGTH 자로 자르고 따옴표로 감싼다.
 
-    글(text)과 같은 방식으로 공백 · 줄바꿈을 한 칸으로 줄이고 MAX_VALUE_LENGTH 자로 자른다.
     따옴표 · 역슬래시는 JSON 문자열처럼 이스케이프해 값이 따옴표 밖으로 나오지 못하게 한다.
     """
-    return json.dumps(" ".join(value.split())[:MAX_VALUE_LENGTH], ensure_ascii=False)
+    return json.dumps(_clean(value)[:MAX_VALUE_LENGTH], ensure_ascii=False)
+
+
+def _body_text(raw: str) -> str:
+    """본문 글을 줄마다 정리하고(_clean) 빈 줄을 뺀 뒤 MAX_TEXT_LENGTH 자로 자른다.
+
+    줄은 페이지 스크립트가 블록마다 나눈 것이다. 자르면 끝에 … 을 붙여 뒤에 글이 더 있음을 알린다.
+    """
+    lines = (_clean(line) for line in raw.splitlines())
+    text = "\n".join(line for line in lines if line)
+    return text if len(text) <= MAX_TEXT_LENGTH else text[:MAX_TEXT_LENGTH] + "…"
+
+
+def _clean(value: str) -> str:
+    """페이지 글 한 줄을 프롬프트에 넣기 전에 다듬는다.
+
+    - 안 보이는 제어 · 서식 문자(유니코드 Cc · Cf)를 지운다. \\x08 · \\x01 · U+202E 를 남기면 JSON
+      이스케이프(\\b · \\u0001)가 낱말에 붙어 지시문 패턴이 빗나간다.
+    - NFC 로 맞춘다. 첫가끝 자모로 풀어 쓴 글은 지시문 표시가 따옴표까지 넓어진다.
+    - 공백 · 줄바꿈은 한 칸으로 줄인다.
+    """
+    kept = "".join(c for c in value if c.isspace() or unicodedata.category(c) not in ("Cc", "Cf"))
+    return " ".join(unicodedata.normalize("NFC", kept).split())
