@@ -43,6 +43,10 @@ DEFAULT_MAX_SECONDS = 600
 # 닫기가 멈춰도 취소 요청 후 10초 안에 종료를 기록한다 — 감시 2초 + 닫기 5초 < 10초.
 BROWSER_CLOSE_TIMEOUT_SECONDS = 5
 
+# 마지막 화면 스크린샷 상한(초). 시간 상한 밖이라 따로 둔다 (GACA-221).
+# 취소 요청이 오면 바로 멈추므로 위의 취소 10초 약속에 더해지지 않는다.
+LAST_SCREENSHOT_TIMEOUT_SECONDS = 5
+
 # 프로세스 전역 Persona 동시 상한. 회차마다 세마포어를 만들면 회차가 늘수록 동시 브라우저 수가
 # 곱해져 RAM 상한이 무너진다 (architecture §3.1). 모든 회차의 Persona 가 이 자리를 나눠 쓴다.
 persona_slots = asyncio.Semaphore(settings.max_concurrent_personas)
@@ -296,19 +300,20 @@ class RunOrchestrator:
                 outcome = "cancelled"
             else:
                 try:
-                    outcome = await self._drive_persona(
-                        run_id,
-                        target_url,
-                        hosts,
-                        task,
-                        persona,
-                        max_steps,
-                        max_seconds,
-                        cancel_event,
-                    )
+                    async with self._open_driver(run_id, persona_id, hosts) as driver:
+                        outcome = await self._drive_persona(
+                            run_id,
+                            target_url,
+                            hosts,
+                            task,
+                            persona,
+                            max_steps,
+                            max_seconds,
+                            cancel_event,
+                            driver,
+                        )
                     if outcome == "cancelled":
-                        # _drive_persona는 async with를 빠져나온 뒤 반환하므로
-                        # 이 시점엔 브라우저가 이미 닫혀 있다.
+                        # 위 async with를 빠져나왔으므로 이 시점엔 브라우저가 이미 닫혀 있다.
                         logger.info(
                             "run=%s persona=%s 브라우저(컨텍스트) 폐기 완료 → 페르소나 취소",
                             run_id,
@@ -375,18 +380,24 @@ class RunOrchestrator:
         max_steps: int,
         max_seconds: float,
         cancel_event: asyncio.Event,
+        driver: DomDriver,
     ) -> Literal["done", "max_steps", "timeout", "cancelled", "fail"]:
         persona_id = persona["persona_id"]
         step_log_writer.prepare(run_id, persona_id)
         prices = self._run_prices[run_id]
         spent = 0.0  # 이 Persona 가 쓴 LLM 비용(USD)의 정확한 합계 — 반올림하지 않은 값
-        # 어느 경로로 return하든 async with를 빠져나가며 브라우저(컨텍스트, 페이지 포함)를 폐기한다.
-        # 시간 상한은 자리를 잡은 뒤 브라우저 시작부터 잰다. 넘으면 진행 중인 스텝을 끊고
-        # TimeoutError 로 빠져나간다. 브라우저 닫기는 시간 상한이 풀린 뒤라 그 상한에는 끊기지 않고
-        # 닫기 상한(BROWSER_CLOSE_TIMEOUT_SECONDS)만 따른다.
+        # 마지막 화면 스크린샷의 파일 번호 n+1 (n = 마지막으로 로그에 쓴 step 번호). 한도나
+        # 시간 상한으로 끝날 때 마지막 행동을 브라우저에 보냈으면 그 행동 뒤 화면을 한 장 더
+        # 남긴다. 남기지 않는 끝이면 None.
+        last_screen_step: int | None = None
+        # 브라우저(driver)는 부른 쪽이 열고 닫는다. 어느 경로로 return하든 닫히며 컨텍스트, 페이지도
+        # 함께 폐기된다. 시간 상한은 자리를 잡은 뒤 브라우저 시작부터 잰다. 넘으면 진행 중인 스텝을
+        # 끊고 TimeoutError 로 빠져나간다. 마지막 화면 스크린샷과 브라우저 닫기는 시간 상한이 풀린
+        # 뒤라 시간 상한에 끊기지 않고, 자기 상한만 따른다
+        # (LAST_SCREENSHOT_TIMEOUT_SECONDS · BROWSER_CLOSE_TIMEOUT_SECONDS).
         deadline = asyncio.timeout(max_seconds)
         try:
-            async with self._open_driver(run_id, persona_id, hosts) as driver, deadline:
+            async with deadline:
                 started, _ = await self._run_unless_cancelled(
                     driver.start(target_url), cancel_event
                 )
@@ -407,7 +418,7 @@ class RunOrchestrator:
                         audit_log_repository.add_limit_reached(
                             run_id, persona_id, {"persona_id": persona_id, "step": step_no, **limit}
                         )
-                        return "max_steps"
+                        break
                     finished, step = await self._run_unless_cancelled(agent.step(), cancel_event)
                     if not finished:
                         # 감시 태스크가 진행 중인 스텝을 중단했다.
@@ -434,6 +445,12 @@ class RunOrchestrator:
                             run_id, persona_id, step_no, step, task, driver.mode, screenshot
                         ),
                     )
+                    # 브라우저에 보낸 행동(실패한 행동 포함) 뒤에만 마지막 화면을 새로 찍는다.
+                    # 행동을 얻지 못했거나, 실행 전에 막았거나, 드라이버가 이동을 되돌린 step 은
+                    # 찍지 않는다. 화면이 이 step 을 시작할 때와 같다고 보고 이 step 의 그림을
+                    # 마지막 화면으로 삼는다.
+                    sent = step.action is not None and step.result.error_code not in BLOCK_REASONS
+                    last_screen_step = step_no + 1 if sent else None
                     tokens = step.decision.prompt_tokens + step.decision.completion_tokens
                     if run_id in self._run_tokens:
                         self._run_tokens[run_id].used += tokens
@@ -498,8 +515,54 @@ class RunOrchestrator:
             logger.warning(
                 "run=%s persona=%s exceeded max_seconds=%s", run_id, persona_id, max_seconds
             )
-            return "timeout"
-        return "max_steps"
+            outcome = "timeout"
+        else:
+            outcome = "max_steps"  # step 상한 · 토큰 상한 · 하루 예산으로 루프를 나왔다
+        if last_screen_step is not None:
+            await self._save_last_screenshot(
+                run_id, persona_id, driver, last_screen_step, cancel_event
+            )
+        return outcome
+
+    async def _save_last_screenshot(
+        self,
+        run_id: int,
+        persona_id: int,
+        driver: DomDriver,
+        step: int,
+        cancel_event: asyncio.Event,
+    ) -> None:
+        """끝난 Persona 의 마지막 행동 뒤 화면을 step-<step>.png 로 한 장 더 남긴다 (GACA-221).
+
+        다음 step 을 시작했다면 봤을 화면이라 step 스크린샷과 뜻이 같다. step 은 로그에 쓴 마지막
+        step 번호 + 1 이고 로그 줄은 쓰지 않는다. 그림은 step 과 같은 observe() 로 얻고
+        (입력칸 가림 포함) 같은 함수로 쓴다. 시간 상한으로 끊긴 step 의 행동이 이미 실행됐으면 그
+        결과도 이 화면에 보일 수 있다. 얻거나 쓰지 못해도 Persona 결과는 그대로 두고 기록만 한다.
+        """
+        try:
+            finished, observation = await self._run_unless_cancelled(
+                asyncio.wait_for(driver.observe(), LAST_SCREENSHOT_TIMEOUT_SECONDS), cancel_event
+            )
+            if not finished:  # 취소 요청이 먼저 왔다
+                logger.info(
+                    "run=%s persona=%s 취소 요청으로 마지막 화면 건너뜀", run_id, persona_id
+                )
+                return
+            if observation.screenshot is None:
+                logger.warning("run=%s persona=%s 마지막 화면 그림을 얻지 못함", run_id, persona_id)
+                return
+            step_log_writer.write_screenshot(run_id, persona_id, step, observation.screenshot)
+            logger.info("run=%s persona=%s 마지막 화면 step-%s.png", run_id, persona_id, step)
+        except TimeoutError:
+            logger.warning(
+                "run=%s persona=%s 마지막 화면이 %ss 를 넘겨 건너뜀",
+                run_id,
+                persona_id,
+                LAST_SCREENSHOT_TIMEOUT_SECONDS,
+            )
+        except Exception:
+            # 실패가 이미 정해진 Persona 결과(max_steps · timeout)를 덮지 않게 기록만 한다.
+            logger.exception("run=%s persona=%s 마지막 화면 스크린샷 실패", run_id, persona_id)
 
     def _token_limit_reached(self, run_id: int) -> dict | None:
         """넘은 한도가 있으면 감사 로그에 남길 사유, 없으면 None."""

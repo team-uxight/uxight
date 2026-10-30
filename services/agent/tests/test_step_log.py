@@ -63,8 +63,12 @@ class CheckingWriter(StepLogWriter):
 
 
 @pytest.fixture
-def ran(fixture_server: str, scripted_llm, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    llm, requests = scripted_llm(*REPLIES)
+def ran(
+    fixture_server: str, scripted_llm, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, request
+):
+    # indirect 로 (답, step 상한)을 주면 기본값(REPLIES · 10)을 바꾼다.
+    replies, max_steps = getattr(request, "param", (REPLIES, 10))
+    llm, requests = scripted_llm(*replies)
     personas = FakeRunPersonaRepository()
     personas.statuses[PERSONA_ID] = "running"
     audits = FakeAuditLogRepository()
@@ -88,7 +92,7 @@ def ran(fixture_server: str, scripted_llm, monkeypatch: pytest.MonkeyPatch, tmp_
             "success_url": f"{target}?page=2",
         },
         personas=[{"persona_id": PERSONA_ID, "name": "p", "profile": {"web_skill": "low"}}],
-        policy={"max_steps": 10},
+        policy={"max_steps": max_steps},
     )
 
     asyncio.run(asyncio.wait_for(RunOrchestrator().run_personas(RUN_ID, snapshot), timeout=60))
@@ -170,6 +174,27 @@ def test_navigation_and_done(ran) -> None:
     assert done["result"]["error_code"] is None
 
 
+# 그림 속 점의 색(RGB)을 읽는다. <img> 를 canvas 에 그려 그 점의 픽셀을 본다.
+PIXEL_JS = """async ([x, y]) => {
+    const img = document.getElementById('shot');
+    await img.decode();
+    const canvas = document.createElement('canvas');
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    return Array.from(ctx.getImageData(x, y, 1, 1).data.slice(0, 3));
+}"""
+
+
+async def pixel_colors(browser, png: bytes, points: list[list[int]]) -> list[list[int]]:
+    """찍힌 그림을 새 페이지에 띄워 각 점의 색을 읽는다."""
+    viewer = await browser.new_page()
+    encoded = base64.b64encode(png).decode()
+    await viewer.set_content(f'<img id="shot" src="data:image/png;base64,{encoded}">')
+    return [await viewer.evaluate(PIXEL_JS, point) for point in points]
+
+
 def test_dom_screenshot_masks_typed_input(fixture_server: str) -> None:
     async def run() -> tuple[list[int], list[int]]:
         async with DomDriver() as driver:
@@ -178,24 +203,12 @@ def test_dom_screenshot_masks_typed_input(fixture_server: str) -> None:
             await driver.act(Action(kind="type", element_id=8, value="W" * 40))
             observation = await driver.observe()
             box = await driver._page.locator("[name=q]").bounding_box()
-            # 찍힌 그림을 새 페이지에 띄워 입력칸 가운데 · 바깥 점의 색을 읽는다.
-            viewer = await driver._browser.new_page()
-            png = base64.b64encode(observation.screenshot).decode()
-            await viewer.set_content(f'<img id="shot" src="data:image/png;base64,{png}">')
-            pixel_js = """async ([x, y]) => {
-                const img = document.getElementById('shot');
-                await img.decode();
-                const canvas = document.createElement('canvas');
-                canvas.width = img.naturalWidth;
-                canvas.height = img.naturalHeight;
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(img, 0, 0);
-                return Array.from(ctx.getImageData(x, y, 1, 1).data.slice(0, 3));
-            }"""
-            inside = await viewer.evaluate(
-                pixel_js, [int(box["x"] + 5), int(box["y"] + box["height"] / 2)]
+            # 찍힌 그림 속 입력칸 가운데 · 바깥 점의 색을 읽는다.
+            inside, outside = await pixel_colors(
+                driver._browser,
+                observation.screenshot,
+                [[int(box["x"] + 5), int(box["y"] + box["height"] / 2)], [1, 1]],
             )
-            outside = await viewer.evaluate(pixel_js, [1, 1])
             assert first.screenshot is not None
             return inside, outside
 
@@ -204,3 +217,26 @@ def test_dom_screenshot_masks_typed_input(fixture_server: str) -> None:
     mask = [int(MASK_COLOR[i : i + 2], 16) for i in (1, 3, 5)]
     assert inside == mask
     assert outside != mask
+
+
+@pytest.mark.parametrize("ran", [(REPLIES[:1], 1)], indirect=True)
+def test_last_screen_after_step_limit_is_saved_and_masked(ran) -> None:
+    # step 상한 1 로 끝난다. 마지막 행동이 입력이라 마지막 화면(step-2)은 값이 찍힌 직후의 화면이다.
+    # 로그 줄은 1 개이고 step-2 에는 줄이 없다.
+    folder = ran["folder"]
+
+    assert [s["step"] for s in ran["steps"]] == [1]
+    assert ran["personas"].statuses == {PERSONA_ID: "max_steps"}
+    assert sorted(p.name for p in folder.iterdir()) == ["step-1.png", "step-2.png", "steps.jsonl"]
+    final = (folder / "step-2.png").read_bytes()
+    assert final.startswith(PNG_SIGNATURE)
+
+    async def input_color() -> list[int]:
+        # 마지막 화면을 찍은 쪽과 같은 페이지를 새 브라우저로 열어 입력칸 자리를 구한다.
+        async with DomDriver() as driver:
+            await driver.start(ran["target"])
+            box = await driver._page.locator("[name=q]").bounding_box()
+            point = [int(box["x"] + 5), int(box["y"] + box["height"] / 2)]
+            return (await pixel_colors(driver._browser, final, [point]))[0]
+
+    assert asyncio.run(input_color()) == [int(MASK_COLOR[i : i + 2], 16) for i in (1, 3, 5)]

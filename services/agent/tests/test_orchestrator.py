@@ -5,6 +5,7 @@
 
 import asyncio
 import itertools
+import json
 import time
 from types import SimpleNamespace
 
@@ -115,12 +116,15 @@ class FakeAuditLogRepository:
 
 
 class Browsers:
-    """가짜 브라우저 집계 — 띄운 수 · 지금 열린 수 · 동시에 열린 최대 수."""
+    """가짜 브라우저 집계 — 띄운 수 · 지금 열린 수 · 동시에 열린 최대 수 · 닫기를 부른 수."""
 
     def __init__(self) -> None:
         self.started = 0
         self.open = 0
         self.peak = 0
+        self.closed = 0  # close() 를 부른 수. 띄우지 못한 브라우저도 센다
+        self.start_seconds = 0.0  # 브라우저를 띄우는 데 걸리는 시간
+        self.start_error: Exception | None = None  # 띄우다 낼 예외 (실행 파일 없음 등)
         self.close_seconds = 0.0  # 브라우저를 닫는 데 걸리는 시간
         self.close_error: Exception | None = None  # 닫은 뒤 낼 예외 (드라이버 연결 끊김 등)
 
@@ -132,6 +136,10 @@ def fake_driver_class(browsers: Browsers) -> type[Driver]:
             self._started = False
 
         async def start(self, url: str) -> None:
+            if browsers.start_seconds:
+                await asyncio.sleep(browsers.start_seconds)
+            if browsers.start_error:
+                raise browsers.start_error
             self._started = True
             browsers.started += 1
             browsers.open += 1
@@ -144,6 +152,7 @@ def fake_driver_class(browsers: Browsers) -> type[Driver]:
             return ActionResult(ok=True)
 
         async def close(self) -> None:
+            browsers.closed += 1
             await asyncio.sleep(browsers.close_seconds)
             if self._started:
                 browsers.open -= 1
@@ -368,6 +377,42 @@ def test_browser_close_error_does_not_change_result(
     assert fakes.personas.statuses == {1: outcome}
     assert fakes.runs.status == run_status
     assert fakes.browsers.open == 0
+    assert free_global_slots() == 3
+
+
+def test_browser_start_failure_closes_once_and_fails_persona(fakes: SimpleNamespace) -> None:
+    # 브라우저를 띄우지 못한다 — 예외가 올라가도 닫기를 한 번 부르고 자리를 돌려준다.
+    fakes.browsers.start_error = RuntimeError("Executable doesn't exist at /ms-playwright/chromium")
+    snap = snapshot([persona(1)], max_steps=3)
+
+    asyncio.run(run(fakes, RUN_ID, snap))
+
+    assert fakes.personas.statuses == {1: "fail"}
+    assert fakes.runs.status == "failed"
+    assert fakes.browsers.closed == 1
+    assert free_global_slots() == 3
+
+
+def test_cancel_during_browser_start_closes_once(fakes: SimpleNamespace) -> None:
+    # 브라우저를 띄우는 중 취소 요청이 온다 — 띄우기를 멈추고 닫기를 한 번 부르고 자리를 돌려준다.
+    fakes.browsers.start_seconds = HANG_SECONDS
+    snap = snapshot([persona(1)], max_steps=3, max_seconds=HANG_SECONDS)
+
+    async def cancel_midway() -> float:
+        task = asyncio.create_task(run(fakes, RUN_ID, snap))
+        await asyncio.sleep(POLL_SECONDS * 2)
+        fakes.runs.cancel_requested = True
+        requested_at = time.monotonic()
+        await task
+        return time.monotonic() - requested_at
+
+    elapsed = asyncio.run(cancel_midway())
+
+    assert elapsed < POLL_SECONDS * 10
+    assert fakes.personas.statuses == {1: "cancelled"}
+    assert fakes.runs.status == "cancelled"
+    assert fakes.browsers.started == 0  # 띄우기를 끝내지 못했다
+    assert fakes.browsers.closed == 1
     assert free_global_slots() == 3
 
 
@@ -869,3 +914,293 @@ def test_daily_budget_spent_stops_before_llm_call(fakes: SimpleNamespace) -> Non
     assert fakes.personas.steps.get(1, 0) == 0
     assert fakes.personas.statuses == {1: "max_steps"}
     assert fakes.audits.limits[0][2]["reason"] == "daily_token_budget"
+
+
+# 가드가 막는 요소 둘 — 1 은 허용 밖으로 가는 링크, 2 는 되돌릴 수 없는 버튼
+GUARDED_ELEMENTS = {
+    1: {"tag": "a", "url": "https://evil.example/"},
+    2: {"tag": "button", "type": "button", "text": "회원 탈퇴"},
+}
+
+
+def screen_driver_class(final_call: int | None = None, final: str = "") -> type[Driver]:
+    """화면이 행동마다 바뀌는 가짜 브라우저. observe() 가 'after-<행동 수>' 를 그림으로 낸다.
+
+    final_call 번째 observe() — 마지막 step 이 끝난 뒤 마지막 화면을 얻는 호출 — 만 final 에 따라
+    다르다.
+    - "error": 예외
+    - "hang": 끝나지 않음
+    - "slow": 시간 상한을 넘겨 걸림
+    - "no-image": 그림 없음
+    """
+
+    class ScreenDriver(Driver):
+        def __init__(self, allowed_hosts: frozenset[str] = frozenset()) -> None:
+            super().__init__(allowed_hosts)
+            self.observes = 0
+            self.acts = 0
+
+        async def start(self, url: str) -> None:
+            pass
+
+        async def observe(self) -> Observation:
+            self.observes += 1
+            screenshot: bytes | None = f"after-{self.acts}".encode()
+            if self.observes == final_call:
+                if final == "error":
+                    raise RuntimeError("Target page, context or browser has been closed")
+                if final == "hang":
+                    await asyncio.sleep(HANG_SECONDS)
+                if final == "slow":
+                    await asyncio.sleep(0.4)
+                if final == "no-image":
+                    screenshot = None
+            return Observation(
+                url="https://example.com/",
+                title="t",
+                dom="",
+                element_map=GUARDED_ELEMENTS,
+                screenshot=screenshot,
+            )
+
+        async def act(self, action: Action) -> ActionResult:
+            self.acts += 1
+            return ActionResult(ok=True)
+
+        async def close(self) -> None:
+            pass
+
+    return ScreenDriver
+
+
+class HangAfterDecider(Decider):
+    """처음 count 번은 scroll 을 내고 그다음부터는 응답이 오지 않는다."""
+
+    def __init__(self, count: int) -> None:
+        self.count = count
+
+    async def decide(self, persona, task, observation, history) -> Decision:
+        if len(history) >= self.count:
+            await asyncio.sleep(HANG_SECONDS)
+        return Decision(Action(kind="scroll", value="down"))
+
+
+def persona_folder(fakes: SimpleNamespace):
+    return fakes.log_dir / str(RUN_ID) / "1"
+
+
+def saved_files(fakes: SimpleNamespace) -> list[str]:
+    """Persona 폴더의 파일 이름들 — step-<n>.png 와 steps.jsonl. 임시 파일이 남았는지도 보인다."""
+    return sorted(p.name for p in persona_folder(fakes).iterdir())
+
+
+def logged_steps(fakes: SimpleNamespace) -> list[int]:
+    lines = (persona_folder(fakes) / "steps.jsonl").read_text(encoding="utf-8").splitlines()
+    return [json.loads(line)["step"] for line in lines]
+
+
+def screens(fakes: SimpleNamespace, count: int) -> list[bytes]:
+    return [(persona_folder(fakes) / f"step-{n}.png").read_bytes() for n in range(1, count + 1)]
+
+
+def test_max_steps_saves_screen_after_last_action(
+    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # step 3 개가 모두 scroll. step-1~3 은 각 step 을 시작할 때 화면, step-4 는 세 번째 행동 뒤
+    # 화면이다. 로그 줄은 3 개 그대로다.
+    monkeypatch.setattr(orchestrator_module, "DomDriver", screen_driver_class())
+
+    asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)], max_steps=3)))
+
+    assert fakes.personas.statuses == {1: "max_steps"}
+    assert fakes.runs.status == "done"
+    assert saved_files(fakes) == [f"step-{n}.png" for n in (1, 2, 3, 4)] + ["steps.jsonl"]
+    assert screens(fakes, 4) == [b"after-0", b"after-1", b"after-2", b"after-3"]
+    assert logged_steps(fakes) == [1, 2, 3]
+    assert fakes.personas.steps[1] == 3  # 마지막 화면은 step 으로 세지 않는다
+    assert free_global_slots() == 3
+
+
+@pytest.mark.parametrize("limit", ["max_tokens", "daily_budget"])
+def test_token_limits_save_screen_after_last_action(
+    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, limit: str
+) -> None:
+    # 3 step 뒤 다음 LLM 호출 전에 끝난다 — 회차당 상한 250(step 마다 100 토큰)이거나 하루 예산이
+    # 바닥난다.
+    monkeypatch.setattr(orchestrator_module, "DomDriver", screen_driver_class())
+    use_decider(monkeypatch, ScriptedDecider(*[scroll_with_tokens(80, 20) for _ in range(10)]))
+    policy = {"max_tokens": 250} if limit == "max_tokens" else {}
+    if limit == "daily_budget":
+        left = iter([None, None, None])  # 처음 세 번은 예산이 남아 있다
+        fakes.runs.daily_tokens_left = lambda: next(left, 0)
+
+    asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)], max_steps=10, **policy)))
+
+    assert fakes.personas.statuses == {1: "max_steps"}
+    assert fakes.audits.limits[0][2]["step"] == 4
+    assert saved_files(fakes) == [f"step-{n}.png" for n in (1, 2, 3, 4)] + ["steps.jsonl"]
+    assert screens(fakes, 4)[-1] == b"after-3"
+    assert logged_steps(fakes) == [1, 2, 3]
+
+
+def test_max_seconds_saves_screen_after_last_logged_action(
+    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # step 2 개를 마치고 세 번째 step 의 LLM 응답을 기다리다 시간 상한에 걸린다.
+    monkeypatch.setattr(orchestrator_module, "DomDriver", screen_driver_class())
+    use_decider(monkeypatch, HangAfterDecider(2))
+
+    asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)], max_steps=10, max_seconds=0.5)))
+
+    assert fakes.personas.statuses == {1: "timeout"}
+    assert saved_files(fakes) == [f"step-{n}.png" for n in (1, 2, 3)] + ["steps.jsonl"]
+    assert screens(fakes, 3) == [b"after-0", b"after-1", b"after-2"]
+    assert logged_steps(fakes) == [1, 2]
+
+
+def test_done_saves_no_extra_screen(
+    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # done 은 행동이 없어 마지막 step 의 화면이 곧 마지막 화면이다.
+    monkeypatch.setattr(orchestrator_module, "DomDriver", screen_driver_class())
+    use_decider(
+        monkeypatch,
+        ScriptedDecider(
+            Decision(Action(kind="scroll", value="down")), Decision(Action(kind="done"))
+        ),
+    )
+
+    asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)], max_steps=5)))
+
+    assert fakes.personas.statuses == {1: "done"}
+    assert saved_files(fakes) == ["step-1.png", "step-2.png", "steps.jsonl"]
+
+
+@pytest.mark.parametrize(
+    "last",
+    [
+        parse_failure(),
+        parse_failure("LLM_REQUEST_FAILED"),
+        Decision(Action(kind="click", element_id=1)),  # 허용 밖으로 가는 링크
+        Decision(Action(kind="click", element_id=2)),  # 되돌릴 수 없는 버튼
+    ],
+    ids=["parse-failed", "llm-failed", "domain-blocked", "destructive-blocked"],
+)
+def test_last_action_not_executed_saves_no_extra_screen(
+    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, last: Decision
+) -> None:
+    # 첫 step 은 실행됐고 마지막 step 은 실행되지 않았다. 화면이 그대로라 step-2 가 마지막 화면이다.
+    monkeypatch.setattr(orchestrator_module, "DomDriver", screen_driver_class())
+    use_decider(monkeypatch, ScriptedDecider(Decision(Action(kind="scroll", value="down")), last))
+
+    asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)], max_steps=2)))
+
+    assert fakes.personas.statuses == {1: "max_steps"}
+    assert saved_files(fakes) == ["step-1.png", "step-2.png", "steps.jsonl"]
+
+
+def test_failed_persona_saves_no_extra_screen(
+    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 행동을 얻지 못한 step 이 3 번 이어져 실패로 끝난다.
+    monkeypatch.setattr(orchestrator_module, "DomDriver", screen_driver_class())
+    use_decider(
+        monkeypatch,
+        ScriptedDecider(
+            Decision(Action(kind="scroll", value="down")),
+            parse_failure(),
+            parse_failure(),
+            parse_failure(),
+        ),
+    )
+
+    asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)], max_steps=10)))
+
+    assert fakes.personas.statuses == {1: "fail"}
+    assert saved_files(fakes) == [f"step-{n}.png" for n in (1, 2, 3, 4)] + ["steps.jsonl"]
+
+
+def test_cancelled_persona_saves_no_extra_screen(
+    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 세 번째 step 의 LLM 응답을 기다리는 중 취소된다 — 끝난 이유가 한도가 아니다.
+    monkeypatch.setattr(orchestrator_module, "DomDriver", screen_driver_class())
+    use_decider(monkeypatch, HangAfterDecider(2))
+    snap = snapshot([persona(1)], max_steps=10, max_seconds=HANG_SECONDS)
+
+    async def cancel_midway() -> None:
+        task = asyncio.create_task(run(fakes, RUN_ID, snap))
+        await asyncio.sleep(POLL_SECONDS * 3)
+        fakes.runs.cancel_requested = True
+        await task
+
+    asyncio.run(cancel_midway())
+
+    assert fakes.personas.statuses == {1: "cancelled"}
+    assert saved_files(fakes) == ["step-1.png", "step-2.png", "steps.jsonl"]
+
+
+@pytest.mark.parametrize("failure", ["error", "hang", "no-image", "write-error"])
+def test_failing_last_screen_does_not_change_result(
+    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    # 마지막 화면을 얻거나 쓰지 못해도 Persona 결과 · 회차 상태 · 로그는 그대로고 파일만 없다.
+    monkeypatch.setattr(orchestrator_module, "LAST_SCREENSHOT_TIMEOUT_SECONDS", 0.2)
+    monkeypatch.setattr(orchestrator_module, "DomDriver", screen_driver_class(4, failure))
+    if failure == "write-error":
+        writer = orchestrator_module.step_log_writer
+        write = writer.write_screenshot
+
+        def write_unless_last(run_id: int, persona_id: int, step: int, png: bytes) -> str:
+            if step == 4:
+                raise OSError("No space left on device")
+            return write(run_id, persona_id, step, png)
+
+        monkeypatch.setattr(writer, "write_screenshot", write_unless_last)
+
+    asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)], max_steps=3)))
+
+    assert fakes.personas.statuses == {1: "max_steps"}
+    assert fakes.runs.status == "done"
+    assert saved_files(fakes) == [f"step-{n}.png" for n in (1, 2, 3)] + ["steps.jsonl"]
+    assert logged_steps(fakes) == [1, 2, 3]
+    assert free_global_slots() == 3
+
+
+def test_last_screen_is_outside_max_seconds(
+    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # step 은 시간 상한 안에 끝났고, 마지막 화면은 그 시간 상한을 넘겨서 얻는다.
+    # 마지막 화면이 시간 상한에 끊기면 결과가 timeout 으로 바뀌고 그림도 남지 않는다.
+    monkeypatch.setattr(orchestrator_module, "DomDriver", screen_driver_class(3, "slow"))
+
+    asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)], max_steps=2, max_seconds=0.3)))
+
+    assert fakes.personas.statuses == {1: "max_steps"}
+    assert saved_files(fakes) == [f"step-{n}.png" for n in (1, 2, 3)] + ["steps.jsonl"]
+
+
+def test_cancel_stops_last_screen_quickly(
+    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 마지막 화면을 얻는 중 취소 요청이 오면 상한(3초)을 기다리지 않고 멈춘다 — 취소 10초 약속.
+    monkeypatch.setattr(orchestrator_module, "LAST_SCREENSHOT_TIMEOUT_SECONDS", 3)
+    monkeypatch.setattr(orchestrator_module, "DomDriver", screen_driver_class(3, "hang"))
+    snap = snapshot([persona(1)], max_steps=2)
+
+    async def cancel_midway() -> float:
+        task = asyncio.create_task(run(fakes, RUN_ID, snap))
+        await asyncio.sleep(POLL_SECONDS * 2)
+        fakes.runs.cancel_requested = True
+        requested_at = time.monotonic()
+        await task
+        return time.monotonic() - requested_at
+
+    elapsed = asyncio.run(cancel_midway())
+
+    assert elapsed < POLL_SECONDS * 10
+    assert fakes.personas.statuses == {1: "max_steps"}  # 이미 정해진 결과는 그대로
+    # 취소 요청은 마지막 화면만 멈춘다. Persona 결과가 이미 정해져 있어 회차는 done 이다.
+    assert fakes.runs.status == "done"
+    assert saved_files(fakes) == ["step-1.png", "step-2.png", "steps.jsonl"]
+    assert free_global_slots() == 3
