@@ -149,23 +149,112 @@ BYPASS_PAGE = """<!doctype html><html><head><meta charset="utf-8"></head><body>
 <a href="/inside" onmousedown="this.href='{ext}'">rewrite link</a>
 </body></html>"""
 
-# 새 창(target=_blank · window.open · 이름 있는 창 · form.target). 새 창의 이동은 주소와 상관없이
-# 끊는다. 그래서 이 페이지의 허용된 주소는 모두 밖으로 보내는 리다이렉트(/redir)로 두고,
-# 외부 서버가 받은 요청 수로 확인한다 (GACA-223).
-# - 주소를 넘겨 연 새 창: 전에는 가드가 오류를 냈고, Playwright 가 그 오류를 다음 관측에서 대신
-#   던져 Persona 가 실패했다.
-# - 빈 창(window.open('') · 이름 있는 창)의 이동: Playwright 가 이미 아는 창이라 전에는 주 창과
-#   같은 규칙을 탔고, 허용된 주소의 리다이렉트로 허용 밖 주소에 닿았다.
-NEW_WINDOW_PAGE = """<!doctype html><html><head><meta charset="utf-8"></head><body>
-<a href="/redir" target="_blank">new window link</a>
-<button onclick="window.open('/redir')">open window</button>
-<button onclick="window.open('{ext}')">open outside window</button>
-<button onclick="const w = window.open(''); setTimeout(() => w.location = '/redir', 300)">
-blank window then move</button>
-<a href="/redir" target="side">named window link</a>
-<form action="/redir" target="side"><button type="submit">form to named window</button></form>
-<script>window.open('', 'side')</script>
-</body></html>"""
+# 새 창(target=_blank · window.open · 이름 있는 창 · form.target)의 이동은 주소와 상관없이 끊는다
+# (GACA-223). 행동 뒤 첫 이동이 새 창의 허용 주소 GET 이면 그 주소를 주 창에서 연다 (GACA-225).
+# 'go' 를 누르는 페이지들이다. 처음 17가지는 GACA-223 보안 리뷰 probe 의 시나리오다.
+# 빈 창에 주소를 나중에 넣는 두 가지만 300ms 를 100ms 로 줄였다 — 기다리는 상한(500ms)과 거리를
+# 두려고.
+# 허용된 주소는 대부분 허용 밖으로 보내는 리다이렉트(/redir)다. 따라가면 주 창이 허용 밖 주소에
+# 한 번 닿고 3단계가 되돌린다. 같은 창 링크(위 'redirect link')와 같다.
+# 새 창이 스스로 요청을 보냈다면 허용 밖 요청이 하나 더 는다.
+# 행동 뒤 결과: (주 창 경로 — None 이면 그대로, 허용 밖 요청 수, 오류 코드)
+REVERTED = (None, 1, "DOMAIN_BLOCKED")  # 따라간 주소가 허용 밖으로 리다이렉트 → 3단계가 되돌린다
+FOLLOWED = ("inside", 0, None)  # 따라가 주 창이 그 주소로 간다
+BLOCKED = (None, 0, "DOMAIN_BLOCKED")  # 허용 밖 주소 → 끊고 차단으로 남긴다
+STAYED = (None, 0, None)  # 따르지 않는다
+# 학교 사본 졸업 페이지의 학번 칸: 링크가 아닌 칸을 누르면 스크립트가 칸 안 경로를
+# 창 이름 · 크기와 함께 새 창으로 연다. 손가락 커서라 번호가 붙는다.
+POINTER_CELL = (
+    "<table><tr><td style='cursor: pointer' onclick=\"window.open(this.querySelector('span')"
+    ".textContent, 'table-credit', 'width=1200, height=600')\"><p>go</p>"
+    "<span style='display: none'>{to}</span></td></tr></table>"
+)
+NEW_WINDOW_CASES = {
+    "blank-link": ('<a href="/redir" target="_blank">go</a>', REVERTED),
+    "open-blank-move-later": (
+        "<button onclick=\"const w = window.open(''); "
+        "setTimeout(() => w.location = '/redir', 100)\">go</button>",
+        REVERTED,
+    ),
+    "open-blank-move": (
+        "<button onclick=\"const w = window.open(''); w.location = '/redir'\">go</button>",
+        REVERTED,
+    ),
+    "open-inside-move-later": (
+        "<button onclick=\"const w = window.open('/inside'); "
+        "setTimeout(() => w.location = '/redir', 300)\">go</button>",
+        FOLLOWED,
+    ),
+    "open-blank-meta-refresh": (
+        "<button onclick=\"const w = window.open(''); "
+        "w.document.write('<meta http-equiv=refresh content=0;url=/redir>'); w.document.close()\">"
+        "go</button>",
+        REVERTED,
+    ),
+    "named-window-link": (
+        "<script>window.open('about:blank', 'side')</script><a href='/redir' target='side'>go</a>",
+        REVERTED,
+    ),
+    "form-new-window": (
+        '<form action="/redir" target="_blank"><button type="submit">go</button></form>',
+        REVERTED,
+    ),
+    "base-target": ('<base target="_blank"><a href="/redir">go</a>', REVERTED),
+    "open-noopener": (
+        "<button onclick=\"window.open('/redir', '_blank', 'noopener')\">go</button>",
+        REVERTED,
+    ),
+    "open-outside": ("<button onclick=\"window.open('{ext}')\">go</button>", BLOCKED),
+    "blank-link-inside": ('<a href="/inside" target="_blank">go</a>', FOLLOWED),
+    "open-blob-meta-refresh": (
+        "<button onclick=\"window.open(URL.createObjectURL(new Blob(['<meta http-equiv=refresh "
+        "content=0;url=/redir>'], { type: 'text/html' })))\">go</button>",
+        STAYED,
+    ),
+    "open-javascript-url": (
+        "<button onclick=\"window.open('javascript:location.href=\\'/redir\\'')\">go</button>",
+        STAYED,
+    ),
+    "open-data-url-outside": (
+        "<button onclick=\"window.open('data:text/html,<meta http-equiv=refresh "
+        "content=0;url={ext}>')\">go</button>",
+        STAYED,
+    ),
+    "open-about-blank-move-later": (
+        "<button onclick=\"const w = window.open('about:blank', '_blank'); "
+        "setTimeout(() => w.location = '/redir', 100)\">go</button>",
+        REVERTED,
+    ),
+    "open-inside-move-after-4s": (
+        "<button onclick=\"const w = window.open('/inside'); "
+        "setTimeout(() => w.location = '/redir', 4000)\">go</button>",
+        FOLLOWED,
+    ),
+    "form-named-popup": (
+        '<form action="/redir" target="pay"><input type="hidden" name="amount" value="1">'
+        "<button type=\"submit\" onclick=\"window.open('', 'pay', 'width=400, height=300')\">"
+        "go</button></form>",
+        REVERTED,
+    ),
+    # 아래는 GACA-225 에서 더했다.
+    # 하위 요청이 계속 나가는 페이지 (GACA-223: 가드 오류가 다른 요청을 거쳐 관측에서 터졌다).
+    "busy-blank-link": (
+        '<a href="/redir" target="_blank">go</a>'
+        "<script>setInterval(() => { new Image().src = '/img?' + Math.random(); }, 20)</script>",
+        REVERTED,
+    ),
+    "pointer-cell": (POINTER_CELL.replace("{to}", "/inside"), FOLLOWED),
+    "pointer-cell-outside": (POINTER_CELL.replace("{to}", "{ext}"), BLOCKED),
+    # 밖으로 가는 새 창 링크는 1단계(누르기 전)에서 막힌다.
+    "blank-link-outside": ('<a href="{ext}" target="_blank">go</a>', BLOCKED),
+    # 폼 POST 는 주 창에서 다시 보낼 수 없어 따르지 않는다.
+    # 버튼 이름이 '검색' 이라 파괴적 행동 가드는 통과한다.
+    "form-post-new-window": (
+        '<form method="post" action="/redir" target="_blank">'
+        '<button type="submit" aria-label="검색">go</button></form>',
+        STAYED,
+    ),
+}
 
 
 def _serve(handler: type[BaseHTTPRequestHandler]) -> ThreadingHTTPServer:
@@ -193,6 +282,11 @@ def two_sites():
     external = _serve(External)
     ext = f"http://127.0.0.1:{external.server_address[1]}/outside"
 
+    pages = {"/": BYPASS_PAGE, "/popup-on-load": POPUP_ON_LOAD_PAGE} | {
+        f"/new-window/{name}": f"<!doctype html><meta charset='utf-8'>{case[0]}"
+        for name, case in NEW_WINDOW_CASES.items()
+    }
+
     class Allowed(BaseHTTPRequestHandler):
         def log_message(self, *args) -> None:
             pass
@@ -203,12 +297,14 @@ def two_sites():
                 self.send_header("Location", ext)
                 self.end_headers()
                 return
-            pages = {"/": BYPASS_PAGE, "/new-window": NEW_WINDOW_PAGE}
-            body = pages.get(self.path, "<html>inside</html>").format(ext=ext)
+            body = pages.get(self.path, "<html>inside</html>").replace("{ext}", ext)
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
             self.wfile.write(body.encode())
+
+        # 새 창의 폼 POST 가 새어 나가면 /redir 를 거쳐 허용 밖 요청으로 잡힌다.
+        do_POST = do_GET
 
     allowed = _serve(Allowed)
     yield f"http://127.0.0.1:{allowed.server_address[1]}/", ext, hits
@@ -245,32 +341,45 @@ def test_navigation_outside_is_blocked_whatever_the_route(two_sites, label: str)
         assert hits == []
 
 
-@pytest.mark.parametrize(
-    ("label", "busy", "codes"),
-    [
-        ("new window link", False, {None}),
-        # 하위 요청이 계속 나가는 페이지. 가드 오류가 다른 요청의 route.continue_ 를 거쳐 관측에서
-        # 터졌다 ('Route.continue_: Route.continue_: Frame for this navigation request …').
-        ("new window link", True, {None}),
-        ("open window", False, {None}),
-        # 차단 기록은 행동이 끝나기 전에 새 창 요청이 가드에 닿아야 남는다.
-        ("open outside window", False, {None, "DOMAIN_BLOCKED"}),
-        ("blank window then move", False, {None}),
-        ("named window link", False, {None}),
-        ("form to named window", False, {None}),
-    ],
-)
-def test_new_window_not_opened_and_observation_continues(
-    two_sites, label: str, busy: bool, codes: set
-) -> None:
+@pytest.mark.parametrize("case", NEW_WINDOW_CASES)
+def test_new_window_followed_in_main_window_through_guard(two_sites, case: str) -> None:
     target, ext, hits = two_sites
-    url = f"{target}new-window"
+    url = f"{target}new-window/{case}"
+    _, (path_after, outside_requests, code) = NEW_WINDOW_CASES[case]
     hits.clear()
 
     async def run():
         async with DomDriver(allowed_hosts=allowed_hosts(url, [])) as driver:
             await driver.start(url)
-            # 가드가 새 창의 이동을 끊으면 requestfailed 가 온다. 정해 둔 시간 대신 이것을 기다린다.
+            agent = PersonaAgent(
+                {"persona_id": 1}, {}, driver, ClickByText("go"), driver._allowed_hosts
+            )
+            step = await agent.step()
+            after = await driver.observe()  # 가드가 예외를 내면 Playwright 가 여기서 대신 던진다
+            return step, after
+
+    step, after = asyncio.run(run())
+
+    expected = f"{target}{path_after}" if path_after else url
+    assert step.result.error_code == code
+    # 따라가면 행동 결과의 url_after 가 새 창의 주소다. 누르기 전에 막은 step 은 url_after 가 없다.
+    assert (step.result.url_after or step.observation.url) == expected
+    assert after.url == expected
+    assert len(hits) == outside_requests
+
+
+# 행동과 상관없이 페이지가 띄운 새 창 (광고 · 공지 팝업 등).
+POPUP_ON_LOAD_PAGE = """<!doctype html><meta charset="utf-8">
+<button>stay</button><script>setTimeout(() => window.open('/inside'), 500)</script>"""
+
+
+def test_popup_without_action_is_not_followed_and_closed(two_sites) -> None:
+    url = f"{two_sites[0]}popup-on-load"
+
+    async def run():
+        async with DomDriver(allowed_hosts=allowed_hosts(url, [])) as driver:
+            await driver.start(url)
+            # 가드가 새 창의 이동을 끊으면 requestfailed 가 온다. 그때까지 기다린 뒤 행동한다.
             aborted = asyncio.Event()
 
             def on_failed(request) -> None:
@@ -278,22 +387,17 @@ def test_new_window_not_opened_and_observation_continues(
                     aborted.set()
 
             driver._page.context.on("requestfailed", on_failed)
-            if busy:
-                await driver._page.evaluate(
-                    "setInterval(() => { new Image().src = '/img?' + Math.random(); }, 20)"
-                )
+            await asyncio.wait_for(aborted.wait(), 5)
             agent = PersonaAgent(
-                {"persona_id": 1}, {}, driver, ClickByText(label), driver._allowed_hosts
+                {"persona_id": 1}, {}, driver, ClickByText("stay"), driver._allowed_hosts
             )
             step = await agent.step()
-            await asyncio.wait_for(aborted.wait(), 5)  # 끊지 못하면 시간 초과로 실패한다
-            after = await driver.observe()  # 가드가 예외를 내면 Playwright 가 여기서 대신 던진다
-            return step, after
+            targets = (await driver._cdp.send("Target.getTargets"))["targetInfos"]
+            return step, [t for t in targets if t["type"] == "page"]
 
-    step, after = asyncio.run(run())
+    step, pages = asyncio.run(run())
 
-    # 허용된 주소로 가는 새 창은 끊어도 차단(DOMAIN_BLOCKED)으로 남기지 않는다.
-    assert step.result.error_code in codes
-    assert after.url == url
-    # 새 창은 주소와 상관없이 열지 않는다 — 허용된 주소도 리다이렉트로 허용 밖 주소에 닿을 수 있다.
-    assert hits == []
+    assert step.result.ok is True
+    assert step.result.url_after == url
+    # 끊긴 새 창은 빈 창으로 남아 메모리를 먹는다. 행동 뒤 닫는다.
+    assert len(pages) == 1

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>클릭이 걸린 칸</title>
+  <style>
+    /* 학교 사본 졸업 페이지처럼 칸에 손가락 커서를 주고 스크립트로 클릭을 받는다. */
+    .table-credit td { cursor: pointer; }
+    .table-credit td span { display: none; }
+    .pointer { cursor: pointer; }
+  </style>
+</head>
+<body>
+  <h1>졸업</h1>
+  <div class="table-credit">
+    <table>
+      <tr>
+        <td><p>25학번 (별표31)</p><span>/kor/10723/subview.do</span></td>
+        <td><p>26학번 (별표32)</p><span>/kor/12490/subview.do</span></td>
+      </tr>
+    </table>
+  </div>
+  <div class="pointer" onclick="this.dataset.clicked = 1">구매하기</div>
+  <div class="pointer">바깥 칸 <span class="pointer">안쪽 글</span></div>
+
+  <!-- 아래는 번호가 붙지 않는다. -->
+  <ul><li class="pointer"><button>KOR</button></li></ul>
+  <label class="pointer" for="agree">약관 동의</label><input id="agree" type="checkbox">
+  <a href="/notice"><span class="pointer">링크 안 글</span></a>
+  <div class="pointer"><p>긴 글 칸. 이 칸은 손가락 커서지만 글이 요소 줄 하나(100자)보다 길다. 이런 큰
+    상자에 번호를 붙이면 그 안의 글이 본문에서 빠지므로 번호를 붙이지 않고 본문 글로 남긴다. 끝.</p></div>
+  <div class="pointer" style="width: 20px; height: 20px"></div>
+  <div class="pointer" style="display: none">숨긴 칸</div>
+  <div class="pointer" style="opacity: 0.05">투명한 칸</div>
+</body>
+</html>

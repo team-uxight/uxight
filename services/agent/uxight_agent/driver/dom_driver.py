@@ -1,9 +1,11 @@
+import asyncio
+import contextlib
 import dataclasses
 import json
 import re
 import unicodedata
 
-from playwright.async_api import Browser, Page, Playwright, async_playwright
+from playwright.async_api import Browser, CDPSession, Page, Playwright, async_playwright
 from playwright.async_api import Error as PlaywrightError
 
 from ..guard.domain import host_key, is_allowed, safe_destination
@@ -13,6 +15,11 @@ from .base import ActionResult, Driver, Observation
 NAVIGATION_TIMEOUT_MS = 15_000
 ACTION_TIMEOUT_MS = 5_000
 ID_ATTRIBUTE = "data-ux-id"
+# 행동으로 새 창이 열렸는데 이동 요청이 아직 없을 때 기다리는 상한.
+# 새 창의 첫 이동 요청은 보통 click 이 돌아올 때 이미 가드에 닿아 있다(10/31 측정: 60번 모두
+# 1ms 안). 빈 창을 먼저 열고 주소를 나중에 넣는 스크립트를 위해 둔다.
+# 새 창이 없는 행동은 기다리지 않는다.
+NEW_WINDOW_WAIT_MS = 500
 
 # 화면 그림에서 값을 가릴 입력칸. 버튼 · 체크 계열 input 은 보이는 값이 사용자 입력이 아니라서 뺀다.
 MASK_SELECTOR = (
@@ -112,6 +119,11 @@ _COLLECT_ELEMENTS_JS = """
     return text;
   };
 
+  // 글 대신 붙인 이름(aria-label · title · 안의 img alt). 관측 글에는 넣지 않고 가드만 본다.
+  const hintOf = (el) => [el.getAttribute('aria-label'), el.getAttribute('title'),
+    ...Array.from(el.querySelectorAll('img[alt]'), (img) => img.alt)]
+    .filter(Boolean).join(' ').slice(0, maxValueLength);
+
   const selector = 'a[href], button, input:not([type=hidden]), select, textarea, '
     + '[role=button], [role=link]';
   const items = [];
@@ -164,13 +176,36 @@ _COLLECT_ELEMENTS_JS = """
         : null,
       form_action: el.form ? (el.getAttribute('formaction') || el.form.action) : null,
       role: el.getAttribute('role'),
-      // 글 대신 붙인 이름(aria-label · title · 안의 img alt). 관측 글에는 넣지 않고 가드만 본다.
-      hint: [el.getAttribute('aria-label'), el.getAttribute('title'),
-        ...Array.from(el.querySelectorAll('img[alt]'), (img) => img.alt)]
-        .filter(Boolean).join(' ').slice(0, maxValueLength),
+      hint: hintOf(el),
       options: tag === 'select'
         ? Array.from(el.options).map(o => ({ value: o.value, text: o.text.trim() }))
         : null,
+    });
+    nextId++;
+  }
+
+  // 클릭이 걸린 칸 (GACA-225): 링크 · 버튼 · 입력칸이 아닌데 손가락 커서(cursor: pointer)인 요소.
+  // 사이트 스크립트가 클릭을 받는다 — 학교 사본 졸업 페이지의 학번 칸은 누르면 새 창을 연다.
+  // 번호는 위 요소들 다음부터 붙인다. 번호 요소가 넘치지 않게 아래를 모두 지킨 것만 넣는다.
+  // - 가장 바깥 요소만: 손가락 커서는 자식에게 물려지므로 부모도 손가락 커서면 뺀다.
+  // - 번호 요소 안이 아니고, 안에 번호 요소도 없다 — 그 번호를 누르면 된다.
+  //   라벨은 이어진 입력칸에 번호가 있으면 뺀다.
+  // - 보이고, 보이는 글이 maxValueLength 자 안이다. 번호 요소 안 글은 본문 글에서 빠지므로,
+  //   글이 요소 줄 하나에 다 들어가는 것만 넣는다. 큰 상자를 넣으면 그 안 글을 잃는다.
+  // 파괴적 행동 가드는 이 요소(pointer)를 버튼으로 본다.
+  for (const el of document.body?.querySelectorAll('*') ?? []) {
+    if (getComputedStyle(el).cursor !== 'pointer'
+      || getComputedStyle(el.parentElement).cursor === 'pointer'
+      || el.closest(`${selector}, [${idAttr}]`) || el.querySelector(`[${idAttr}]`)
+      || el.control?.hasAttribute(idAttr) || visibilityOf(el) !== 'visible') {
+      continue;
+    }
+    const text = visibleText(el).trim().replace(/\\s+/g, ' ');
+    if (!text || text.length > maxValueLength) continue;
+    el.setAttribute(idAttr, String(nextId));
+    items.push({
+      id: nextId, tag: el.tagName.toLowerCase(), text, role: el.getAttribute('role'),
+      hint: hintOf(el), pointer: true,
     });
     nextId++;
   }
@@ -317,16 +352,26 @@ class DomDriver(Driver):
     def __init__(self, headless: bool = True, allowed_hosts: frozenset[str] = frozenset()) -> None:
         super().__init__(allowed_hosts)
         self._blocked_url: str | None = None  # 이번 행동 중 끊은 이동의 목적지
+        # 이번 행동 뒤 첫 top-level 이동 요청이 왔는지. 그 요청이 새 창의 허용 주소 GET 이면
+        # 주소를 _new_window_url 에 남긴다 — act() 가 주 창에서 연다 (GACA-225).
+        self._navigated = asyncio.Event()
+        self._new_window_url: str | None = None
         self._headless = headless
         self._playwright: Playwright | None = None
         self._browser: Browser | None = None
         self._page: Page | None = None
+        self._cdp: CDPSession | None = None  # 새 창을 닫는 브라우저 CDP 세션
+        self._target_id: str | None = None  # 주 창의 CDP target id
         self._element_map: dict[int, dict] = {}
 
     async def start(self, url: str) -> None:
         self._playwright = await async_playwright().start()
         self._browser = await self._playwright.chromium.launch(headless=self._headless)
         self._page = await self._browser.new_page()
+        session = await self._page.context.new_cdp_session(self._page)
+        self._target_id = (await session.send("Target.getTargetInfo"))["targetInfo"]["targetId"]
+        await session.detach()
+        self._cdp = await self._browser.new_browser_cdp_session()
         start_host = host_key(url)
         if start_host:
             self._allowed_hosts = self._allowed_hosts | {start_host}
@@ -342,6 +387,8 @@ class DomDriver(Driver):
         주 창(self._page)이 아닌 창, 곧 새 창의 이동은 주소와 상관없이 끊는다. 허용된 주소도
         리다이렉트로 허용 밖 주소에 닿을 수 있고(route 는 리다이렉트를 보지 못한다), 새 창에는
         3단계 되돌리기가 없다. Agent 는 새 창을 보지 않는다.
+        대신 행동 뒤 첫 top-level 이동이 새 창의 허용 주소 GET 이면 주소를 남긴다 (GACA-225).
+        act() 가 그 주소를 주 창에서 연다. 주 창의 이동이라 이 처리기와 3단계 되돌리기를 거친다.
         이 처리기는 예외를 내면 안 된다. 낸 예외는 Playwright 가 다음 API 호출(관측의 page.evaluate
         등)에서 대신 던지고, 그 요청은 이어지지도 끊기지도 않은 채 멈춘다 (GACA-223).
         그래서 판정하지 못한 이동은 끊고, 끊기 · 잇기에서 난 오류는 밖으로 내지 않는다.
@@ -351,11 +398,23 @@ class DomDriver(Driver):
         try:
             if request.is_navigation_request():
                 outside = not is_allowed(request.url, self._allowed_hosts)
-                frame = request.frame
-                block = frame.page is not self._page or (outside and frame.parent_frame is None)
+                try:
+                    frame = request.frame
+                except PlaywrightError:
+                    # 주소를 넘겨 연 새 창(target=_blank · window.open)은 첫 이동부터 끊기므로
+                    # Playwright 가 끝내 그 창을 모른다. 그래서 그 창의 모든 이동에서
+                    # request.frame 이 오류를 낸다.
+                    frame = None
+                new_window = frame is None or frame.page is not self._page
+                top = frame is None or frame.parent_frame is None
+                block = new_window or (outside and top)
+                if top and not self._navigated.is_set():
+                    # 행동 뒤 첫 top-level 이동. 주 창이 먼저 움직였으면 새 창은 따르지 않는다.
+                    # 폼 POST 는 주 창에서 다시 보낼 수 없어(page.goto 는 GET) 따르지 않는다.
+                    if new_window and not outside and request.method == "GET":
+                        self._new_window_url = request.url
+                    self._navigated.set()
         except Exception:
-            # 주소를 넘겨 연 새 창(target=_blank · window.open)은 첫 이동부터 끊기므로 Playwright 가
-            # 끝내 그 창을 모른다. 그래서 그 창의 모든 이동에서 request.frame 이 오류를 낸다.
             block = True
         try:
             if block:
@@ -404,8 +463,20 @@ class DomDriver(Driver):
         page = self._require_page()
         before = page.url
         self._blocked_url = None
+        self._new_window_url = None
+        self._navigated.clear()
         try:
             result = await self._perform(action)
+            await self._close_new_windows()
+            if self._new_window_url:
+                # 새 창으로 열려던 허용 주소를 주 창에서 연다 (GACA-225).
+                # 사람은 새 탭에서 이어 본다. step 로그의 url_after 가 이 주소가 된다.
+                # 허용 밖으로 리다이렉트되면 아래 3단계가 되돌린다.
+                await page.goto(
+                    self._new_window_url,
+                    wait_until="domcontentloaded",
+                    timeout=NAVIGATION_TIMEOUT_MS,
+                )
         except Exception as e:
             first_line = str(e).splitlines()[0] if str(e) else ""
             result = ActionResult(ok=False, error=f"{type(e).__name__}: {first_line}")
@@ -430,6 +501,30 @@ class DomDriver(Driver):
             )
         # 행동 뒤 주소 (step 로그 result.url_after).
         return dataclasses.replace(result, url_after=page.url)
+
+    async def _close_new_windows(self) -> None:
+        """주 창 말고 열린 창을 닫는다 (GACA-225).
+
+        가드가 이동을 끊은 새 창은 빈 창으로 브라우저가 닫힐 때까지 남는다.
+        target=_blank 링크는 창마다 renderer 프로세스를 하나씩 띄운다(10/31 측정: 20번 누르면
+        renderer 22개, 메모리 약 1.4GB). Playwright 가 모르는 창도 있어 CDP 로 닫는다.
+        새 창이 있는데 행동 뒤 이동 요청이 아직 없으면, 닫기 전에 NEW_WINDOW_WAIT_MS 까지 기다린다.
+        닫지 못해도 행동은 그대로 진행한다.
+        """
+        try:
+            targets = (await self._cdp.send("Target.getTargets"))["targetInfos"]
+            windows = [
+                target["targetId"]
+                for target in targets
+                if target["type"] == "page" and target["targetId"] != self._target_id
+            ]
+            if windows and not self._navigated.is_set():
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(self._navigated.wait(), NEW_WINDOW_WAIT_MS / 1000)
+            for target_id in windows:
+                await self._cdp.send("Target.closeTarget", {"targetId": target_id})
+        except PlaywrightError:
+            pass
 
     async def close(self) -> None:
         if self._browser is not None:

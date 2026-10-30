@@ -6,6 +6,7 @@
 2. 명사: 버튼의 글에 구매 · 주문 · 제출 · 확정 · submit · confirm 같은 말. 다른 쪽으로 가는
    링크에는 걸지 않는다 — '구매입찰' 처럼 메뉴 이름에 흔해서 길 찾기를 막는다.
    페이지를 옮기지 않는 링크(href="#" · javascript:)는 버튼처럼 쓰이므로 버튼으로 본다.
+   손가락 커서로 클릭을 받는 칸(링크 · 버튼이 아닌 요소, GACA-225)도 버튼으로 본다.
 3. 속성: POST 폼을 보내는 제출 버튼 — 서버에 무언가를 써 넣는 전송이다. 글이 검색 · 조회 ·
    search 인 버튼은 뺀다 (게시판 검색 폼이 POST 인 사이트가 흔하다).
 
@@ -66,6 +67,8 @@ def destructive_reason(action: Action, observation: Observation) -> str | None:
 
 def _acts_like_button(element: dict, page_url: str) -> bool:
     if element.get("tag") in BUTTON_TAGS or element.get("role") == "button":
+        return True
+    if element.get("pointer"):  # 손가락 커서로 클릭을 받는 칸 (GACA-225)
         return True
     url = element.get("url") or ""
     return url.startswith("javascript:") or (
