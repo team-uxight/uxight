@@ -789,6 +789,7 @@ paths:
       description: |-
         운영자용 스크린샷 조회와 같은 이미지다. 프론트엔드는 Authorization 헤더를 붙여 fetch로 받는다.
         step 로그의 hasScreenshot이 false인 step은 조회하지 않는다. 스크린샷은 한 번 저장되면 바뀌지 않아 본인 브라우저에 하루 캐시한다.
+        Persona 상태가 max_steps나 timeout이면 마지막 step 번호 + 1을 한 번 더 요청할 수 있다(마지막 행동 뒤 화면이고 step 로그 줄은 없다). 스크린샷이 없으면 404다. Persona 종료 기록이 그림 저장보다 뒤라, 끝 상태를 확인한 뒤에 요청하면 된다.
       responses:
         "200":
           description: 스크린샷 이미지
@@ -863,7 +864,10 @@ paths:
       tags: [행동 로그 관리]
       operationId: getStepScreenshot
       summary: step별 스크린샷 조회
-      description: 프론트엔드는 Authorization 헤더를 붙여 fetch로 받는다. img 태그의 src로는 헤더를 붙일 수 없기 때문이다. step 로그의 hasScreenshot이 false인 step은 조회하지 않는다.
+      description: |-
+        프론트엔드는 Authorization 헤더를 붙여 fetch로 받는다. img 태그의 src로는 헤더를 붙일 수 없기 때문이다.
+        step 로그의 hasScreenshot이 false인 step은 조회하지 않는다.
+        Persona 상태가 max_steps나 timeout이면 마지막 step 번호 + 1을 한 번 더 요청할 수 있다(마지막 행동 뒤 화면이고 step 로그 줄은 없다). 스크린샷이 없으면 404다. Persona 종료 기록이 그림 저장보다 뒤라, 끝 상태를 확인한 뒤에 요청하면 된다.
       responses:
         "200":
           description: 스크린샷 이미지

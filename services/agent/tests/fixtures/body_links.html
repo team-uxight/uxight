@@ -1,0 +1,72 @@
+<!doctype html>
+<!--
+  GACA-222 본문의 요소 번호.
+  본문 글이 있는 표 칸 · 문단 안에 번호 요소(링크)가 있으면 글 뒤에 그 요소 번호 [n] 을 붙인다.
+  번호는 요소 줄의 번호다. 번호가 없는 요소(화면 밖 · 숨김)는 붙이지 않는다.
+  body_text.html 의 학번 표는 학교 사본 그대로라 칸에 링크가 없다.
+  (사본은 칸을 누르면 스크립트가 새 창을 연다.)
+  이 페이지는 글과 링크가 한 칸 · 한 문단에 같이 든 경우를 본다.
+  내용은 모두 첫 화면(1280×720) 안에 들어가게 둔다.
+-->
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <title>요소 번호</title>
+    <style>
+      body {
+        margin: 8px;
+        font: 14px/1.4 sans-serif;
+      }
+      p {
+        margin: 4px 0;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- 글 + 링크 칸 · 링크만 든 칸 · 링크가 글보다 앞인 칸 · 링크가 둘인 칸 -->
+    <table>
+      <tr>
+        <td><p>25학번 (별표31)</p><a href="/kor/10723/subview.do">보기</a></td>
+        <td><p>26학번 (별표32)</p><a href="/kor/12490/subview.do">보기</a></td>
+      </tr>
+      <tr>
+        <th>NO</th>
+        <th>제목</th>
+        <th>등록일</th>
+      </tr>
+      <tr>
+        <td>2645</td>
+        <td><a href="/bbs/2645">장학금 신청 안내</a></td>
+        <td>2026-10-30 <a href="/bbs/2645.hwp">첨부</a></td>
+      </tr>
+      <tr>
+        <td><a href="/bbs/new">새 글</a> 2646</td>
+        <td>신청 <a href="/apply">온라인</a> <a href="/visit">방문</a></td>
+      </tr>
+    </table>
+
+    <!-- 문단 · 목록 항목 안의 링크 -->
+    <p>졸업 요건은 <a href="/guide">졸업 안내</a>에서 본다.</p>
+    <ul>
+      <li>2026-10-29 <a href="/notice/1">휴강 안내</a></li>
+    </ul>
+
+    <!-- 바깥 블록의 링크는 바깥 글에, 안쪽 블록의 링크는 안쪽 글에 붙는다. 바깥 글이 둘로 갈려도 번호는 한 번만 붙는다 -->
+    <div>
+      앞 글 <a href="/outer">바깥 링크</a>
+      <div>가운데 글 <a href="/inner">안쪽 링크</a></div>
+      뒤 글
+    </div>
+
+    <!-- 번호가 없는 링크(화면 밖 · 숨김)는 붙이지 않는다 -->
+    <p>
+      보이는 글
+      <a href="/off-left" style="position: absolute; left: -9999px">밖 왼쪽</a>
+      <a href="/off-top" style="position: absolute; top: -9999px">밖 위</a>
+      <a href="/off-none" style="display: none">숨김</a>
+    </p>
+
+    <!-- 링크만 든 블록은 본문에 줄이 생기지 않는다 (요소 줄에만 있다) -->
+    <nav><a href="/menu1">메뉴1</a> <a href="/menu2">메뉴2</a></nav>
+  </body>
+</html>
