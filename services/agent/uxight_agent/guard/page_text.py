@@ -22,10 +22,10 @@ INSTRUCTION_PATTERNS: dict[str, re.Pattern[str]] = {
         r"[^.?!\n]{0,10}?(?:무시|잊)",
         re.IGNORECASE,
     ),
-    # 줄 머리나 따옴표 · 괄호 바로 뒤의 "system:" — 대화 역할을 사칭한다.
+    # 줄 머리나 따옴표 · 괄호 · 본문 표 칸 구분("| ") 바로 뒤의 "system:" — 대화 역할을 사칭한다.
     # 문장 중간("Operating system: macOS")은 정상 글이 많아 뺀다.
     "role_prefix": re.compile(
-        r"(?:^|(?<=[\"'\[(<{]))(?:system|assistant|developer|시스템)\s*:",
+        r"(?:^|(?<=[\"'\[(<{])|(?<=\| ))(?:system|assistant|developer|시스템)\s*:",
         re.IGNORECASE | re.MULTILINE,
     ),
     "you_are_now": re.compile(r"\byou\s+are\s+now\b|(?:너는|넌|당신은)\s*이제", re.IGNORECASE),
