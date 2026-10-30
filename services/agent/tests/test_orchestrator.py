@@ -116,12 +116,15 @@ class FakeAuditLogRepository:
 
 
 class Browsers:
-    """가짜 브라우저 집계 — 띄운 수 · 지금 열린 수 · 동시에 열린 최대 수."""
+    """가짜 브라우저 집계 — 띄운 수 · 지금 열린 수 · 동시에 열린 최대 수 · 닫기를 부른 수."""
 
     def __init__(self) -> None:
         self.started = 0
         self.open = 0
         self.peak = 0
+        self.closed = 0  # close() 를 부른 수. 띄우지 못한 브라우저도 센다
+        self.start_seconds = 0.0  # 브라우저를 띄우는 데 걸리는 시간
+        self.start_error: Exception | None = None  # 띄우다 낼 예외 (실행 파일 없음 등)
         self.close_seconds = 0.0  # 브라우저를 닫는 데 걸리는 시간
         self.close_error: Exception | None = None  # 닫은 뒤 낼 예외 (드라이버 연결 끊김 등)
 
@@ -133,6 +136,10 @@ def fake_driver_class(browsers: Browsers) -> type[Driver]:
             self._started = False
 
         async def start(self, url: str) -> None:
+            if browsers.start_seconds:
+                await asyncio.sleep(browsers.start_seconds)
+            if browsers.start_error:
+                raise browsers.start_error
             self._started = True
             browsers.started += 1
             browsers.open += 1
@@ -145,6 +152,7 @@ def fake_driver_class(browsers: Browsers) -> type[Driver]:
             return ActionResult(ok=True)
 
         async def close(self) -> None:
+            browsers.closed += 1
             await asyncio.sleep(browsers.close_seconds)
             if self._started:
                 browsers.open -= 1
@@ -369,6 +377,42 @@ def test_browser_close_error_does_not_change_result(
     assert fakes.personas.statuses == {1: outcome}
     assert fakes.runs.status == run_status
     assert fakes.browsers.open == 0
+    assert free_global_slots() == 3
+
+
+def test_browser_start_failure_closes_once_and_fails_persona(fakes: SimpleNamespace) -> None:
+    # 브라우저를 띄우지 못한다 — 예외가 올라가도 닫기를 한 번 부르고 자리를 돌려준다.
+    fakes.browsers.start_error = RuntimeError("Executable doesn't exist at /ms-playwright/chromium")
+    snap = snapshot([persona(1)], max_steps=3)
+
+    asyncio.run(run(fakes, RUN_ID, snap))
+
+    assert fakes.personas.statuses == {1: "fail"}
+    assert fakes.runs.status == "failed"
+    assert fakes.browsers.closed == 1
+    assert free_global_slots() == 3
+
+
+def test_cancel_during_browser_start_closes_once(fakes: SimpleNamespace) -> None:
+    # 브라우저를 띄우는 중 취소 요청이 온다 — 띄우기를 멈추고 닫기를 한 번 부르고 자리를 돌려준다.
+    fakes.browsers.start_seconds = HANG_SECONDS
+    snap = snapshot([persona(1)], max_steps=3, max_seconds=HANG_SECONDS)
+
+    async def cancel_midway() -> float:
+        task = asyncio.create_task(run(fakes, RUN_ID, snap))
+        await asyncio.sleep(POLL_SECONDS * 2)
+        fakes.runs.cancel_requested = True
+        requested_at = time.monotonic()
+        await task
+        return time.monotonic() - requested_at
+
+    elapsed = asyncio.run(cancel_midway())
+
+    assert elapsed < POLL_SECONDS * 10
+    assert fakes.personas.statuses == {1: "cancelled"}
+    assert fakes.runs.status == "cancelled"
+    assert fakes.browsers.started == 0  # 띄우기를 끝내지 못했다
+    assert fakes.browsers.closed == 1
     assert free_global_slots() == 3
 
 
@@ -1156,5 +1200,7 @@ def test_cancel_stops_last_screen_quickly(
 
     assert elapsed < POLL_SECONDS * 10
     assert fakes.personas.statuses == {1: "max_steps"}  # 이미 정해진 결과는 그대로
+    # 취소 요청은 마지막 화면만 멈춘다. Persona 결과가 이미 정해져 있어 회차는 done 이다.
+    assert fakes.runs.status == "done"
     assert saved_files(fakes) == ["step-1.png", "step-2.png", "steps.jsonl"]
     assert free_global_slots() == 3
