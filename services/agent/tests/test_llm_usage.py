@@ -112,6 +112,10 @@ def test_gpt_6_luna_cost_of_dev_run_9(log, model: str) -> None:
     assert summary["groups"]["9"]["usd"] == pytest.approx(0.007002)
     assert round(summary["total"]["usd"], 4) == 0.0070
     assert summary["unpriced"] == 0
+    # 리포트는 소수 4자리로 보여 준다 — DB 의 cost_usd 칸과 같은 자리라 견주어 볼 수 있다.
+    report = usage_report.render(summary, "run", "t")
+    assert report.splitlines()[2].endswith(" 0.0070")
+    assert report.splitlines()[3].endswith("약 $0.0070")
 
 
 def test_cached_input_is_billed_at_cache_price(log) -> None:
@@ -142,6 +146,45 @@ def test_cache_price_in_env_is_optional(monkeypatch) -> None:
     assert usage_report.cost_usd({"model": "a/with", **cached_call}, table) == pytest.approx(0.5)
     # 캐시 단가를 안 주면 캐시된 입력도 입력 단가로 센다
     assert usage_report.cost_usd({"model": "a/without", **cached_call}, table) == pytest.approx(1.0)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        '{"a/b": [1]}',  # 값 1개
+        '{"a/b": 0.1}',  # 숫자 하나 (목록이 아님)
+        "not json",
+        '{"a/b": [-1, 2]}',  # 음수
+        '{"a/b": [1, 2, 3, 4]}',
+        '{"a/b": [NaN, 2]}',
+        '{"a/b": [1, Infinity]}',
+        '{"a/b": ["1", 2]}',
+        '{"a/b": [true, 2]}',
+        '{"a/b": null}',
+        "[1, 2]",
+    ],
+)
+def test_malformed_prices_env_is_value_error(monkeypatch, value: str) -> None:
+    monkeypatch.setenv("LLM_PRICES", value)
+
+    with pytest.raises(ValueError):
+        usage_report.price_table()
+
+
+def test_prices_env_accepts_two_or_three_numbers_and_zero(monkeypatch) -> None:
+    monkeypatch.setenv("LLM_PRICES", '{"a/free": [0, 0], "a/full": [1, 2.5, 0]}')
+
+    table = usage_report.price_table()
+
+    assert table["a/free"] == (0.0, 0.0, 0.0)
+    assert table["a/full"] == (1.0, 2.5, 0.0)
+    assert table["gpt-6-luna"] == usage_report.GPT_6_LUNA_PRICES  # 기본표는 그대로 남는다
+
+
+def test_blank_prices_env_means_not_set(monkeypatch) -> None:
+    monkeypatch.setenv("LLM_PRICES", "")
+
+    assert usage_report.price_table() == usage_report.DEFAULT_PRICES
 
 
 def test_slack_text_warns_over_threshold(log) -> None:

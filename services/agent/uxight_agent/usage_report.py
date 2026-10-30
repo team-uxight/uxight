@@ -5,8 +5,9 @@
     uv run python -m uxight_agent.usage_report --days 1 --slack --alert-usd 5   # 서버 cron 용
 
 - 단가는 USD / 100만 토큰 (입력, 출력, 캐시된 입력). 기본표에 없는 모델은 env 로 준다:
-  LLM_PRICES='{"openai/gpt-6-luna": [0.10, 0.50, 0.01]}'.
+  LLM_PRICES='{"example/model": [1.00, 2.00, 0.10]}'.
 - 캐시 단가를 빼고 [입력, 출력] 만 주면 캐시된 입력도 입력 단가로 센다.
+- LLM_PRICES 는 모델마다 0 이상인 숫자 2~3개여야 한다. 아니면 ValueError.
 - 단가가 없는 모델은 토큰만 세고 비용은 "?".
 - 캐시된 입력 토큰은 입력 토큰 안에, 추론 토큰은 출력 토큰 안에 이미 들어 있다 (따로 더하지 않는다).
   캐시된 만큼은 캐시 단가로, 나머지 입력은 입력 단가로 센다.
@@ -18,6 +19,7 @@
 
 import argparse
 import json
+import math
 import os
 import sys
 import urllib.request
@@ -57,11 +59,22 @@ def load(path: Path, days: int | None = None) -> list[dict[str, Any]]:
     return rows
 
 
+def _is_price(value: Any) -> bool:
+    # JSON 숫자만 (참거짓 · 글자 아님), 0 이상 유한. NaN · Infinity 도 JSON 으로 들어올 수 있다.
+    return isinstance(value, int | float) and not isinstance(value, bool) and 0 <= value < math.inf
+
+
 def price_table() -> PriceTable:
+    """기본표에 env LLM_PRICES 를 얹은 단가표. env 모양이 틀리면 ValueError."""
     table = dict(DEFAULT_PRICES)
-    for model, prices in json.loads(os.environ.get("LLM_PRICES", "{}")).items():
+    env = json.loads(os.environ.get("LLM_PRICES") or "{}")  # 비어 있으면 안 준 것으로 본다
+    if not isinstance(env, dict):
+        raise ValueError("LLM_PRICES must be a JSON object {model: [input, output, cached]}")
+    for model, prices in env.items():
+        if not (isinstance(prices, list) and len(prices) in (2, 3) and all(map(_is_price, prices))):
+            raise ValueError(f"LLM_PRICES[{model!r}] must be 2-3 non-negative finite numbers")
         p_in, p_out = float(prices[0]), float(prices[1])
-        table[model] = (p_in, p_out, float(prices[2]) if len(prices) > 2 else p_in)
+        table[model] = (p_in, p_out, float(prices[2]) if len(prices) == 3 else p_in)
     return table
 
 
@@ -116,10 +129,10 @@ def render(summary: dict, by: str, title: str) -> str:
     for name, g in ordered:
         lines.append(
             f"{name[:14]:<14} {g['calls']:>6} {g['errors']:>4} {g['input']:>10,} "
-            f"{g['output']:>10,} {g['reasoning']:>9,} {g['usd']:>8.3f}"
+            f"{g['output']:>10,} {g['reasoning']:>9,} {g['usd']:>8.4f}"
         )
     t = summary["total"]
-    lines.append(f"합계: 호출 {t['calls']} · 실패 {t['errors']} · 약 ${t['usd']:.3f}")
+    lines.append(f"합계: 호출 {t['calls']} · 실패 {t['errors']} · 약 ${t['usd']:.4f}")
     if summary["unpriced"]:
         lines.append(f"단가 없는 모델 {summary['unpriced']}건은 비용에 안 들어갔다 (LLM_PRICES)")
     return "\n".join(lines)

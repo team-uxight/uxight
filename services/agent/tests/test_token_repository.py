@@ -71,6 +71,24 @@ def test_step_cost_adds_to_persona_and_run(engine) -> None:
     assert run_cost == pytest.approx(0.0021)
 
 
+def test_run_cost_is_sum_of_persona_rows(engine) -> None:
+    # 회차 칸에는 Persona 행에 더한 값을 그대로 더한다 — 그래서 Persona 행들의 합과 같다.
+    with engine.begin() as conn:
+        conn.execute(text("INSERT INTO run_personas VALUES (2, 6, 0, NULL, 'running', NULL)"))
+    personas = RunPersonaRepository()
+
+    personas.increment_steps(2, 5, 100, 0.0006)
+    personas.increment_steps(2, 6, 100, 0.0007)
+    personas.increment_steps(2, 5, 100, 0.0006)
+    personas.increment_steps(2, 6, 100, 0.0006)
+
+    with engine.connect() as conn:
+        rows = dict(conn.execute(text("SELECT persona_id, cost_usd FROM run_personas")).all())
+        run_cost = conn.execute(text("SELECT cost_usd FROM runs WHERE run_id = 2")).scalar()
+    assert rows == pytest.approx({5: 0.0012, 6: 0.0013})
+    assert run_cost == pytest.approx(0.0025)
+
+
 def test_unpriced_step_keeps_cost_null_but_counts_tokens(engine) -> None:
     personas = RunPersonaRepository()
 

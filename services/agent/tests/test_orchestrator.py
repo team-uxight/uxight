@@ -82,6 +82,7 @@ class FakeRunPersonaRepository:
         # 비용은 실제 SQL 처럼 None 이면 건드리지 않고, 처음 값이 오면 0 에서 시작해 더한다.
         self.costs: dict[int, float | None] = {}
         self.cost_added: dict[int, list[float | None]] = {}  # step 마다 더한 값
+        self.run_cost: float | None = None  # runs 칸. Persona 행에 더한 값을 그대로 더한다
 
     def get_statuses(self, run_id: int) -> dict[int, str]:
         return dict(self.statuses)
@@ -94,6 +95,7 @@ class FakeRunPersonaRepository:
         self.cost_added.setdefault(persona_id, []).append(cost_usd)
         if cost_usd is not None:
             self.costs[persona_id] = (self.costs.get(persona_id) or 0.0) + cost_usd
+            self.run_cost = (self.run_cost or 0.0) + cost_usd
 
     def mark_finished(self, run_id: int, persona_id: int, status: str) -> None:
         if self.statuses[persona_id] == "running":
@@ -172,6 +174,7 @@ def fakes(monkeypatch: pytest.MonkeyPatch, tmp_path) -> SimpleNamespace:
     browsers = Browsers()
     runs = FakeRunRepository()
     personas = FakeRunPersonaRepository()
+    monkeypatch.delenv("LLM_PRICES", raising=False)  # 단가표는 코드의 기본표로
     monkeypatch.setattr(orchestrator_module, "DomDriver", fake_driver_class(browsers))
     use_decider(monkeypatch, SleepyDecider())
     monkeypatch.setattr(orchestrator_module, "step_log_writer", StepLogWriter(str(tmp_path)))
@@ -219,10 +222,17 @@ def snapshot(personas: list[dict], **policy) -> RunSnapshot:
     )
 
 
-async def run(fakes: SimpleNamespace, run_id: int, snap: RunSnapshot) -> None:
+async def run(
+    fakes: SimpleNamespace,
+    run_id: int,
+    snap: RunSnapshot,
+    orchestrator: RunOrchestrator | None = None,
+) -> None:
     # try_accept_and_start 가 만든 running 행에서 시작한다.
     fakes.personas.statuses.update({p["persona_id"]: "running" for p in snap.personas})
-    await asyncio.wait_for(RunOrchestrator().run_personas(run_id, snap), timeout=5)
+    await asyncio.wait_for(
+        (orchestrator or RunOrchestrator()).run_personas(run_id, snap), timeout=5
+    )
 
 
 @pytest.mark.parametrize(
@@ -738,27 +748,20 @@ def test_unpriced_model_counts_tokens_but_leaves_cost_empty(
     assert 1 not in fakes.personas.costs
 
 
-def test_cost_added_to_db_equals_cost_from_usage_log(
-    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, tmp_path
-) -> None:
-    # 한 응답에서 두 값이 나온다 — 사용량 기록(llm-usage.jsonl)으로 계산한 비용과 DB 에 더한 비용.
-    # 둘이 같아야 한다.
-    log = tmp_path / "llm-usage.jsonl"
-    monkeypatch.setenv("LLM_USAGE_LOG", str(log))
-    monkeypatch.delenv("LLM_PRICES", raising=False)
-    # (입력, 출력, 캐시된 입력) — 입력 47,080 · 출력 4,588 인 dev 회차 9 의 모양에 캐시를 섞었다.
-    usages = iter(
-        [(1_900, 410, 0), (3_100, 520, 0), (3_800, 380, 1_000), (4_400, 450, 2_000),
-         (4_900, 470, 0), (5_300, 500, 3_000), (5_600, 440, 0), (5_800, 460, 4_000),
-         (5_900, 480, 0), (6_380, 478, 5_000)]
-    )  # fmt: skip
+def usage_llm(usages: dict[str, list[tuple[int, int, int]]]) -> LLMDecider:
+    """Persona 마다 정해 둔 (입력, 출력, 캐시된 입력)을 차례로 쓰는 판단기.
+
+    실제 LLMClient 처럼 호출마다 사용량 기록(llm-usage.jsonl)을 남긴다. 사용량은 Persona 별로
+    정해 두므로 Persona 들의 step 이 어떻게 섞여도 같은 값이 나온다.
+    """
+    queues = {persona_id: iter(calls) for persona_id, calls in usages.items()}
     reply = '{"reasoning": "r", "action": {"kind": "scroll", "element_id": null, "value": "down"}}'
 
     class UsageLLM:
         model = "openai/gpt-6-luna"
 
         async def chat(self, messages, *, role, run_id=None, persona_id=None, **kwargs):
-            inp, out, cached = next(usages)
+            inp, out, cached = next(queues[persona_id])
             response = SimpleNamespace(
                 usage=SimpleNamespace(
                     prompt_tokens=inp,
@@ -780,7 +783,21 @@ def test_cost_added_to_db_equals_cost_from_usage_log(
             )
             return response
 
-    use_decider(monkeypatch, LLMDecider(UsageLLM(), run_id=RUN_ID))
+    return LLMDecider(UsageLLM(), run_id=RUN_ID)
+
+
+def test_cost_added_to_db_equals_cost_from_usage_log(
+    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    # 한 응답에서 두 값이 나온다 — 사용량 기록(llm-usage.jsonl)으로 계산한 비용과 DB 에 더한 비용.
+    # 둘이 같아야 한다.
+    log = tmp_path / "llm-usage.jsonl"
+    monkeypatch.setenv("LLM_USAGE_LOG", str(log))
+    # (입력, 출력, 캐시된 입력) — 입력 47,080 · 출력 4,588 인 dev 회차 9 의 모양에 캐시를 섞었다.
+    calls = [(1_900, 410, 0), (3_100, 520, 0), (3_800, 380, 1_000), (4_400, 450, 2_000),
+             (4_900, 470, 0), (5_300, 500, 3_000), (5_600, 440, 0), (5_800, 460, 4_000),
+             (5_900, 480, 0), (6_380, 478, 5_000)]  # fmt: skip
+    use_decider(monkeypatch, usage_llm({"1": calls}))
 
     asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)], max_steps=10)))
 
@@ -788,6 +805,60 @@ def test_cost_added_to_db_equals_cost_from_usage_log(
     from_log = sum(usage_report.cost_usd(row, usage_report.price_table()) for row in rows)
     assert len(rows) == 10
     assert fakes.personas.costs[1] == pytest.approx(round(from_log, 4))
+    assert fakes.personas.run_cost == pytest.approx(round(from_log, 4))
+
+
+def test_two_personas_cost_rows_are_rounded_each_and_run_is_their_sum(
+    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    # PM 이 정한 기준: Persona 행 = 그 Persona 사용량 합계의 4자리 반올림,
+    # 회차(runs) = Persona 행의 합. 그래서 Persona 가 여럿이면 회차 값이 사용량 기록 전체 합을
+    # 반올림한 값과 0.0001 다를 수 있다.
+    log = tmp_path / "llm-usage.jsonl"
+    monkeypatch.setenv("LLM_USAGE_LOG", str(log))
+    use_decider(
+        monkeypatch,
+        usage_llm(
+            {
+                "1": [(5_000, 240, 0)] * 2,  # step 하나 $0.00062 → 합계 $0.00124
+                "2": [(5_200, 300, 0)] * 2,  # step 하나 $0.00067 → 합계 $0.00134
+            }
+        ),
+    )
+
+    asyncio.run(run(fakes, RUN_ID, snapshot([persona(1), persona(2)], max_steps=2)))
+
+    table = usage_report.price_table()
+    rows = usage_report.load(log)
+    assert len(rows) == 4
+    from_log = {
+        pid: sum(usage_report.cost_usd(r, table) for r in rows if r["persona_id"] == str(pid))
+        for pid in (1, 2)
+    }
+    for pid in (1, 2):
+        assert fakes.personas.costs[pid] == pytest.approx(round(from_log[pid], 4))
+    assert fakes.personas.costs[1] == pytest.approx(0.0012)
+    assert fakes.personas.costs[2] == pytest.approx(0.0013)
+    assert fakes.personas.run_cost == pytest.approx(sum(fakes.personas.costs.values()))
+    # 로그 전체 합은 $0.00258 → 4자리 0.0026. 회차 값은 Persona 행의 합 0.0025 라서 0.0001 낮다.
+    assert round(sum(from_log.values()), 4) == pytest.approx(0.0026)
+    assert fakes.personas.run_cost == pytest.approx(0.0025)
+
+
+def test_steps_use_the_price_table_made_at_accept_not_the_env(
+    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 수락할 때 만든 단가표를 쓴다 — step 마다 env 를 다시 읽으면 아래 깨진 값에서 실패한다.
+    orchestrator = RunOrchestrator()
+    orchestrator._run_prices[RUN_ID] = {"example/model": (1.0, 2.0, 0.5)}
+    monkeypatch.setenv("LLM_PRICES", "not json")
+    use_decider(monkeypatch, ScriptedDecider(*[luna_step(1_000, 500, model="example/model")] * 2))
+
+    asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)], max_steps=2), orchestrator))
+
+    assert fakes.personas.statuses == {1: "max_steps"}
+    assert fakes.personas.costs[1] == pytest.approx(2 * (1_000 * 1.0 + 500 * 2.0) / 1_000_000)
+    assert orchestrator._run_prices == {}  # 회차가 끝나면 비운다
 
 
 def test_daily_budget_spent_stops_before_llm_call(fakes: SimpleNamespace) -> None:
