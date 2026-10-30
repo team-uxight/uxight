@@ -149,6 +149,16 @@ BYPASS_PAGE = """<!doctype html><html><head><meta charset="utf-8"></head><body>
 <a href="/inside" onmousedown="this.href='{ext}'">rewrite link</a>
 </body></html>"""
 
+# 새 창(target=_blank · window.open). 새 창의 첫 이동 요청은 Playwright 가 그 창을 알기 전에
+# 와서 가드가 오류를 냈고, Playwright 가 그 오류를 다음 관측에서 대신 던져 Persona 가 실패했다
+# (GACA-223).
+NEW_WINDOW_PAGE = """<!doctype html><html><head><meta charset="utf-8"></head><body>
+<a href="/inside" target="_blank">new window link</a>
+<button onclick="window.open('/inside')">open window</button>
+<a href="/redir" target="_blank">new window redirect</a>
+<button onclick="window.open('{ext}')">open outside window</button>
+</body></html>"""
+
 
 def _serve(handler: type[BaseHTTPRequestHandler]) -> ThreadingHTTPServer:
     server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
@@ -185,7 +195,8 @@ def two_sites():
                 self.send_header("Location", ext)
                 self.end_headers()
                 return
-            body = BYPASS_PAGE.format(ext=ext) if self.path == "/" else "<html>inside</html>"
+            pages = {"/": BYPASS_PAGE, "/new-window": NEW_WINDOW_PAGE}
+            body = pages.get(self.path, "<html>inside</html>").format(ext=ext)
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
@@ -224,3 +235,49 @@ def test_navigation_outside_is_blocked_whatever_the_route(two_sites, label: str)
     if label != "redirect link":
         # 리다이렉트는 같은 도메인 요청의 응답이라 외부 요청이 한 번 나간 뒤 되돌린다.
         assert hits == []
+
+
+@pytest.mark.parametrize(
+    ("label", "busy", "codes"),
+    [
+        ("new window link", False, {None}),
+        # 하위 요청이 계속 나가는 페이지. 가드 오류가 다른 요청의 route.continue_ 를 거쳐 관측에서
+        # 터졌다 ('Route.continue_: Route.continue_: Frame for this navigation request …').
+        ("new window link", True, {None}),
+        ("open window", False, {None}),
+        ("new window redirect", False, {None}),
+        # 차단 기록은 행동이 끝나기 전에 새 창 요청이 가드에 닿아야 남는다.
+        ("open outside window", False, {None, "DOMAIN_BLOCKED"}),
+    ],
+)
+def test_new_window_not_opened_and_observation_continues(
+    two_sites, label: str, busy: bool, codes: set
+) -> None:
+    target, ext, hits = two_sites
+    url = f"{target}new-window"
+    hits.clear()
+
+    async def run():
+        async with DomDriver(allowed_hosts=allowed_hosts(url, [])) as driver:
+            await driver.start(url)
+            if busy:
+                await driver._page.evaluate(
+                    "setInterval(() => { new Image().src = '/img?' + Math.random(); }, 20)"
+                )
+            agent = PersonaAgent(
+                {"persona_id": 1}, {}, driver, ClickByText(label), driver._allowed_hosts
+            )
+            step = await agent.step()
+            await asyncio.sleep(0.5)  # 새 창의 이동 요청이 가드에 닿기를 기다린다
+            after = await driver.observe()  # 전에는 여기서 가드의 오류가 터졌다
+            others = [page.url for page in driver._page.context.pages if page is not driver._page]
+            return step, after, others
+
+    step, after, others = asyncio.run(run())
+
+    # 허용된 주소로 가는 새 창은 끊어도 차단(DOMAIN_BLOCKED)으로 남기지 않는다.
+    assert step.result.error_code in codes
+    assert after.url == url
+    # 새 창은 주소와 상관없이 열지 않는다 — 허용된 주소도 리다이렉트로 허용 밖 주소에 닿을 수 있다.
+    assert all(page_url == "about:blank" for page_url in others)
+    assert hits == []

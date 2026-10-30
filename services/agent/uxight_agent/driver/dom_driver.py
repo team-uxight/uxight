@@ -316,16 +316,25 @@ class DomDriver(Driver):
 
         이미지 · 스크립트 같은 하위 요청과 iframe 이동은 그대로 둔다 — 화면이 사람이 보는 것과
         달라지지 않게. 'aborted' 로 끊으면 오류 화면 없이 지금 페이지에 머문다.
+        이 처리기는 예외를 내면 안 된다. 낸 예외는 Playwright 가 다음 API 호출(관측의 page.evaluate
+        등)에서 대신 던지고, 그 요청은 이어지지도 끊기지도 않은 채 멈춘다 (GACA-223).
         """
         request = route.request
-        if (
-            request.is_navigation_request()
-            and request.frame.parent_frame is None
-            and not is_allowed(request.url, self._allowed_hosts)
-        ):
-            self._blocked_url = request.url
-            await route.abort("aborted")
-            return
+        if request.is_navigation_request():
+            outside = not is_allowed(request.url, self._allowed_hosts)
+            try:
+                frame = request.frame
+            except PlaywrightError:
+                # 새 창(target=_blank · window.open)의 첫 이동 요청은 Playwright 가 그 창을 알기
+                # 전에 와서 request.frame 이 오류를 낸다. 이 요청은 주소와 상관없이 끊는다.
+                # 허용된 주소도 리다이렉트로 허용 밖 주소에 닿을 수 있고(route 는 리다이렉트를
+                # 보지 못한다), 새 창에는 3단계 되돌리기가 없다. Agent 는 새 창을 보지 않는다.
+                frame = None
+            if frame is None or (outside and frame.parent_frame is None):
+                if outside:
+                    self._blocked_url = request.url
+                await route.abort("aborted")
+                return
         await route.continue_()
 
     async def observe(self) -> Observation:
