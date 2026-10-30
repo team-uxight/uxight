@@ -149,6 +149,24 @@ BYPASS_PAGE = """<!doctype html><html><head><meta charset="utf-8"></head><body>
 <a href="/inside" onmousedown="this.href='{ext}'">rewrite link</a>
 </body></html>"""
 
+# 새 창(target=_blank · window.open · 이름 있는 창 · form.target). 새 창의 이동은 주소와 상관없이
+# 끊는다. 그래서 이 페이지의 허용된 주소는 모두 밖으로 보내는 리다이렉트(/redir)로 두고,
+# 외부 서버가 받은 요청 수로 확인한다 (GACA-223).
+# - 주소를 넘겨 연 새 창: 전에는 가드가 오류를 냈고, Playwright 가 그 오류를 다음 관측에서 대신
+#   던져 Persona 가 실패했다.
+# - 빈 창(window.open('') · 이름 있는 창)의 이동: Playwright 가 이미 아는 창이라 전에는 주 창과
+#   같은 규칙을 탔고, 허용된 주소의 리다이렉트로 허용 밖 주소에 닿았다.
+NEW_WINDOW_PAGE = """<!doctype html><html><head><meta charset="utf-8"></head><body>
+<a href="/redir" target="_blank">new window link</a>
+<button onclick="window.open('/redir')">open window</button>
+<button onclick="window.open('{ext}')">open outside window</button>
+<button onclick="const w = window.open(''); setTimeout(() => w.location = '/redir', 300)">
+blank window then move</button>
+<a href="/redir" target="side">named window link</a>
+<form action="/redir" target="side"><button type="submit">form to named window</button></form>
+<script>window.open('', 'side')</script>
+</body></html>"""
+
 
 def _serve(handler: type[BaseHTTPRequestHandler]) -> ThreadingHTTPServer:
     server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
@@ -185,7 +203,8 @@ def two_sites():
                 self.send_header("Location", ext)
                 self.end_headers()
                 return
-            body = BYPASS_PAGE.format(ext=ext) if self.path == "/" else "<html>inside</html>"
+            pages = {"/": BYPASS_PAGE, "/new-window": NEW_WINDOW_PAGE}
+            body = pages.get(self.path, "<html>inside</html>").format(ext=ext)
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
@@ -224,3 +243,57 @@ def test_navigation_outside_is_blocked_whatever_the_route(two_sites, label: str)
     if label != "redirect link":
         # 리다이렉트는 같은 도메인 요청의 응답이라 외부 요청이 한 번 나간 뒤 되돌린다.
         assert hits == []
+
+
+@pytest.mark.parametrize(
+    ("label", "busy", "codes"),
+    [
+        ("new window link", False, {None}),
+        # 하위 요청이 계속 나가는 페이지. 가드 오류가 다른 요청의 route.continue_ 를 거쳐 관측에서
+        # 터졌다 ('Route.continue_: Route.continue_: Frame for this navigation request …').
+        ("new window link", True, {None}),
+        ("open window", False, {None}),
+        # 차단 기록은 행동이 끝나기 전에 새 창 요청이 가드에 닿아야 남는다.
+        ("open outside window", False, {None, "DOMAIN_BLOCKED"}),
+        ("blank window then move", False, {None}),
+        ("named window link", False, {None}),
+        ("form to named window", False, {None}),
+    ],
+)
+def test_new_window_not_opened_and_observation_continues(
+    two_sites, label: str, busy: bool, codes: set
+) -> None:
+    target, ext, hits = two_sites
+    url = f"{target}new-window"
+    hits.clear()
+
+    async def run():
+        async with DomDriver(allowed_hosts=allowed_hosts(url, [])) as driver:
+            await driver.start(url)
+            # 가드가 새 창의 이동을 끊으면 requestfailed 가 온다. 정해 둔 시간 대신 이것을 기다린다.
+            aborted = asyncio.Event()
+
+            def on_failed(request) -> None:
+                if request.is_navigation_request():
+                    aborted.set()
+
+            driver._page.context.on("requestfailed", on_failed)
+            if busy:
+                await driver._page.evaluate(
+                    "setInterval(() => { new Image().src = '/img?' + Math.random(); }, 20)"
+                )
+            agent = PersonaAgent(
+                {"persona_id": 1}, {}, driver, ClickByText(label), driver._allowed_hosts
+            )
+            step = await agent.step()
+            await asyncio.wait_for(aborted.wait(), 5)  # 끊지 못하면 시간 초과로 실패한다
+            after = await driver.observe()  # 가드가 예외를 내면 Playwright 가 여기서 대신 던진다
+            return step, after
+
+    step, after = asyncio.run(run())
+
+    # 허용된 주소로 가는 새 창은 끊어도 차단(DOMAIN_BLOCKED)으로 남기지 않는다.
+    assert step.result.error_code in codes
+    assert after.url == url
+    # 새 창은 주소와 상관없이 열지 않는다 — 허용된 주소도 리다이렉트로 허용 밖 주소에 닿을 수 있다.
+    assert hits == []
