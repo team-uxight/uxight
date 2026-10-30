@@ -15,7 +15,9 @@ def create_db_engine(db_url: str) -> Engine:
     connect_args = {}
     if make_url(db_url).get_backend_name() == "mysql":
         connect_args = {"connect_timeout": 3, "read_timeout": 10, "write_timeout": 10}
-    return create_engine(db_url, connect_args=connect_args)
+    # MySQL 은 오래 쉰 연결을 끊는다(wait_timeout). 쓰기 전에 살아 있는지 보고,
+    # 1시간 넘은 연결은 새로 맺는다(10/30 dev 서버에서 'MySQL server has gone away').
+    return create_engine(db_url, connect_args=connect_args, pool_pre_ping=True, pool_recycle=3600)
 
 
 # 앱 전체에서 엔진은 한 번만 생성해서 재사용한다.
