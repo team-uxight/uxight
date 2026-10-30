@@ -1,7 +1,7 @@
 {
-  "name": "학교 사본 — 관측 dom vs som",
+  "name": "학교 사본 — 본문 글 있음 vs 없음",
   "personas_file": "school_personas_50.json",
-  "personas": ["P001", "P006", "P016", "P031", "P036"],
+  "personas": ["P001", "P016", "P031"],
   "tasks": [
     {
       "goal": "교내 장학금 종류와 신청 방법을 찾는다",
@@ -14,9 +14,9 @@
       "success_url": "/kor/1163/subview.do"
     },
     {
-      "goal": "학교 오는 길(대중교통)을 찾는다",
-      "success_rule": "대중교통으로 오는 방법이 적힌 페이지에 도달한다",
-      "success_url": "/kor/1466/subview.do"
+      "goal": "26학번 졸업 이수학점 기준을 찾는다",
+      "success_rule": "26학번 졸업 이수학점 기준표(별표32) 페이지에 도달한다",
+      "success_url": "/kor/12490/subview.do"
     }
   ],
   "sites": [
@@ -24,8 +24,8 @@
     { "name": "seedA", "url": "/kor/index.do" }
   ],
   "variants": {
-    "dom": { "observation": "dom" },
-    "som": { "observation": "som" }
+    "text_on": {},
+    "text_off": { "body_text": false }
   },
   "repeat": 1,
   "concurrency": 3,

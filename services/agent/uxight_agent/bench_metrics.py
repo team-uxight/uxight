@@ -45,6 +45,7 @@ TAXONOMY_BY_KIND = {
 CSV_FIELDS = [
     "variant",
     "observation",
+    "body_text",
     "guard",
     "diagnosis",
     "site",
@@ -153,9 +154,9 @@ def recall_counts(findings: list[dict], answers: dict) -> tuple[int, int]:
 
 def render_md(rows: list[dict]) -> str:
     out = [
-        "| 변형 | 관측 | 가드 | 진단 | 사이트 | 실행 | 오류 | 성공률 | step | 시간(s) | "
+        "| 변형 | 관측 | 본문 | 가드 | 진단 | 사이트 | 실행 | 오류 | 성공률 | step | 시간(s) | "
         "입력 토큰 | 출력 토큰 | 비용($) | JSON 준수율 | 재현율 | 오탐 |",
-        "|" + " --- |" * 16,
+        "|" + " --- |" * 17,
     ]
     for r in rows:
         recall = (
@@ -166,6 +167,7 @@ def render_md(rows: list[dict]) -> str:
         cells = [
             r["variant"],
             r["observation"],
+            "on" if r["body_text"] else "off",
             r["guard"],
             r["diagnosis"],
             r["site"],

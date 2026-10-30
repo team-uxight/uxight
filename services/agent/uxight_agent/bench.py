@@ -27,7 +27,7 @@ import subprocess
 import threading
 import time
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Literal, Self
@@ -43,6 +43,7 @@ from pydantic import (
 )
 
 from . import bench_metrics
+from .driver.base import Observation
 from .driver.dom_driver import DomDriver
 from .driver.som_driver import SomDriver
 from .guard.domain import allowed_hosts
@@ -92,6 +93,7 @@ class Variant(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     observation: Literal["dom", "som"] = "dom"
+    body_text: bool = True  # 끄면 관측에서 본문 글을 뺀다 — 본문 글(GACA-217)의 효과 비교
     # 아래 둘은 자리만 있다. 지금 코드에 스위치가 없어 운영 값만 받는다.
     guard: Literal["on"] = "on"  # 가드를 끄고 막을 행동은 기록만 하는 쪽은 GACA-180
     diagnosis: Literal["single"] = "single"  # 다중 진단은 GACA-181
@@ -145,6 +147,7 @@ class Job:
     task: dict  # 회차 스냅샷 모양. success_url 은 사이트 주소에 붙인 것
     repeat: int
     persona: dict
+    body_text: bool = True
 
 
 def load_config(path: Path) -> BenchConfig:
@@ -243,6 +246,7 @@ def plan(config: BenchConfig, personas: list[dict], urls: dict[str, str]) -> lis
                                 run_id=run_id,
                                 variant=name,
                                 observation=variant.observation,
+                                body_text=variant.body_text,
                                 site=site.name,
                                 url=url,
                                 hosts=hosts,
@@ -253,6 +257,19 @@ def plan(config: BenchConfig, personas: list[dict], urls: dict[str, str]) -> lis
                             )
                         )
     return jobs
+
+
+class _WithoutBodyText:
+    """변형 body_text=false — 관측에서 본문 글만 뺀다. 나머지는 감싼 드라이버 그대로다."""
+
+    def __init__(self, driver: DomDriver) -> None:
+        self._driver = driver
+
+    def __getattr__(self, name: str):
+        return getattr(self._driver, name)
+
+    async def observe(self) -> Observation:
+        return replace(await self._driver.observe(), text="")
 
 
 async def run_persona(
@@ -271,6 +288,8 @@ async def run_persona(
     cost: float | None = 0.0  # 이 실행의 LLM 비용(USD). 단가 없는 step 이 하나라도 있으면 None
     outcome, error, seconds = "max_steps", None, 0.0
     driver = DRIVERS[job.observation](allowed_hosts=job.hosts)
+    if not job.body_text:
+        driver = _WithoutBodyText(driver)
     deadline = asyncio.timeout(config.max_seconds)
     try:
         async with deadline:
@@ -416,7 +435,8 @@ def render_summary(
     total_cost = "—" if None in costs else f"${sum(costs):.4f}"
     errors = sum(1 for r in records if r["error"])
     variants = " / ".join(
-        f"{name} = 관측 {v.observation} · 가드 {v.guard} · 진단 {v.diagnosis}"
+        f"{name} = 관측 {v.observation} · 본문 {'on' if v.body_text else 'off'}"
+        f" · 가드 {v.guard} · 진단 {v.diagnosis}"
         for name, v in config.variants.items()
     )
     sites = " / ".join(

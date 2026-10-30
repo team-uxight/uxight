@@ -5,6 +5,7 @@ Persona 실행이 끝나는 길(시간 상한 · 토큰 상한 · 실행 오류 
 
 import asyncio
 import csv
+import dataclasses
 import functools
 import json
 import os
@@ -198,7 +199,7 @@ def test_success_steps_tokens_cost_and_json_rate(ran: dict) -> None:
         assert float(row["cost_usd"]) == pytest.approx(calls * 25 / 1_000_000), key
     # 표의 칸: 오류 · 성공률 · step · 입력 토큰 · 출력 토큰 · JSON 준수율
     cells = _md_row(ran["md"], "dom", "seed1")
-    assert [cells[i] for i in (6, 7, 8, 10, 11, 13)] == ["0", "100%", "3.0", "33", "21", "67%"]
+    assert [cells[i] for i in (7, 8, 9, 11, 12, 14)] == ["0", "100%", "3.0", "33", "21", "67%"]
 
 
 def test_recall_and_false_positives_only_when_files_given(ran: dict) -> None:
@@ -480,3 +481,32 @@ def test_persona_file_becomes_snapshot_shape() -> None:
     assert p1["persona_id"] == "P001" and p50["persona_id"] == "P050"
     assert set(p1) == {"persona_id", "name", "profile"}
     assert isinstance(p1["profile"]["behavior"], list) and "device" in p1["profile"]
+
+
+class TextRecordingDecider(Decider):
+    """받은 관측의 본문 글을 적어 두고 바로 끝낸다."""
+
+    def __init__(self) -> None:
+        self.texts: list[str] = []
+
+    async def decide(self, persona, task, observation, history) -> Decision:
+        self.texts.append(observation.text)
+        return decision("done")
+
+
+@pytest.mark.parametrize(("body_text", "seen"), [(True, ["본문 한 줄"]), (False, [""])])
+def test_body_text_variant_removes_only_body_text(
+    monkeypatch: pytest.MonkeyPatch, body_text: bool, seen: list[str]
+) -> None:
+    async def observe(self) -> Observation:
+        return Observation(url="https://example.com/", title="t", dom="", text="본문 한 줄")
+
+    monkeypatch.setitem(bench.DRIVERS, "dom", type("Driver", (FakeDriver,), {"observe": observe}))
+    decider = TextRecordingDecider()
+    job = dataclasses.replace(JOB, body_text=body_text)
+
+    record, steps = asyncio.run(asyncio.wait_for(bench.run_persona(job, decider, {}, limits()), 10))
+
+    assert decider.texts == seen
+    assert (record["outcome"], steps[0]["observation"]["mode"]) == ("done", "dom")
+    assert bench.Variant.model_validate({"body_text": False}).body_text is False

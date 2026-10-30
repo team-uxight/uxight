@@ -43,7 +43,7 @@ uv run python -m uxight_agent.bench ../../config/bench-school.json --out data/be
 | `sites[].answers` | 결함 사본의 정답 파일 |
 | `sites[].findings` | `{변형 이름: 진단 결과 파일}`. 진단 결과는 findings 표의 행을 담은 JSON 배열이다. 원본 사본이나 정답 파일이 있는 사이트에만 쓴다 |
 | `sites[].allowed_domains` | 회차의 허용 도메인과 같다. 시작 URL 의 호스트는 늘 허용한다 |
-| `variants` | 변형 이름 → 바꿀 값. `observation` 은 `dom` 또는 `som` |
+| `variants` | 변형 이름 → 바꿀 값. `observation` 은 `dom` 또는 `som`, `body_text` 는 `false` 면 관측에서 본문 글을 뺀다(기본 `true`) |
 | `variants` 의 자리만 있는 칸 | `guard` 는 `on`, `diagnosis` 는 `single` 만 받는다. 가드 끄기(GACA-180) · 다중 진단(GACA-181)이 생기면 값을 더한다 |
 | `repeat` · `concurrency` | 반복 수 · 동시에 도는 Persona 수 |
 | `max_steps` · `max_seconds` · `max_tokens` | 한도. 토큰 상한은 Persona 실행 하나마다 센다 |
