@@ -27,6 +27,7 @@
 - Spring은 파일 경로를 run_id, persona_id, step 숫자로 직접 만든다. 로그 안의 `observation.screenshot`이나 `run_personas.log_path`를 경로로 쓰지 않는다.
 - Action 파싱은 최대 2회 재시도하며, 3회 연속 실패하면 Persona 실행을 실패(`fail`)로 처리한다.
 - max_steps 도달은 step을 추가하지 않고 `run_personas.status = 'max_steps'`로 기록한다.
+- step 상한, 토큰 상한, 하루 토큰 예산, 시간 상한으로 끝난 Persona는 마지막 행동 뒤 화면을 `step-<n+1>.png`(n은 step 로그 줄 수)로 남길 수 있다. 이 스크린샷의 step 로그 줄은 없다.
 
 ## 3. Step 객체
 
