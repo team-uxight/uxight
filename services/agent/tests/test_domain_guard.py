@@ -11,7 +11,7 @@ from sqlalchemy import text
 
 from uxight_agent.db import create_db_engine
 from uxight_agent.driver.base import Observation
-from uxight_agent.driver.dom_driver import DomDriver
+from uxight_agent.driver.dom_driver import NEW_WINDOW_WAIT_MS, DomDriver
 from uxight_agent.guard.domain import allowed_hosts, blocked_destination, is_allowed
 from uxight_agent.persona.persona_agent import Decider, Decision, PersonaAgent
 from uxight_agent.repositories import audit_log_repository as audit_module
@@ -191,9 +191,10 @@ NEW_WINDOW_CASES = {
         "go</button>",
         REVERTED,
     ),
+    # 페이지가 열릴 때 주 창이 스스로 창('side')을 열었으므로, 이번 행동의 새 창은 따르지 않는다.
     "named-window-link": (
         "<script>window.open('about:blank', 'side')</script><a href='/redir' target='side'>go</a>",
-        REVERTED,
+        STAYED,
     ),
     "form-new-window": (
         '<form action="/redir" target="_blank"><button type="submit">go</button></form>',
@@ -254,6 +255,26 @@ NEW_WINDOW_CASES = {
         '<button type="submit" aria-label="검색">go</button></form>',
         STAYED,
     ),
+    # 아래는 GACA-225 보안 리뷰에서 더했다.
+    # 한꺼번에 둘 이상 열린 창은 어느 창의 주소인지 가를 수 없어 따르지 않는다.
+    "two-windows": (
+        "<button onclick=\"window.open('/inside?a'); window.open('/inside?b')\">go</button>",
+        STAYED,
+    ),
+    # 주 창도 움직이면 새 창은 따르지 않는다. 주 창이 허용 밖으로 가면 지금처럼 끊고 남긴다.
+    "window-then-main": (
+        "<a href='/inside?main' onclick=\"window.open('/inside?popup')\">go</a>",
+        ("inside?main", 0, None),
+    ),
+    "window-then-main-outside": (
+        "<button onclick=\"window.open('/inside'); location.href = '{ext}'\">go</button>",
+        BLOCKED,
+    ),
+    # 따라갈 주소도 파괴적 행동 가드의 경로 검사를 거친다.
+    "pointer-cell-withdraw": (
+        POINTER_CELL.replace("{to}", "/member/withdraw.do?confirm=1"),
+        (None, 0, "DESTRUCTIVE_ACTION_BLOCKED"),
+    ),
 }
 
 
@@ -277,15 +298,26 @@ def two_sites():
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
             self.end_headers()
+            if self.path.endswith("?spam"):
+                # 허용 밖 iframe 이 자기를 넣은 허용 사이트 주소로 새 창을 거듭 연다.
+                self.wfile.write(SPAM_FRAME.encode())
+                return
             self.wfile.write(b"<html><body>outside</body></html>")
 
     external = _serve(External)
     ext = f"http://127.0.0.1:{external.server_address[1]}/outside"
 
-    pages = {"/": BYPASS_PAGE, "/popup-on-load": POPUP_ON_LOAD_PAGE} | {
-        f"/new-window/{name}": f"<!doctype html><meta charset='utf-8'>{case[0]}"
-        for name, case in NEW_WINDOW_CASES.items()
-    }
+    pages = (
+        {"/": BYPASS_PAGE}
+        | {
+            f"/new-window/{name}": f"<!doctype html><meta charset='utf-8'>{case[0]}"
+            for name, case in NEW_WINDOW_CASES.items()
+        }
+        | {
+            f"/unrelated/{name}": f"<meta charset='utf-8'><button>stay</button>{html}"
+            for name, html in UNRELATED_WINDOW_PAGES.items()
+        }
+    )
 
     class Allowed(BaseHTTPRequestHandler):
         def log_message(self, *args) -> None:
@@ -356,9 +388,9 @@ def test_new_window_followed_in_main_window_through_guard(two_sites, case: str) 
             )
             step = await agent.step()
             after = await driver.observe()  # 가드가 예외를 내면 Playwright 가 여기서 대신 던진다
-            return step, after
+            return step, after, await driver._windows()
 
-    step, after = asyncio.run(run())
+    step, after, windows = asyncio.run(run())
 
     expected = f"{target}{path_after}" if path_after else url
     assert step.result.error_code == code
@@ -366,20 +398,66 @@ def test_new_window_followed_in_main_window_through_guard(two_sites, case: str) 
     assert (step.result.url_after or step.observation.url) == expected
     assert after.url == expected
     assert len(hits) == outside_requests
+    # 끊긴 새 창은 빈 창으로 남아 메모리를 먹는다. 행동 뒤 닫는다.
+    assert windows == []
 
 
-# 행동과 상관없이 페이지가 띄운 새 창 (광고 · 공지 팝업 등).
-POPUP_ON_LOAD_PAGE = """<!doctype html><meta charset="utf-8">
-<button>stay</button><script>setTimeout(() => window.open('/inside'), 500)</script>"""
+@pytest.mark.parametrize(
+    ("windows", "state", "follows"),
+    [
+        ([{"openerFrameId": "main"}], {}, True),
+        # 행동 중 허용 밖 이동을 끊었다 · 주 창도 움직였다 · 행동 전에 주 창이 스스로 창을 열었다
+        ([{"openerFrameId": "main"}], {"_blocked_url": "http://outside.test/"}, False),
+        ([{"openerFrameId": "main"}], {"_main_navigated": True}, False),
+        ([{"openerFrameId": "main"}], {"_page_opened_window": True}, False),
+        # iframe 이 연 창 · 한꺼번에 둘 이상 열린 창
+        ([{"openerFrameId": "iframe"}], {}, False),
+        ([{"openerFrameId": "main"}, {"openerFrameId": "main"}], {}, False),
+    ],
+)
+def test_follow_only_window_opened_by_action(windows: list, state: dict, follows: bool) -> None:
+    driver = DomDriver()
+    driver._target_id = "main"
+    driver._new_window_url = "http://allowed.test/inside"
+    driver._navigated.set()
+    for name, value in state.items():
+        setattr(driver, name, value)
+
+    async def listed() -> list[dict]:
+        return [{"targetId": f"w{i}", **window} for i, window in enumerate(windows)]
+
+    async def closed(windows: list[dict]) -> None:
+        pass
+
+    driver._windows, driver._close_windows = listed, closed
+
+    url = asyncio.run(driver._new_window_to_follow())
+
+    assert url == ("http://allowed.test/inside" if follows else None)
 
 
-def test_popup_without_action_is_not_followed_and_closed(two_sites) -> None:
-    url = f"{two_sites[0]}popup-on-load"
+# 행동과 상관없이 페이지가 띄운 새 창 (광고 · 공지 팝업 등). 'stay' 는 아무 일도 하지 않는 버튼이다.
+UNRELATED_WINDOW_PAGES = {
+    # 페이지가 열린 뒤 한 번 띄우는 창
+    "popup-on-load": "<script>setTimeout(() => window.open('/inside'), 500)</script>",
+    # 주 창 스크립트가 거듭 띄우는 창. 행동 중에 생긴 창도 클릭이 열었는지 가를 수 없어, 행동 전에
+    # 주 창이 연 창이 있었으면 따르지 않는다.
+    "popup-interval": "<script>setInterval(() => window.open('/inside?ad'), 100)</script>",
+    # 허용 밖 iframe 이 허용 사이트 주소로 거듭 띄우는 창. 연 frame 이 주 창이 아니라 따르지 않는다.
+    "iframe-popup-interval": "<iframe src='{ext}?spam'></iframe>",
+}
+SPAM_FRAME = """<script>const to = new URL('/inside?iframe', document.referrer).href;
+setInterval(() => window.open(to), 50)</script>"""
+
+
+@pytest.mark.parametrize("page", UNRELATED_WINDOW_PAGES)
+def test_window_not_opened_by_action_is_not_followed(two_sites, page: str) -> None:
+    url = f"{two_sites[0]}unrelated/{page}"
 
     async def run():
         async with DomDriver(allowed_hosts=allowed_hosts(url, [])) as driver:
             await driver.start(url)
-            # 가드가 새 창의 이동을 끊으면 requestfailed 가 온다. 그때까지 기다린 뒤 행동한다.
+            # 가드가 새 창의 이동을 끊으면 requestfailed 가 온다. 창이 한 번 뜬 뒤에 행동한다.
             aborted = asyncio.Event()
 
             def on_failed(request) -> None:
@@ -391,13 +469,11 @@ def test_popup_without_action_is_not_followed_and_closed(two_sites) -> None:
             agent = PersonaAgent(
                 {"persona_id": 1}, {}, driver, ClickByText("stay"), driver._allowed_hosts
             )
-            step = await agent.step()
-            targets = (await driver._cdp.send("Target.getTargets"))["targetInfos"]
-            return step, [t for t in targets if t["type"] == "page"]
+            return await agent.step()
 
-    step, pages = asyncio.run(run())
+    step = asyncio.run(run())
 
     assert step.result.ok is True
     assert step.result.url_after == url
-    # 끊긴 새 창은 빈 창으로 남아 메모리를 먹는다. 행동 뒤 닫는다.
-    assert len(pages) == 1
+    # 행동 전부터 있던 창 · iframe 이 연 창 때문에 새 창의 이동을 기다리지 않는다.
+    assert step.browser_ms < NEW_WINDOW_WAIT_MS

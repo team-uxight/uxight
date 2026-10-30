@@ -22,6 +22,8 @@
   </div>
   <div class="pointer" onclick="this.dataset.clicked = 1">구매하기</div>
   <div class="pointer">바깥 칸 <span class="pointer">안쪽 글</span></div>
+  <!-- 칸 안의 ✕ 아이콘에만 '삭제' 라는 이름이 있다. -->
+  <div class="pointer"><span class="pointer" title="삭제">✕</span></div>
 
   <!-- 아래는 번호가 붙지 않는다. -->
   <ul><li class="pointer"><button>KOR</button></li></ul>
@@ -29,8 +31,13 @@
   <a href="/notice"><span class="pointer">링크 안 글</span></a>
   <div class="pointer"><p>긴 글 칸. 이 칸은 손가락 커서지만 글이 요소 줄 하나(100자)보다 길다. 이런 큰
     상자에 번호를 붙이면 그 안의 글이 본문에서 빠지므로 번호를 붙이지 않고 본문 글로 남긴다. 끝.</p></div>
-  <div class="pointer" style="width: 20px; height: 20px"></div>
+  <div class="pointer" aria-label="닫기" style="width: 20px; height: 20px"></div>
   <div class="pointer" style="display: none">숨긴 칸</div>
   <div class="pointer" style="opacity: 0.05">투명한 칸</div>
+  <!-- 칸은 보여도 글은 사람 눈에 안 보인다. -->
+  <div class="pointer" style="color: transparent">글자색이 투명한 칸</div>
+  <div class="pointer" style="height: 2px; overflow: hidden"><br>잘려서 안 보이는 칸</div>
+  <div class="pointer" style="text-indent: -9999px">화면 옆으로 밀어낸 칸</div>
+  <div class="pointer" style="clip-path: inset(50%)">clip-path 로 가린 칸</div>
 </body>
 </html>

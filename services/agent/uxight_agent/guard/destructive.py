@@ -54,8 +54,8 @@ def destructive_reason(action: Action, observation: Observation) -> str | None:
         return f"keyword '{word}'"
     # 링크 목적지 · 폼 action 경로의 동사 (/member/delete.do 등)
     for url in (element.get("url"), element.get("form_action")):
-        if url and (word := _find_word(_path_words(url), KOREAN_VERBS, ENGLISH_VERBS)):
-            return f"path '{word}'"
+        if url and (reason := destructive_path(url)):
+            return reason
     if (
         element.get("form_method") == "post"
         and _is_submit(element)
@@ -63,6 +63,15 @@ def destructive_reason(action: Action, observation: Observation) -> str | None:
     ):
         return "submit of a POST form"
     return None
+
+
+def destructive_path(url: str) -> str | None:
+    """주소의 경로 · 쿼리 이름에 행동 동사가 있으면 그 까닭, 아니면 None (/member/delete.do 등).
+
+    요소의 링크 목적지 · 폼 action 과, 새 창 대신 주 창에서 열 주소(GACA-225)에 쓴다.
+    """
+    word = _find_word(_path_words(url), KOREAN_VERBS, ENGLISH_VERBS)
+    return f"path '{word}'" if word else None
 
 
 def _acts_like_button(element: dict, page_url: str) -> bool:

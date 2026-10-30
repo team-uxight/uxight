@@ -11,6 +11,8 @@ import re
 import unicodedata
 from pathlib import Path
 
+from playwright.async_api import Error as PlaywrightError
+
 from uxight_agent.driver import dom_driver
 from uxight_agent.driver.base import Observation
 from uxight_agent.driver.dom_driver import DomDriver
@@ -150,16 +152,21 @@ def test_pointer_cells_get_element_numbers() -> None:
         (5, "td", "26학번 (별표32)"),
         (6, "div", "구매하기"),
         (7, "div", "바깥 칸 안쪽 글"),  # 가장 바깥 요소만
+        (8, "div", "✕"),
     ]
     assert '[5] <td> "26학번 (별표32)"' in obs.dom.splitlines()
     # 빠지는 것: 안에 번호 요소가 있는 칸(KOR 버튼) · 번호가 붙은 입력칸의 라벨 · 링크 안 글 ·
-    # 글이 100자보다 긴 상자 · 글이 없는 칸 · 숨기거나 투명한 칸.
-    assert len(obs.element_map) == 7
+    # 글이 100자보다 긴 상자 · 글 없이 aria-label 만 있는 칸 · 숨기거나 투명한 칸.
+    # 칸은 보여도 글이 안 보이는 칸(투명한 글자색 · overflow 로 잘림 · text-indent ·
+    # clip-path)도 빠진다. 글은 본문 글과 같은 기준으로 본다.
+    assert len(obs.element_map) == 8
     # 번호가 붙은 칸의 글은 요소 줄에만 있다.
-    # 번호를 붙이지 않은 큰 상자 · 라벨의 글은 본문에 남는다.
+    # 번호를 붙이지 않은 큰 상자 · 라벨의 글은 본문에 남는다. 안 보이는 글은 본문에도 없다.
     assert "26학번" not in obs.text
     assert "긴 글 칸." in obs.text
     assert "약관 동의" in obs.text
+    for hidden in ("글자색이 투명한", "잘려서", "밀어낸", "clip-path"):
+        assert hidden not in obs.dom + obs.text
 
 
 def test_menu_text_stays_in_element_lines() -> None:
@@ -200,6 +207,30 @@ def test_br_lines_follow_scroll() -> None:
     first = scrolled.text.splitlines()[0]
     assert int(first.split("번째")[0]) > 100
     assert "1번째 줄" not in scrolled.text.splitlines()
+
+
+def test_observation_retries_when_page_opens_window_meanwhile() -> None:
+    # 페이지 스크립트가 새 창을 여는 순간에 관측이 끼면 TreeWalker 의 거르개를 부르지 못해
+    # 실패한다 (GACA-225: 새 창을 거듭 여는 페이지에서 400번 중 2번쯤). 한 번 더 시도한다.
+    class OpeningWindowPage:
+        calls = 0
+
+        async def wait_for_load_state(self, *args, **kwargs) -> None:
+            pass
+
+        async def evaluate(self, *args, **kwargs) -> dict:
+            self.calls += 1
+            if self.calls == 1:
+                raise PlaywrightError(
+                    "Page.evaluate: Error: Failed to execute 'nextNode' on 'TreeWalker': "
+                    "The provided callback is no longer runnable."
+                )
+            return {"items": [], "text": "본문"}
+
+    page = OpeningWindowPage()
+
+    assert asyncio.run(DomDriver()._collect_elements(page)) == {"items": [], "text": "본문"}
+    assert page.calls == 2
 
 
 def test_body_text_is_capped(monkeypatch) -> None:
