@@ -24,6 +24,7 @@ class Observation:
     """observe()가 돌려주는 현재 페이지 상태.
 
     dom은 LLM에게 보여줄 텍스트, element_map은 ID → 요소 정보.
+    text 는 요소 줄에 없고 지금 화면 안에 보이는 본문 글이다 — 블록마다 한 줄 (GACA-217).
     링크 요소의 url 은 브라우저가 풀어 쓴 목적지다 — 도메인 가드가 이것으로 막는다.
     screenshot은 입력칸을 가린 화면 PNG 바이트다. SoM 방식은 번호 박스를 그린 그림(모델 입력),
     DOM 방식은 step 로그용 그림이다. 가린 그림을 얻지 못하면 None이다 — 그 step은 글 관측(dom)만
@@ -33,6 +34,7 @@ class Observation:
     url: str
     title: str
     dom: str
+    text: str = ""
     element_map: dict[int, dict] = field(default_factory=dict)
     screenshot: bytes | None = field(default=None, repr=False)
 

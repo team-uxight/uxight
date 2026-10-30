@@ -1,0 +1,65 @@
+<!doctype html>
+<!--
+  GACA-217 숨은 글. 사람 눈에 안 보이는 글은 관측 본문(Observation.text)에 들어가지 않아야 한다.
+  아래 묶음은 감싼 상자는 보이지만 글은 안 보이는 경우다 (GACA-217 보안 리뷰에서 본문에 새던 것).
+  화면 아래 글은 스크롤해야 본문에 들어온다.
+-->
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <title>숨은 글</title>
+    <style>
+      body {
+        margin: 8px;
+        font: 14px/1.4 sans-serif;
+      }
+      p {
+        margin: 4px 0;
+      }
+    </style>
+  </head>
+  <body>
+    <p>보이는 글</p>
+
+    <p style="display: none">숨은글 display</p>
+    <p style="visibility: hidden">숨은글 visibility</p>
+    <p style="opacity: 0">숨은글 opacity</p>
+    <p style="font-size: 1px">숨은글 font</p>
+    <p style="position: absolute; left: -9999px">숨은글 left</p>
+    <p style="position: absolute; top: -9999px">숨은글 top</p>
+    <p hidden>숨은글 hidden</p>
+    <details>
+      <summary>더보기</summary>
+      <p>숨은글 details</p>
+    </details>
+    <template><p>숨은글 template</p></template>
+    <noscript>숨은글 noscript</noscript>
+    <script>
+      // 숨은글 script
+    </script>
+    <!-- 쓸 수 없게 된 입력칸은 요소 줄에 없지만 글 노드는 여전히 입력값이다 -->
+    <textarea name="memo" disabled>숨은글 textarea</textarea>
+
+    <!-- 감싼 상자는 보이지만 글은 안 보인다 -->
+    <p style="text-indent: -9999px">숨은글 text-indent</p>
+    <p style="color: transparent">숨은글 transparent</p>
+    <p style="-webkit-text-fill-color: transparent">숨은글 text-fill</p>
+    <div style="height: 0; overflow: hidden"><p>숨은글 접힌 상자</p></div>
+    <div style="width: 300px; overflow: hidden">
+      <div style="display: flex; width: 900px">
+        <p style="width: 300px; flex: none">첫 슬라이드</p>
+        <p style="width: 300px; flex: none">숨은글 둘째 슬라이드</p>
+      </div>
+    </div>
+    <canvas width="20" height="20">숨은글 canvas</canvas>
+    <p style="filter: opacity(0)">숨은글 filter</p>
+    <p style="position: fixed; top: 300vh">숨은글 fixed</p>
+    <!-- 요소 줄도 같은 판정을 쓴다: 화면 아래에 고정한 링크는 빠지고, filter 로 투명한 링크는 글만 빠진다 -->
+    <a href="#fixed" style="position: fixed; top: 300vh">숨은 링크 fixed</a>
+    <a href="#filter" style="filter: opacity(0)">숨은 링크 filter</a>
+
+    <!-- 화면 아래 글: 스크롤해야 보인다 -->
+    <p style="position: absolute; top: 1000px">아래쪽 안내</p>
+    <div style="height: 3000px"></div>
+  </body>
+</html>

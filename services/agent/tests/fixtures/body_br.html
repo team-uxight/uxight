@@ -1,0 +1,19 @@
+<!doctype html>
+<!--
+  GACA-217 줄바꿈(<br>)으로만 나눈 긴 글. 글 조각이 모두 한 상자 안이라, 감싼 상자가 아니라 글 조각
+  자리로 판정해야 스크롤할 때 본문이 따라 내려간다 (GACA-217 보안 리뷰).
+-->
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <title>줄바꿈 글</title>
+  </head>
+  <body>
+    <div id="content"></div>
+    <script>
+      const lines = [];
+      for (let i = 1; i <= 200; i++) lines.push(`${i}번째 줄 — 긴 안내 문단을 줄바꿈으로만 나눈 본문`);
+      document.getElementById('content').innerHTML = lines.join('<br>');
+    </script>
+  </body>
+</html>
