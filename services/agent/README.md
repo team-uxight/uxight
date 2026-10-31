@@ -12,12 +12,15 @@ uv run ruff check . && uv run pytest
 
 환경변수는 `.env.example`. 실행 로그(JSON)는 `data/` — 커밋하지 않는다.
 
-**LLM 호출은 `uxight_agent/llm.py` 의 `LLMClient.chat()` 으로만.** 호출마다 사용량(토큰 · 시간 · 역할 · 실행 id)이 `data/llm-usage.jsonl` 에 한 줄씩 남는다 — 키 · 프롬프트 · 응답 본문은 남기지 않는다. 비용은:
+**LLM 호출은 `uxight_agent/llm.py` 의 `LLMClient.chat()` 으로만.** 호출마다 사용량(토큰 · 비용 · 시간 · 역할 · 실행 id)이 `data/llm-usage.jsonl` 에 한 줄씩 남는다 — 키 · 프롬프트 · 응답 본문은 남기지 않는다. 비용은:
 
 ```sh
 uv run python -m uxight_agent.usage_report                  # 전체, 역할별
 uv run python -m uxight_agent.usage_report --days 1 --by run  # 최근 하루, 실행별
+uv run python -m uxight_agent.usage_report --log data/llm-usage.jsonl data/bench/*/usage.jsonl --by day  # 운영 + benchmark
 ```
+
+단가는 OpenRouter 기준이고(`usage_report.py` 의 단가표), 호출마다 그때의 단가로 센 `cost_usd` 가 같이 남는다. 단가표가 나중에 바뀌어도 지난 비용은 안 바뀐다.
 
 ## 성능 benchmark (GACA-179)
 

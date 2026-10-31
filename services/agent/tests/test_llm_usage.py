@@ -60,8 +60,47 @@ def test_record_usage_keeps_counts_not_content(log) -> None:
     assert _rows(log) == [row]
     assert set(row) == {
         "ts", "role", "model", "run_id", "persona_id", "input_tokens", "output_tokens",
-        "reasoning_tokens", "cached_tokens", "latency_ms", "error",
+        "reasoning_tokens", "cached_tokens", "latency_ms", "error", "cost_usd",
     }  # fmt: skip
+    assert row["cost_usd"] is None  # 단가표에 없는 모델은 비용을 비운다
+
+
+def test_record_usage_stores_cost_at_call_time(log) -> None:
+    # 1M 입력 × $0.10 + 1M 출력 × $0.50 (gpt-6-luna, OpenRouter 단가 100만 토큰당)
+    row = record_usage(
+        _resp(1_000_000, 1_000_000, 0), role="persona_step", model="gpt-6-luna", latency_ms=1
+    )
+    assert row["cost_usd"] == pytest.approx(0.60)
+    assert _rows(log)[0]["cost_usd"] == pytest.approx(0.60)
+
+
+def test_report_keeps_cost_recorded_at_call_time(log, monkeypatch) -> None:
+    # 부를 때 단가로 남긴 비용을 리포트가 그대로 쓴다.
+    # 나중에 단가표가 바뀌어도 지난 비용은 안 바뀐다.
+    monkeypatch.setenv("LLM_PRICES", '{"gpt-6-luna": [1, 1, 1]}')
+    record_usage(_resp(1_000_000, 0, 0), role="persona_step", model="gpt-6-luna", latency_ms=1)
+    monkeypatch.delenv("LLM_PRICES")
+    record_usage(_resp(1_000_000, 0, 0), role="persona_step", model="gpt-6-luna", latency_ms=1)
+
+    summary = usage_report.summarize(usage_report.load(log), "model", usage_report.price_table())
+
+    assert summary["total"]["usd"] == pytest.approx(1.00 + 0.10)
+
+
+def test_report_reads_several_logs(tmp_path, monkeypatch, capsys) -> None:
+    # 서버에는 운영 로그와 benchmark 로그가 따로 있다 — 한 번에 묶어 서버 전체 합계를 본다.
+    monkeypatch.delenv("LLM_PRICES", raising=False)
+    paths = [tmp_path / "a.jsonl", tmp_path / "b.jsonl"]
+    for n, path in enumerate(paths, 1):
+        monkeypatch.setenv("LLM_USAGE_LOG", str(path))
+        for _ in range(n):
+            record_usage(
+                _resp(1_000_000, 0, 0), role="persona_step", model="gpt-6-luna", latency_ms=1
+            )
+
+    assert usage_report.main(["--log", *map(str, paths), "--by", "model"]) == 0
+
+    assert "합계: 호출 3 · 실패 0 · 약 $0.3000" in capsys.readouterr().out
 
 
 def test_chat_records_success_and_failure(log) -> None:
