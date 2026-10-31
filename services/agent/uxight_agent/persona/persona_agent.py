@@ -9,9 +9,9 @@ from ..guard.destructive import destructive_reason
 from ..guard.domain import blocked_destination, safe_destination
 from ..schemas import Action
 
-# 가드 모드 (GACA-180). on = 집행(기본값, 운영), shadow = 막을지 판단만 하고 막지 않는다.
-# shadow 는 성능 benchmark(bench.py)에서만 켠다. 운영 Watcher 는 이 값을 넘기지 않는다.
-GuardMode = Literal["on", "shadow"]
+# 가드 켬 · 끔 (GACA-180). on = 집행(기본값, 운영), off = 가드 끔 — 막을지 판단만 기록하고 막지
+# 않는다. off 는 성능 benchmark(bench.py)에서만 쓴다. 운영 Watcher 는 이 값을 넘기지 않는다.
+GuardMode = Literal["on", "off"]
 
 
 @dataclass(frozen=True)
@@ -38,7 +38,7 @@ class StepResult:
     """한 스텝(observe → decide → act)의 기록. AI Orchestrator가 이것을 받아 스텝 로그로 남긴다.
 
     guard_block 은 행동 가드(도메인 · 파괴적 행동)가 이 행동을 막을 때의 차단 결과다 (GACA-180).
-    집행 모드면 result 와 같다. 그림자 모드면 행동은 실행되고, 이 값은 기록으로만 쓴다.
+    집행 모드면 result 와 같다. 가드 끔이면 행동은 실행되고, 이 값은 기록으로만 쓴다.
     step 로그 · 감사 로그에는 쓰지 않는다.
     """
 
@@ -68,7 +68,7 @@ class Decider(ABC):
 class PersonaAgent:
     """Driver를 통해 대상 URL에서 태스크 목표를 수행하는 주체.
 
-    guard 가 "shadow" 면 행동 가드가 막을 행동도 실행하고 차단 결과는 guard_block 에만 남긴다
+    guard 가 "off" 면 행동 가드가 막을 행동도 실행하고 차단 결과는 guard_block 에만 남긴다
     (GACA-180). 그 밖의 값은 모두 집행이다.
     """
 
@@ -86,7 +86,7 @@ class PersonaAgent:
         self._driver = driver
         self._decider = decider
         self._allowed_hosts = allowed_hosts
-        self._shadow = guard == "shadow"
+        self._guard_off = guard == "off"
         self.history: list[StepResult] = []
 
     async def step(self) -> StepResult:
@@ -117,11 +117,11 @@ class PersonaAgent:
             result = ActionResult(ok=False, error=decision.error, error_code=decision.error_code)
         elif (
             guard_block := self._guard_block(decision.action, observation)
-        ) is not None and not self._shadow:
+        ) is not None and not self._guard_off:
             # 가드 차단 — 실행하지 않는다. 페이지는 그대로다.
             result = guard_block
         else:
-            # 그림자 모드는 가드가 막을 행동도 실행한다. 막을 결과는 guard_block 에만 남는다.
+            # 가드 끔은 가드가 막을 행동도 실행한다. 막을 결과는 guard_block 에만 남는다.
             # 요청 단계 도메인 차단 · 새 창 규칙 · 늦은 이동 되돌리기는 드라이버에서 그대로 돈다.
             act_start = time.monotonic()
             result = await self._driver.act(decision.action)
@@ -141,7 +141,7 @@ class PersonaAgent:
     def _guard_block(self, action: Action, observation: Observation) -> ActionResult | None:
         """행동 가드 둘을 차례로 본다. 막을 행동이면 차단 결과, 아니면 None.
 
-        집행 · 그림자 모드가 같은 판단을 쓴다. 그림자 모드는 막지 않을 뿐이다 (GACA-180).
+        집행 · 가드 끔이 같은 판단을 쓴다. 가드 끔은 막지 않을 뿐이다 (GACA-180).
         """
         if destination := blocked_destination(action, observation, self._allowed_hosts):
             # 허용 밖 링크. 막으면 페이지는 그대로다.
