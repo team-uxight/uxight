@@ -75,11 +75,25 @@ class PersonaAgent:
     async def step(self) -> StepResult:
         started_at = datetime.now().astimezone()
         observation = await self._driver.observe()
-        decision = await self._decider.decide(
-            self._persona, self._task, observation, list(self.history)
+        # 관측 전에 주 창이 허용 밖에 와 있어 드라이버가 되돌렸으면(늦은 이동, GACA-224)
+        # LLM 을 부르지 않는다. 이 step 은 차단으로만 남고, 다음 step 이 되돌린 화면을 보고 정한다.
+        # 행동이 없는 step 이라 '행동을 얻지 못한 step' 으로 센다. 세 번 이어지면 Persona 는 fail.
+        decision = (
+            Decision(action=None)
+            if observation.blocked
+            else await self._decider.decide(
+                self._persona, self._task, observation, list(self.history)
+            )
         )
         browser_ms = 0
-        if decision.action is None:
+        if observation.blocked:
+            result = ActionResult(
+                ok=False,
+                error=f"Page moved outside domain policy: {observation.blocked}",
+                error_code="DOMAIN_BLOCKED",
+                destination=observation.blocked,
+            )
+        elif decision.action is None:
             # 행동을 얻지 못한 step 은 브라우저에서 아무것도 하지 않고 기록만 남긴다.
             result = ActionResult(ok=False, error=decision.error, error_code=decision.error_code)
         elif destination := blocked_destination(decision.action, observation, self._allowed_hosts):

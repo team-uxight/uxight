@@ -11,7 +11,12 @@ from sqlalchemy import text
 
 from uxight_agent.db import create_db_engine
 from uxight_agent.driver.base import Observation
-from uxight_agent.driver.dom_driver import NEW_WINDOW_WAIT_MS, DomDriver
+from uxight_agent.driver.dom_driver import (
+    ACTION_TIMEOUT_MS,
+    MAX_LATE_RETURNS,
+    NEW_WINDOW_WAIT_MS,
+    DomDriver,
+)
 from uxight_agent.guard.domain import allowed_hosts, blocked_destination, is_allowed
 from uxight_agent.persona.persona_agent import Decider, Decision, PersonaAgent
 from uxight_agent.repositories import audit_log_repository as audit_module
@@ -317,6 +322,7 @@ def two_sites():
             f"/unrelated/{name}": f"<meta charset='utf-8'><button>stay</button>{html}"
             for name, html in UNRELATED_WINDOW_PAGES.items()
         }
+        | {f"/late/{ms}": LATE_PAGE.replace("{ms}", str(ms)) for ms in LATE_DELAYS_MS}
     )
 
     class Allowed(BaseHTTPRequestHandler):
@@ -477,3 +483,191 @@ def test_window_not_opened_by_action_is_not_followed(two_sites, page: str) -> No
     assert step.result.url_after == url
     # 행동 전부터 있던 창 · iframe 이 연 창 때문에 새 창의 이동을 기다리지 않는다.
     assert step.browser_ms < NEW_WINDOW_WAIT_MS
+
+
+# 늦은 이동 (GACA-224): 'go' 를 누르고 {ms} 뒤 스크립트가 주소를 허용 주소(/redir)로 바꾸고,
+# 그 주소가 302 로 허용 밖에 보낸다. 행동이 끝난 뒤라 행동 안의 3단계 되돌리기에 걸리지 않는다.
+# 'next' 는 다른 허용 페이지로 가는 보통 링크다.
+LATE_PAGE = (
+    "<p>안쪽 글</p><button onclick=\"setTimeout(() => location.href = '/redir', {ms})\">go</button>"
+    "<a href='/late/1200'>next</a>"
+)
+LATE_DELAYS_MS = (800, 1200)
+
+
+class LateClicker(Decider):
+    """'go' 를 누른다. 첫 step 뒤로는 think 초 생각한 뒤 정한다 (LLM 응답 시간)."""
+
+    def __init__(self, think: float) -> None:
+        self.think = think
+        self.calls = 0
+
+    async def decide(self, persona, task, observation, history) -> Decision:
+        self.calls += 1
+        if history:
+            await asyncio.sleep(self.think)
+        return await ClickByText("go").decide(persona, task, observation, history)
+
+
+@pytest.mark.parametrize("delay_ms", LATE_DELAYS_MS)
+@pytest.mark.parametrize("arrives", ["before-observe", "while-deciding"])
+def test_late_navigation_outside_is_returned_and_blocked(
+    two_sites, arrives: str, delay_ms: int
+) -> None:
+    target, ext, hits = two_sites
+    url = f"{target}late/{delay_ms}"
+    wait = delay_ms / 1000 + 0.5  # 늦은 이동이 허용 밖 주소에 닿기까지
+    hits.clear()
+
+    async def run():
+        async with DomDriver(allowed_hosts=allowed_hosts(url, [])) as driver:
+            await driver.start(url)
+            decider = LateClicker(wait if arrives == "while-deciding" else 0)
+            agent = PersonaAgent({"persona_id": 1}, {}, driver, decider, driver._allowed_hosts)
+            clicked = await agent.step()  # 행동은 바로 끝난다. 이동은 delay_ms 뒤에 일어난다
+            if arrives == "before-observe":
+                await asyncio.sleep(wait)
+            late = await agent.step()
+            return clicked, late, await driver.observe(), decider.calls
+
+    clicked, late, after, calls = asyncio.run(run())
+
+    assert clicked.result.ok is True
+    assert clicked.result.url_after == url
+    # 차단으로 남는다 — step 로그 · 감사 로그는 이 결과로 쓴다.
+    assert late.result.error_code == "DOMAIN_BLOCKED"
+    assert late.result.destination == ext
+    # 주 창이 허용 주소로 돌아오고, 허용 밖 페이지의 글은 관측에 들어가지 않는다.
+    assert (late.result.url_after or late.observation.url) == url
+    for observation in (late.observation, after):
+        assert observation.url == url
+        assert "안쪽 글" in observation.text
+        assert "outside" not in observation.text
+    # 늦은 이동 하나는 차단 하나로 남는다. 되돌린 뒤의 관측은 차단이 아니다.
+    assert after.blocked is None
+    # 허용 밖 요청은 늦은 이동이 낸 하나뿐이다. 되돌리기는 허용 밖으로 가지 않는다.
+    assert len(hits) == 1
+    if arrives == "before-observe":
+        # 관측 전에 되돌렸다. LLM 을 부르지 않고 차단만 남긴다.
+        assert late.observation.blocked == ext
+        assert late.action is None
+        assert calls == 1
+    else:
+        # 행동을 정하는 사이 허용 밖으로 갔다. 그 페이지에서는 누르지 않는다.
+        # 누르면 번호 요소를 찾다가 ACTION_TIMEOUT_MS 를 다 쓴다.
+        assert late.action == Action(kind="click", element_id=1)
+        assert late.browser_ms < ACTION_TIMEOUT_MS
+
+
+async def _leave(driver: DomDriver, ext: str) -> None:
+    """늦은 이동을 일으킨다: 행동과 상관없이 주 창이 /redir 로 가고, 302 로 허용 밖에 닿는다."""
+    await driver._page.evaluate("setTimeout(() => location.href = '/redir')")
+    await driver._page.wait_for_url(ext)
+
+
+def test_late_returns_are_capped_per_persona(two_sites) -> None:
+    # 되돌린 페이지가 또 허용 밖으로 보내면 되돌릴 때마다 허용 밖 요청이 는다.
+    # Persona 하나에 MAX_LATE_RETURNS 번까지 되돌리고, 넘으면 관측이 오류를 낸다(Persona 는 fail).
+    target, ext, hits = two_sites
+    hits.clear()
+
+    async def run():
+        async with DomDriver(allowed_hosts=allowed_hosts(target, [])) as driver:
+            await driver.start(target)
+            observations = []
+            for _ in range(MAX_LATE_RETURNS):
+                await _leave(driver, ext)
+                observations.append(await driver.observe())
+            await _leave(driver, ext)
+            with pytest.raises(RuntimeError, match="되돌리지 못했습니다"):
+                await driver.observe()
+            return observations
+
+    observations = asyncio.run(run())
+
+    assert [o.blocked for o in observations] == [ext] * MAX_LATE_RETURNS
+    assert [o.url for o in observations] == [target] * MAX_LATE_RETURNS
+    assert len(hits) == MAX_LATE_RETURNS + 1  # 늦은 이동마다 하나. 넘은 뒤로는 되돌리지 않는다
+
+
+def test_late_return_stops_when_return_address_leaves_too(two_sites) -> None:
+    # 마지막 허용 주소마저 허용 밖으로 리다이렉트한다.
+    # 예: 세션이 끝나면 허용 밖 로그인 페이지로 보내는 사이트.
+    # 되돌리기는 한 번만 해 보고 그만둔다. 관측은 허용 밖 페이지를 보지 않고 오류를 낸다.
+    target, ext, hits = two_sites
+    hits.clear()
+
+    async def run():
+        async with DomDriver(allowed_hosts=allowed_hosts(target, [])) as driver:
+            await driver.start(target)
+            driver._last_allowed_url = f"{target}redir"
+            await _leave(driver, ext)
+            for _ in range(2):
+                with pytest.raises(RuntimeError, match="되돌리지 못했습니다"):
+                    await driver.observe()
+            return driver._page.url
+
+    url = asyncio.run(run())
+
+    assert url == ext
+    assert len(hits) == 2  # 늦은 이동 하나 + 되돌려 본 것 하나
+
+
+def test_return_address_is_last_allowed_page(two_sites) -> None:
+    # 되돌릴 곳은 마지막으로 허용 안에서 본 주소다. 관측 · 행동이 끝날 때마다 바뀐다.
+    target, ext, _ = two_sites
+    url = f"{target}late/800"
+
+    async def run():
+        async with DomDriver(allowed_hosts=allowed_hosts(url, [])) as driver:
+            await driver.start(url)
+            returned = []
+            # 행동: 관측한 뒤 'next' 를 눌러 /late/1200 으로 가고, 다음 관측 전에 늦은 이동
+            agent = PersonaAgent(
+                {"persona_id": 1}, {}, driver, ClickByText("next"), driver._allowed_hosts
+            )
+            await agent.step()
+            await _leave(driver, ext)
+            returned.append(await driver.observe())
+            # 관측: 페이지가 행동 없이 다른 허용 페이지로 간 것을 관측한 뒤 늦은 이동
+            await driver._page.goto(f"{target}inside")
+            await driver.observe()
+            await _leave(driver, ext)
+            returned.append(await driver.observe())
+            return returned
+
+    returned = asyncio.run(run())
+
+    assert [o.blocked for o in returned] == [ext, ext]
+    assert [o.url for o in returned] == [f"{target}late/1200", f"{target}inside"]
+
+
+def test_page_leaving_while_observed_is_returned(two_sites) -> None:
+    # 요소를 모은 뒤 주 창이 허용 밖으로 간다. 그 뒤에 읽은 제목 · 주소는 허용 밖 페이지의 것이다.
+    # 모은 것을 모두 버리고, 되돌린 뒤 다시 모은다.
+    target, ext, hits = two_sites
+    hits.clear()
+
+    async def run():
+        async with DomDriver(allowed_hosts=allowed_hosts(target, [])) as driver:
+            await driver.start(target)
+            real_collect = driver._collect_elements
+            calls = 0
+
+            async def collect_then_leave(page) -> dict:
+                nonlocal calls
+                calls += 1
+                collected = await real_collect(page)
+                if calls == 1:
+                    await _leave(driver, ext)
+                return collected
+
+            driver._collect_elements = collect_then_leave
+            return await driver.observe(), calls
+
+    observation, calls = asyncio.run(run())
+
+    assert calls == 2
+    assert observation.blocked == ext
+    assert observation.url == target
+    assert len(hits) == 1

@@ -28,6 +28,9 @@ class Observation:
     글이 있는 표 칸 · 문단 안에 번호 요소가 있으면 글 뒤에 그 요소 번호가 ' [n]' 으로 붙는다
     (GACA-222).
     링크 요소의 url 은 브라우저가 풀어 쓴 목적지다 — 도메인 가드가 이것으로 막는다.
+    blocked 는 관측 전에 드라이버가 되돌린 허용 밖 주소다(쿼리 뺌, 200자 안).
+    행동이 끝난 뒤 주 창이 늦게 허용 밖으로 갔다 (GACA-224). 관측은 되돌린 화면이고,
+    허용 밖 페이지의 글은 들어 있지 않다.
     screenshot은 입력칸을 가린 화면 PNG 바이트다. SoM 방식은 번호 박스를 그린 그림(모델 입력),
     DOM 방식은 step 로그용 그림이다. 가린 그림을 얻지 못하면 None이다 — 그 step은 글 관측(dom)만
     으로 진행하고 로그의 screenshot 은 null 이다.
@@ -38,6 +41,7 @@ class Observation:
     dom: str
     text: str = ""
     element_map: dict[int, dict] = field(default_factory=dict)
+    blocked: str | None = None
     screenshot: bytes | None = field(default=None, repr=False)
 
 
