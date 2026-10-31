@@ -44,14 +44,14 @@ STEP_REPLY_FORMAT = type_to_response_format_param(StepReply)
 class LLMDecider(Decider):
     """LLMClient 를 주입받는다 — 테스트는 가짜 클라이언트를 넣는다. run_id 는 사용량 기록용.
 
-    guard 가 "shadow" 면 페이지 글에 지시문 표시를 붙이지 않는다 (GACA-180, bench 만).
+    guard 가 "off" 면 페이지 글에 지시문 표시를 붙이지 않는다 (GACA-180, bench 만).
     그 밖의 값은 모두 표시한다.
     """
 
     def __init__(self, llm: LLMClient, run_id: int | None = None, guard: GuardMode = "on") -> None:
         self._llm = llm
         self._run_id = run_id
-        self._mark = guard != "shadow"
+        self._mark = guard != "off"
 
     async def decide(
         self, persona: dict, task: dict, observation: Observation, history: list[StepResult]

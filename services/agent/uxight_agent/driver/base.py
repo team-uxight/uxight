@@ -60,23 +60,24 @@ class Driver(ABC):
     mode = "dom"
 
     def __init__(
-        self, allowed_hosts: frozenset[str] = frozenset(), strict_requests: bool = False
+        self, allowed_hosts: frozenset[str] = frozenset(), block_outside_subrequests: bool = False
     ) -> None:
         # 허용 도메인('호스트:포트', guard.domain). 드라이버는 이 밖으로 이동하지 않는다.
         # start(url) 의 주소는 늘 허용이다.
         self._allowed_hosts = allowed_hosts
-        # 엄격 요청 차단 (bench 전용, GACA-180). 켜면 브라우저가 허용 밖으로 연결하지 않는다.
+        # 허용 밖 하위 요청 차단 (bench 전용, GACA-180).
+        # 켜면 브라우저가 허용 밖으로 연결하지 않는다.
         # route 에서 하위 요청 · iframe 이동을 끊고, route 를 거치지 않는 연결(worker · 떠날 때의
         # beacon · 추측 prefetch · WebRTC · QUIC)은 브라우저 설정으로 막는다 (DomDriver).
         # 운영 Watcher 는 켜지 않는다.
-        self._strict_requests = strict_requests
+        self._block_outside_subrequests = block_outside_subrequests
         # 요청 단계에서 끊은 허용 밖 이동 요청 수 (guard.domain 2단계).
         # 성능 benchmark 가 가드 조건마다 센다 (GACA-180). 운영은 읽지 않는다.
         self.blocked_requests = 0
-        # 엄격 요청 차단이 route 에서 끊은 허용 밖 하위 요청 · iframe 이동과 가짜로 받은 허용 밖
+        # 허용 밖 하위 요청 차단이 route 에서 끊은 하위 요청 · iframe 이동과 가짜로 받은 허용 밖
         # WebSocket 수. 위와 따로 센다 — 이것으로는 행동이 차단이 되지 않는다.
         # 브라우저 설정(프록시)이 막은 연결은 드라이버가 보지 못해 세지 않는다.
-        self.blocked_subrequests = 0
+        self.blocked_outside_subrequests = 0
 
     @abstractmethod
     async def start(self, url: str) -> None:

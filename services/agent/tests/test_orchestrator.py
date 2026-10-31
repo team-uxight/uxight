@@ -1260,11 +1260,11 @@ def test_cancel_stops_last_screen_quickly(
     assert free_global_slots() == 3
 
 
-def test_watcher_enforces_guards_whatever_policy_or_env(
+def test_watcher_keeps_guards_on_whatever_policy_or_env(
     fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # 가드 그림자 모드(GACA-180)는 성능 benchmark 에서만 켠다. 정책 · env 에 그림자 값을 넣어도
-    # 운영 Watcher 는 집행 모드로 PersonaAgent 를 만들고, 막을 행동은 막고 감사 로그에 남긴다.
+    # 가드 끔(GACA-180)은 성능 benchmark 에서만 켠다. 정책 · env 에 가드 끔 값을 넣어도
+    # 운영 Watcher 는 가드 켬으로 PersonaAgent 를 만들고, 막을 행동은 막고 감사 로그에 남긴다.
     acted: list[Action] = []
     modes: list[str] = []
     real_agent = orchestrator_module.PersonaAgent
@@ -1295,14 +1295,14 @@ def test_watcher_enforces_guards_whatever_policy_or_env(
     monkeypatch.setattr(orchestrator_module, "DomDriver", ButtonPageDriver)
     monkeypatch.setattr(orchestrator_module, "PersonaAgent", recording_agent)
     for name in ("GUARD", "GUARD_MODE", "AGENT_GUARD"):
-        monkeypatch.setenv(name, "shadow")
+        monkeypatch.setenv(name, "off")
     use_decider(
         monkeypatch,
         ScriptedDecider(
             Decision(Action(kind="click", element_id=1)), Decision(Action(kind="done"))
         ),
     )
-    snap = snapshot([persona(1)], max_steps=5, guard="shadow", guard_mode="shadow")
+    snap = snapshot([persona(1)], max_steps=5, guard="off", guard_mode="off")
 
     asyncio.run(run(fakes, RUN_ID, snap))
 
@@ -1317,10 +1317,10 @@ def test_watcher_enforces_guards_whatever_policy_or_env(
 def test_watcher_decider_marks_page_instructions(
     monkeypatch: pytest.MonkeyPatch, scripted_llm
 ) -> None:
-    # 운영 판단기는 페이지 글에 지시문 표시를 붙인다 — 그림자 모드(표시 없음)는 bench 에서만 켠다.
-    # env 에 그림자 값을 넣어도 실제 make_decider 경로는 집행이다.
+    # 운영 판단기는 페이지 글에 지시문 표시를 붙인다 — 가드 끔(표시 없음)은 bench 에서만 켠다.
+    # env 에 가드 끔 값을 넣어도 실제 make_decider 경로는 가드 켬이다.
     for name in ("GUARD", "GUARD_MODE", "AGENT_GUARD"):
-        monkeypatch.setenv(name, "shadow")
+        monkeypatch.setenv(name, "off")
     done = '{"reasoning": "끝", "action": {"kind": "done", "element_id": null, "value": null}}'
     llm, requests = scripted_llm(done)
     monkeypatch.setattr(orchestrator_module, "_llm", llm)

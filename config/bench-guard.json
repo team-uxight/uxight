@@ -1,5 +1,5 @@
 {
-  "name": "학교 사본 — 가드 집행 vs 그림자 (원본 · 지시문 페이지 사본)",
+  "name": "학교 사본 — 가드 켬 vs 끔 (원본 · 프롬프트 인젝션 시험 사본)",
   "personas_file": "school_personas_50.json",
   "personas": ["P001", "P016", "P031"],
   "tasks": [
@@ -25,7 +25,7 @@
   ],
   "variants": {
     "guard_on": {},
-    "guard_shadow": { "guard": "shadow" }
+    "guard_off": { "guard": "off" }
   },
   "repeat": 1,
   "concurrency": 3,

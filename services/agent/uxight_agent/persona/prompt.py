@@ -52,7 +52,7 @@ def build_messages(
     """step 한 번의 프롬프트(system · user 메시지 두 개)를 만든다.
 
     history 는 지난 StepResult 목록이다. 최근 HISTORY_STEPS 개의 행동과 결과만 넣는다.
-    mark=False 면 페이지 글에 지시문 표시를 붙이지 않는다 — 가드 그림자 모드(GACA-180, bench 만).
+    mark=False 면 페이지 글에 지시문 표시를 붙이지 않는다 — 가드 끔(GACA-180, bench 만).
     페이지 글의 [[ · ]] 는 그때도 하나로 줄인다. 시스템 지시는 그대로다.
     """
     sections = [
@@ -121,7 +121,7 @@ def _history_text(history: list) -> str:
 def instruction_marks(observation: Observation) -> tuple[int, list[str]]:
     """프롬프트 페이지 글에 붙일 지시문 표시의 조각 수와 걸린 패턴 이름 (GACA-180).
 
-    그림자 모드는 표시를 붙이지 않고 이 값만 기록한다. 페이지 글의 [[ 는 하나로 줄어
+    가드 끔은 표시를 붙이지 않고 이 값만 기록한다. 페이지 글의 [[ 는 하나로 줄어
     표시와 섞이지 않으므로, 표시 시작 글자(MARK_START)가 나온 횟수가 조각 수다.
     """
     marked, hits = mark_instructions(_page_data(observation))

@@ -27,10 +27,11 @@ NEW_WINDOW_WAIT_MS = 1_000
 # 되돌린 페이지가 또 허용 밖으로 보내면 되돌릴 때마다 허용 밖 요청이 한 번씩 늘고 step 만 쓴다.
 # 넘으면 관측이 오류를 내 Persona 를 끝낸다.
 MAX_LATE_RETURNS = 3
-# 엄격 요청 차단의 닫힌 프록시 (bench 전용, GACA-180). 아무도 듣지 않는 포트라 연결이 바로 실패한다.
+# 허용 밖 하위 요청 차단의 막힌 프록시 (bench 전용, GACA-180).
+# 아무도 듣지 않는 포트라 연결이 바로 실패한다.
 DEAD_PROXY = "http://127.0.0.1:9"
-# 엄격 요청 차단이 끄는 연결 — 프록시를 거치지 않는 WebRTC 의 UDP 와 QUIC.
-STRICT_BROWSER_ARGS = (
+# 허용 밖 하위 요청 차단이 끄는 연결 — 프록시를 거치지 않는 WebRTC 의 UDP 와 QUIC.
+BROWSER_BLOCK_ARGS = (
     "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
     "--disable-quic",
 )
@@ -200,7 +201,7 @@ _COLLECT_ELEMENTS_JS = """
   // 읽어야 한다. 화면 아래 글은 사람처럼 스크롤해야 보인다 (PM 결정 10/30).
   // - 번호를 붙인 요소 안의 글은 요소 줄에 이미 있어 뺀다. 페이지마다 되풀이되는 메뉴 · 바닥 링크가
   //   거의 다 링크라 이것으로 빠진다. textarea 글은 입력값이라 뺀다.
-  // - 보이는지는 요소 글보다 엄격하게 본다. 아래를 모두 지켜야 한다.
+  // - 보이는지는 요소 글보다 까다롭게 본다. 아래를 모두 지켜야 한다.
   //   1) 감싼 요소가 보인다(visibilityOf).
   //   2) 글 조각의 사각형(Range)이 화면 안이고, overflow hidden · clip 조상의 상자와 겹친다.
   //   3) 글자색이 투명하지 않다.
@@ -412,9 +413,9 @@ class DomDriver(Driver):
         self,
         headless: bool = True,
         allowed_hosts: frozenset[str] = frozenset(),
-        strict_requests: bool = False,
+        block_outside_subrequests: bool = False,
     ) -> None:
-        super().__init__(allowed_hosts, strict_requests)
+        super().__init__(allowed_hosts, block_outside_subrequests)
         self._blocked_url: str | None = None  # 이번 행동 중 끊은 이동의 목적지
         # 이번 행동의 새 창 · 이동 요청 (GACA-225). act() 가 행동마다 비운다.
         # - _page_opened_window: 행동 전에 주 창이 스스로 창을 열었다 — 새 창을 따르지 않는다
@@ -447,7 +448,7 @@ class DomDriver(Driver):
         self._left_url: str | None = None
 
     async def start(self, url: str) -> None:
-        # 허용 호스트는 브라우저를 띄우기 전에 정한다 — 엄격 요청 차단의 프록시 예외가 쓴다.
+        # 허용 호스트는 브라우저를 띄우기 전에 정한다 — 허용 밖 하위 요청 차단의 프록시 예외가 쓴다.
         start_host = host_key(url)
         if start_host:
             self._allowed_hosts = self._allowed_hosts | {start_host}
@@ -455,9 +456,9 @@ class DomDriver(Driver):
         self._browser = await self._playwright.chromium.launch(
             headless=self._headless, **self._launch_options()
         )
-        # 엄격 요청 차단은 service worker 를 막는다.
+        # 허용 밖 하위 요청 차단은 service worker 를 막는다.
         # 그 fetch 처리기가 답한 요청은 route 에 오지 않는다.
-        options = {"service_workers": "block"} if self._strict_requests else {}
+        options = {"service_workers": "block"} if self._block_outside_subrequests else {}
         self._page = await self._browser.new_page(**options)
         session = await self._page.context.new_cdp_session(self._page)
         target = (await session.send("Target.getTargetInfo"))["targetInfo"]
@@ -466,7 +467,7 @@ class DomDriver(Driver):
         self._cdp = await self._browser.new_browser_cdp_session()
         # 새 창(target=_blank)도 같은 context 라 함께 막힌다.
         await self._page.context.route("**/*", self._guard_navigation)
-        if self._strict_requests:
+        if self._block_outside_subrequests:
             # 페이지의 WebSocket 은 route 를 거치지 않는다. 허용 밖 주소는 가짜로 받아 서버에 붙지
             # 않게 한다. 첫 이동 전에 건다 — 뒤에 걸면 그 전에 연 문서의 연결은 샌다.
             await self._page.context.route_web_socket(
@@ -476,20 +477,20 @@ class DomDriver(Driver):
         self._remember(url)
 
     def _launch_options(self) -> dict:
-        """브라우저 실행 설정. 엄격 요청 차단(bench 전용, GACA-180)이 아니면 비어 있다.
+        """브라우저 실행 설정. 허용 밖 하위 요청 차단(bench 전용, GACA-180)이 아니면 비어 있다.
 
         route 를 거치지 않는 연결도 막는다 — worker · service worker 안의 요청, 페이지를 떠날 때의
-        beacon · keepalive fetch, 추측 prefetch · prerender. 허용 호스트:포트 말고는 모두 닫힌
+        beacon · keepalive fetch, 추측 prefetch · prerender. 허용 호스트:포트 말고는 모두 막힌
         프록시로 보내 연결이 실패하게 한다. '<-loopback>' 은 루프백 주소를 프록시 없이 잇는
         Chromium 기본값을 끈다. 사본과 같은 127.0.0.1 의 다른 포트도 막아야 해서다.
         WebRTC 의 UDP 와 QUIC(WebTransport · HTTP/3)는 프록시를 거치지 않아 끈다.
         """
-        if not self._strict_requests:
+        if not self._block_outside_subrequests:
             return {}
         bypass = ["<-loopback>", *filter(None, map(_bypass_entry, sorted(self._allowed_hosts)))]
         return {
             "proxy": {"server": DEAD_PROXY, "bypass": ",".join(bypass)},
-            "args": list(STRICT_BROWSER_ARGS),
+            "args": list(BROWSER_BLOCK_ARGS),
         }
 
     def _outside_web_socket(self, url: str) -> bool:
@@ -497,8 +498,11 @@ class DomDriver(Driver):
         return not is_allowed(re.sub(r"^ws", "http", url, flags=re.IGNORECASE), self._allowed_hosts)
 
     def _block_web_socket(self, ws) -> None:
-        """엄격 요청 차단: 허용 밖 WebSocket 을 서버에 잇지 않는다(connect_to_server 를 안 부름)."""
-        self.blocked_subrequests += 1
+        """허용 밖 하위 요청 차단: 허용 밖 WebSocket 을 서버에 잇지 않는다.
+
+        connect_to_server 를 안 부른다.
+        """
+        self.blocked_outside_subrequests += 1
 
     async def _guard_navigation(self, route) -> None:
         """허용 밖으로 가는 top-level 이동 요청을 끊는다 (guard.domain 2단계).
@@ -513,12 +517,12 @@ class DomDriver(Driver):
         이 처리기는 예외를 내면 안 된다. 낸 예외는 Playwright 가 다음 API 호출(관측의 page.evaluate
         등)에서 대신 던지고, 그 요청은 이어지지도 끊기지도 않은 채 멈춘다 (GACA-223).
         그래서 판정하지 못한 이동은 끊고, 끊기 · 잇기에서 난 오류는 밖으로 내지 않는다.
-        엄격 요청 차단(bench 전용, GACA-180)을 켜면 위에서 그냥 두는 허용 밖 하위 요청과 iframe
-        이동도 끊는다. 이것은 blocked_subrequests 로 따로 세고 _blocked_url 은 그대로 둔다.
+        허용 밖 하위 요청 차단(bench 전용, GACA-180)을 켜면 위에서 그냥 두는 하위 요청과 iframe
+        이동도 끊는다. 이것은 blocked_outside_subrequests 로 따로 세고 _blocked_url 은 그대로 둔다.
         페이지가 밖으로 보내는 분석용 이미지 하나로 행동이 차단이 되지 않게 하려는 것이다.
         """
         request = route.request
-        block = outside = strict = False
+        block = outside = subrequest = False
         try:
             if request.is_navigation_request():
                 outside = not is_allowed(request.url, self._allowed_hosts)
@@ -539,23 +543,23 @@ class DomDriver(Driver):
                     elif self._new_window_url is None and not outside and request.method == "GET":
                         self._new_window_url = request.url
                     self._navigated.set()
-            # 엄격 요청 차단: 위에서 그냥 두는 허용 밖 요청(하위 요청 · iframe 이동)도 끊는다.
+            # 허용 밖 하위 요청 차단: 위에서 그냥 두는 요청(하위 요청 · iframe 이동)도 끊는다.
             if (
-                self._strict_requests
+                self._block_outside_subrequests
                 and not block
                 and not is_allowed(request.url, self._allowed_hosts)
             ):
-                block = strict = True
+                block = subrequest = True
         except Exception:
             block = True
         try:
             if block:
-                if strict:
-                    self.blocked_subrequests += 1
+                if subrequest:
+                    self.blocked_outside_subrequests += 1
                 elif outside:
                     self._blocked_url = request.url
                     self.blocked_requests += 1
-                await route.abort("blockedbyclient" if strict else "aborted")
+                await route.abort("blockedbyclient" if subrequest else "aborted")
             else:
                 await route.continue_()
         except PlaywrightError:
