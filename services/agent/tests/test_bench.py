@@ -4,6 +4,7 @@ Persona 실행이 끝나는 길(시간 상한 · 토큰 상한 · 실행 오류 
 """
 
 import asyncio
+import concurrent.futures
 import csv
 import dataclasses
 import functools
@@ -473,6 +474,27 @@ def test_serve_reads_post_body_before_answering(tmp_path: Path) -> None:
             sock.settimeout(5)
             sock.sendall(b"a=1")
             assert sock.recv(1024).startswith(b"HTTP/1.0 200")
+
+
+def test_serve_takes_a_burst_of_connections(tmp_path: Path) -> None:
+    # 브라우저는 페이지 하나를 열며 연결을 한꺼번에 연다. 서버의 연결 대기 줄이 기본값(5)이면
+    # Mac 에서는 넘친 연결이 끊겨 사본의 스크립트 · 그림이 무작위로 빠진다. 학교 사본 홈의 요청 수가
+    # 실행마다 114~202개로 흔들렸다 (GACA-180).
+    (tmp_path / "a.txt").write_text("ok", encoding="utf-8")
+
+    def get(address: tuple) -> bool:
+        try:
+            with socket.create_connection(address, timeout=5) as sock:
+                sock.sendall(b"GET /a.txt HTTP/1.1\r\nHost: x\r\n\r\n")
+                return sock.recv(64).startswith(b"HTTP/1.0 200")
+        except OSError:
+            return False
+
+    with bench.serve(tmp_path) as base:
+        address = (urlsplit(base).hostname, urlsplit(base).port)
+        with concurrent.futures.ThreadPoolExecutor(64) as pool:
+            answered = list(pool.map(get, [address] * 64))
+    assert answered.count(True) == 64
 
 
 def test_persona_file_becomes_snapshot_shape() -> None:
