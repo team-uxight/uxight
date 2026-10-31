@@ -17,7 +17,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from ..driver.base import Observation
 from ..llm import LLMClient
 from ..schemas import Action
-from .persona_agent import Decider, Decision, StepResult
+from .persona_agent import Decider, Decision, GuardMode, StepResult
 from .prompt import build_messages
 
 STEP_ROLE = "persona_step"
@@ -42,16 +42,21 @@ STEP_REPLY_FORMAT = type_to_response_format_param(StepReply)
 
 
 class LLMDecider(Decider):
-    """LLMClient 를 주입받는다 — 테스트는 가짜 클라이언트를 넣는다. run_id 는 사용량 기록용."""
+    """LLMClient 를 주입받는다 — 테스트는 가짜 클라이언트를 넣는다. run_id 는 사용량 기록용.
 
-    def __init__(self, llm: LLMClient, run_id: int | None = None) -> None:
+    guard 가 "shadow" 면 페이지 글에 지시문 표시를 붙이지 않는다 (GACA-180, bench 만).
+    그 밖의 값은 모두 표시한다.
+    """
+
+    def __init__(self, llm: LLMClient, run_id: int | None = None, guard: GuardMode = "on") -> None:
         self._llm = llm
         self._run_id = run_id
+        self._mark = guard != "shadow"
 
     async def decide(
         self, persona: dict, task: dict, observation: Observation, history: list[StepResult]
     ) -> Decision:
-        messages = build_messages(persona, task, observation, history)
+        messages = build_messages(persona, task, observation, history, mark=self._mark)
         start = time.monotonic()
         try:
             # response_format 을 본문에 직접 실어 create() 로 부른다 — parse() 처럼 SDK 가
