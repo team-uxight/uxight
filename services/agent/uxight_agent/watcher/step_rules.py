@@ -63,18 +63,10 @@ def to_step_log(
 
     # 행동 후 URL이 확인되지 않으면 목표 도달 여부를 확정하지 않는다.
     # 행동이 실행되지 않은 경우에는 관측한 현재 URL을 사용한다.
-    action_not_executed = (
-        step.action is None
-        or (
-            step.guard_block is not None
-            and step.guard_block is step.result
-        )
+    action_not_executed = step.action is None or (
+        step.guard_block is not None and step.guard_block is step.result
     )
-    reached_url = (
-        step.result.url_after
-        if not action_not_executed
-        else step.observation.url
-    )
+    reached_url = step.result.url_after if not action_not_executed else step.observation.url
     return {
         "run_id": run_id,
         "persona_id": persona_id,

@@ -4,24 +4,33 @@ from uxight_agent.watcher.step_rules import same_url
 
 
 def test_success_url_reached():
-    assert same_url(
-        "https://example.com/goal",
-        "https://example.com/goal",
-    ) is True
+    assert (
+        same_url(
+            "https://example.com/goal",
+            "https://example.com/goal",
+        )
+        is True
+    )
 
 
 def test_success_url_not_reached():
-    assert same_url(
-        "https://example.com/other",
-        "https://example.com/goal",
-    ) is False
+    assert (
+        same_url(
+            "https://example.com/other",
+            "https://example.com/goal",
+        )
+        is False
+    )
 
 
 def test_url_fragment_and_trailing_slash():
-    assert same_url(
-        "https://example.com/goal/#section",
-        "https://example.com/goal",
-    ) is True
+    assert (
+        same_url(
+            "https://example.com/goal/#section",
+            "https://example.com/goal",
+        )
+        is True
+    )
 
 
 def test_unknown_url_after_action_is_null():
