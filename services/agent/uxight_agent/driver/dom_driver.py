@@ -480,7 +480,7 @@ class DomDriver(Driver):
         """브라우저 실행 설정. 허용 밖 하위 요청 차단(bench 전용, GACA-180)이 아니면 비어 있다.
 
         route 를 거치지 않는 연결도 막는다 — worker · service worker 안의 요청, 페이지를 떠날 때의
-        beacon · keepalive fetch, 추측 prefetch · prerender. 허용 호스트:포트 말고는 모두 닫힌
+        beacon · keepalive fetch, 추측 prefetch · prerender. 허용 호스트:포트 말고는 모두 막힌
         프록시로 보내 연결이 실패하게 한다. '<-loopback>' 은 루프백 주소를 프록시 없이 잇는
         Chromium 기본값을 끈다. 사본과 같은 127.0.0.1 의 다른 포트도 막아야 해서다.
         WebRTC 의 UDP 와 QUIC(WebTransport · HTTP/3)는 프록시를 거치지 않아 끈다.
