@@ -60,6 +60,13 @@ def to_step_log(
         error_code = "BROWSER_ACTION_FAILED"  # 드라이버가 따로 나누지 않은 브라우저 실패
     url_after = step.result.url_after or step.observation.url
     success_url = task.get("success_url")
+
+    # 행동 후 URL이 확인되지 않으면 목표 도달 여부를 확정하지 않는다.
+    # 행동이 실행되지 않은 경우에는 관측한 현재 URL을 사용한다.
+    action_not_executed = step.action is None or (
+        step.guard_block is not None and step.guard_block is step.result
+    )
+    reached_url = step.result.url_after if not action_not_executed else step.observation.url
     return {
         "run_id": run_id,
         "persona_id": persona_id,
@@ -85,7 +92,13 @@ def to_step_log(
         "latency_ms": {"llm": decision.llm_ms, "browser": step.browser_ms},
         "tokens": {"prompt": decision.prompt_tokens, "completion": decision.completion_tokens},
         "model": decision.model,
-        "task": {"url_reached": same_url(url_after, success_url) if success_url else None},
+        "task": {
+            "url_reached": (
+                same_url(reached_url, success_url)
+                if reached_url is not None and success_url
+                else None
+            )
+        },
     }
 
 
