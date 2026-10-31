@@ -11,6 +11,8 @@ import re
 import unicodedata
 from pathlib import Path
 
+from playwright.async_api import Error as PlaywrightError
+
 from uxight_agent.driver import dom_driver
 from uxight_agent.driver.base import Observation
 from uxight_agent.driver.dom_driver import DomDriver
@@ -22,8 +24,9 @@ FIXTURES = Path(__file__).parent / "fixtures"
 PERSONA = {"persona_id": 1, "name": "계층 우선-desktop-01", "profile": {}}
 TASK = {"task_id": 9, "goal": "26학번 졸업 이수학점 기준을 찾는다"}
 BODY_LABEL = "본문 (지금 화면에 보이는 글):"
-# 학번 표는 학교 사본 그대로라 칸에 링크가 없어 요소 번호도 없다.
-# 사본은 칸을 누르면 스크립트가 새 창을 연다.
+# 학번 표 칸에는 링크가 없다. 사본은 칸에 손가락 커서를 주고 스크립트로 클릭을 받는다.
+# 그래서 사본에서는 칸에 번호가 붙지만(GACA-225, pointer_cells.html), 이 fixture 에는 그 스타일이
+# 없어 칸이 글로 남는다.
 TABLE_ROW = "23학번 (별표29) | 24학번 (별표30) | 25학번 (별표31) | 26학번 (별표32)"
 SCROLL_DOWN = Action(kind="scroll", value="down")
 
@@ -138,6 +141,34 @@ def test_cell_numbers_reach_prompt() -> None:
     assert '[2] <a href="/kor/12490/subview.do"> "보기"' in lines
 
 
+def test_pointer_cells_get_element_numbers() -> None:
+    obs = observe("pointer_cells.html")
+    pointer = [item for item in obs.element_map.values() if item.get("pointer")]
+
+    # 링크 · 버튼이 아닌데 손가락 커서인 칸은 스크립트가 클릭을 받는다 (GACA-225).
+    # 링크 · 버튼 · 입력칸 번호는 그대로 두고 그 뒤에 번호를 붙인다.
+    assert [(item["id"], item["tag"], item["text"]) for item in pointer] == [
+        (4, "td", "25학번 (별표31)"),
+        (5, "td", "26학번 (별표32)"),
+        (6, "div", "구매하기"),
+        (7, "div", "바깥 칸 안쪽 글"),  # 가장 바깥 요소만
+        (8, "div", "✕"),
+    ]
+    assert '[5] <td> "26학번 (별표32)"' in obs.dom.splitlines()
+    # 빠지는 것: 안에 번호 요소가 있는 칸(KOR 버튼) · 번호가 붙은 입력칸의 라벨 · 링크 안 글 ·
+    # 글이 100자보다 긴 상자 · 글 없이 aria-label 만 있는 칸 · 숨기거나 투명한 칸.
+    # 칸은 보여도 글이 안 보이는 칸(투명한 글자색 · overflow 로 잘림 · text-indent ·
+    # clip-path)도 빠진다. 글은 본문 글과 같은 기준으로 본다.
+    assert len(obs.element_map) == 8
+    # 번호가 붙은 칸의 글은 요소 줄에만 있다.
+    # 번호를 붙이지 않은 큰 상자 · 라벨의 글은 본문에 남는다. 안 보이는 글은 본문에도 없다.
+    assert "26학번" not in obs.text
+    assert "긴 글 칸." in obs.text
+    assert "약관 동의" in obs.text
+    for hidden in ("글자색이 투명한", "잘려서", "밀어낸", "clip-path"):
+        assert hidden not in obs.dom + obs.text
+
+
 def test_menu_text_stays_in_element_lines() -> None:
     obs = observe("body_text.html")
 
@@ -176,6 +207,30 @@ def test_br_lines_follow_scroll() -> None:
     first = scrolled.text.splitlines()[0]
     assert int(first.split("번째")[0]) > 100
     assert "1번째 줄" not in scrolled.text.splitlines()
+
+
+def test_observation_retries_when_page_opens_window_meanwhile() -> None:
+    # 페이지 스크립트가 새 창을 여는 순간에 관측이 끼면 TreeWalker 의 거르개를 부르지 못해
+    # 실패한다 (GACA-225: 새 창을 거듭 여는 페이지에서 400번 중 2번쯤). 한 번 더 시도한다.
+    class OpeningWindowPage:
+        calls = 0
+
+        async def wait_for_load_state(self, *args, **kwargs) -> None:
+            pass
+
+        async def evaluate(self, *args, **kwargs) -> dict:
+            self.calls += 1
+            if self.calls == 1:
+                raise PlaywrightError(
+                    "Page.evaluate: Error: Failed to execute 'nextNode' on 'TreeWalker': "
+                    "The provided callback is no longer runnable."
+                )
+            return {"items": [], "text": "본문"}
+
+    page = OpeningWindowPage()
+
+    assert asyncio.run(DomDriver()._collect_elements(page)) == {"items": [], "text": "본문"}
+    assert page.calls == 2
 
 
 def test_body_text_is_capped(monkeypatch) -> None:
