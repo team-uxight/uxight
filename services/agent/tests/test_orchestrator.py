@@ -434,8 +434,16 @@ def test_cancel_during_browser_start_closes_once(fakes: SimpleNamespace) -> None
         ({1: "fail", 2: "fail"}, "failed", "실패한 페르소나: 1(fail), 2(fail)"),
         ({1: "timeout", 2: "timeout"}, "done", None),
         ({1: "done", 2: "fail", 3: "cancelled"}, "cancelled", None),
+        ({1: "token_limit", 2: "stuck"}, "done", None),  # 종료 이유 두 값도 회차 실패가 아니다
     ],
-    ids=["some-timeout", "done-and-fail", "all-fail", "all-timeout", "with-cancelled"],
+    ids=[
+        "some-timeout",
+        "done-and-fail",
+        "all-fail",
+        "all-timeout",
+        "with-cancelled",
+        "token-limit-and-stuck",
+    ],
 )
 def test_run_status_from_persona_statuses(
     fakes: SimpleNamespace,
@@ -791,7 +799,8 @@ def test_run_token_cap_ends_personas_with_reason(
 
     assert fakes.personas.steps[1] == 3
     assert fakes.personas.tokens[1] == 300
-    assert fakes.personas.statuses == {1: "max_steps"}
+    assert fakes.personas.statuses == {1: "token_limit"}  # step 상한(max_steps)과 가른다
+    assert fakes.runs.status == "done"
     ((_, persona_id, detail),) = fakes.audits.limits
     assert persona_id == 1
     assert detail == {"persona_id": 1, "step": 4, "reason": "max_tokens", "limit": 250, "used": 300}
@@ -970,7 +979,8 @@ def test_daily_budget_spent_stops_before_llm_call(fakes: SimpleNamespace) -> Non
     asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)], max_steps=10)))
 
     assert fakes.personas.steps.get(1, 0) == 0
-    assert fakes.personas.statuses == {1: "max_steps"}
+    # 하루 예산도 토큰 상한이라 token_limit 이다. 어느 쪽인지는 감사 로그의 reason 이 가른다.
+    assert fakes.personas.statuses == {1: "token_limit"}
     assert fakes.audits.limits[0][2]["reason"] == "daily_token_budget"
 
 
@@ -1098,7 +1108,7 @@ def test_token_limits_save_screen_after_last_action(
 
     asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)], max_steps=10, **policy)))
 
-    assert fakes.personas.statuses == {1: "max_steps"}
+    assert fakes.personas.statuses == {1: "token_limit"}
     assert fakes.audits.limits[0][2]["step"] == 4
     assert saved_files(fakes) == [f"step-{n}.png" for n in (1, 2, 3, 4)] + ["steps.jsonl"]
     assert screens(fakes, 4)[-1] == b"after-3"
@@ -1266,6 +1276,129 @@ def test_cancel_stops_last_screen_quickly(
     assert fakes.runs.status == "done"
     assert saved_files(fakes) == ["step-1.png", "step-2.png", "steps.jsonl"]
     assert free_global_slots() == 3
+
+
+# 같은 화면 시험(GACA-218)의 요소. 가드가 막는 둘(1 · 2)에 더해 3 안쪽 링크 · 4 체크박스 ·
+# 5 글 입력칸 · 6 제출 버튼 · 7 다른 쪽으로 가는 링크.
+SAME_SCREEN_ELEMENTS = {
+    **GUARDED_ELEMENTS,
+    3: {"tag": "a", "url": "https://example.com/next", "text": "다음"},
+    4: {"tag": "input", "type": "checkbox", "text": "동의"},
+    5: {"tag": "input", "type": "text", "name": "q"},
+    6: {"tag": "input", "type": "submit", "text": "검색"},
+    7: {"tag": "a", "url": "https://example.com/page", "text": "다른 쪽"},
+}
+
+
+def same_screen_driver_class() -> type[Driver]:
+    """요소 7 을 누를 때만 요소 줄(elements_hash)이 바뀌는 가짜 브라우저.
+
+    다른 행동 뒤에는 그림(after-<행동 수>)만 바뀌고 요소 줄은 그대로다 — 같은 화면이다.
+    """
+
+    class SameScreenDriver(Driver):
+        def __init__(
+            self,
+            allowed_hosts: frozenset[str] = frozenset(),
+            block_outside_subrequests: bool = False,
+        ) -> None:
+            super().__init__(allowed_hosts, block_outside_subrequests)
+            self.acts = 0
+            self.page = 1
+
+        async def start(self, url: str) -> None:
+            pass
+
+        async def observe(self) -> Observation:
+            return Observation(
+                url="https://example.com/",
+                title="t",
+                dom=f'[7] <a href="/page"> "{self.page}쪽"',
+                element_map=SAME_SCREEN_ELEMENTS,
+                screenshot=f"after-{self.acts}".encode(),
+            )
+
+        async def act(self, action: Action) -> ActionResult:
+            self.acts += 1
+            if action == Action(kind="click", element_id=7):
+                self.page += 1
+            return ActionResult(ok=True)
+
+        async def close(self) -> None:
+            pass
+
+    return SameScreenDriver
+
+
+def click(element_id: int) -> Decision:
+    return Decision(Action(kind="click", element_id=element_id))
+
+
+def test_same_screen_three_times_ends_persona_as_stuck(
+    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 안쪽 링크(3)를 눌러도 같은 화면이다. 세 번째 관측의 step 까지 마치고 stuck 으로 끝난다.
+    # 한도로 끝날 때처럼 로그 줄은 더하지 않고, 마지막 행동 뒤 화면을 step-4.png 로 남긴다.
+    monkeypatch.setattr(orchestrator_module, "DomDriver", same_screen_driver_class())
+    use_decider(monkeypatch, ScriptedDecider(*[click(3)] * 10))
+
+    asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)], max_steps=10)))
+
+    assert fakes.personas.statuses == {1: "stuck"}
+    assert fakes.runs.status == "done"  # 회차 실패가 아니다
+    assert fakes.personas.steps[1] == 3
+    lines = (persona_folder(fakes) / "steps.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len({json.loads(line)["observation"]["elements_hash"] for line in lines}) == 1
+    assert logged_steps(fakes) == [1, 2, 3]
+    assert saved_files(fakes) == [f"step-{n}.png" for n in (1, 2, 3, 4)] + ["steps.jsonl"]
+    assert screens(fakes, 4)[-1] == b"after-3"
+    # 감사 로그는 남기지 않는다 — step 상한 · 시간 상한으로 끝날 때와 같다.
+    assert fakes.audits.rows == [] and fakes.audits.limits == []
+
+
+@pytest.mark.parametrize(
+    ("first_two", "outcome", "steps"),
+    [
+        ([click(3), click(3)], "stuck", 3),
+        ([Decision(Action(kind="back"))] * 2, "stuck", 3),
+        ([click(6), click(6)], "stuck", 3),  # 제출 버튼(버튼 꼴 input)은 입력칸이 아니다
+        ([Decision(Action(kind="scroll", value="down"))] * 2, "done", 4),
+        ([Decision(Action(kind="type", element_id=5, value="장학금"))] * 2, "done", 4),
+        ([click(4), click(4)], "done", 4),
+        ([click(1), click(2)], "done", 4),  # 가드가 막았다 (허용 밖 링크 · 회원 탈퇴)
+        ([parse_failure(), parse_failure()], "done", 4),
+        ([click(7), click(7)], "done", 4),  # 화면이 바뀐다
+    ],
+    ids=[
+        "link-twice",
+        "back-twice",
+        "submit-twice",
+        "scroll-twice",
+        "type-twice",
+        "checkbox-twice",
+        "guard-blocked-twice",
+        "no-action-twice",
+        "screen-changes",
+    ],
+)
+def test_same_screen_counts_only_after_sent_click_or_back(
+    fakes: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    first_two: list[Decision],
+    outcome: str,
+    steps: int,
+) -> None:
+    # 앞의 두 step 뒤에 안쪽 링크(3)를 누르고 done 을 낸다. 세 관측이 같은 화면이어도 앞의 두
+    # 행동이 브라우저에 보낸 click · back 일 때만 세 번째 step 뒤에 stuck 으로 끝난다.
+    # scroll · type · 입력칸 click · 막힌 행동 · 행동 없는 step 뒤에는 처음부터 다시 센다.
+    # 그래서 스크롤 두 번 뒤 다른 행동이면 stuck 이 아니다.
+    monkeypatch.setattr(orchestrator_module, "DomDriver", same_screen_driver_class())
+    use_decider(monkeypatch, ScriptedDecider(*first_two, click(3), Decision(Action(kind="done"))))
+
+    asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)], max_steps=10)))
+
+    assert fakes.personas.statuses == {1: outcome}
+    assert fakes.personas.steps[1] == steps
 
 
 def test_watcher_keeps_guards_on_whatever_policy_or_env(

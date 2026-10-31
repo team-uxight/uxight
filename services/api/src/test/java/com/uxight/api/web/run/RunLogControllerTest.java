@@ -127,6 +127,19 @@ class RunLogControllerTest {
         .andExpect(jsonPath("$.personas[1].finishedAt").value(nullValue()));
   }
 
+  @Test
+  void personas_endReasons_tokenLimitAndStuck_areReturnedAsIs() throws Exception {
+    // 종료 이유 token_limit · stuck (GACA-218) — V9 의 run_personas 상태 제약이 받고, API 는 그대로 넘긴다
+    jdbcTemplate.update("UPDATE runs SET status = 'done' WHERE run_id = ?", runId);
+    insertRunPersona(runId, personaA, "token_limit", 3, "2026-10-27 10:01:00");
+    insertRunPersona(runId, personaB, "stuck", 3, "2026-10-27 10:02:00");
+
+    researcher(get("/api/runs/{runId}/personas", runId))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.personas[0].status").value("token_limit"))
+        .andExpect(jsonPath("$.personas[1].status").value("stuck"));
+  }
+
   // ───────── 권한 ─────────
 
   @Test

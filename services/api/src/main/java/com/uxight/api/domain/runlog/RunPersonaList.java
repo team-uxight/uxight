@@ -16,7 +16,8 @@ import java.util.stream.Collectors;
 public record RunPersonaList(long runId, RunStatus status, List<Item> personas) {
 
   /**
-   * @param status running · done · max_steps · fail · timeout · cancelled (run_personas.status). 실행 전이면 null
+   * @param status running · done · max_steps · token_limit · stuck · fail · timeout · cancelled (run_personas.status).
+   *               실행 전이면 null
    * @param steps  지금까지 기록된 step 수
    */
   public record Item(long personaId, String name, String status, Integer steps, LocalDateTime finishedAt) {

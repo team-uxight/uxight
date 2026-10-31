@@ -332,7 +332,9 @@ class ScriptedDecider(Decider):
 
 
 def decision(kind: str | None) -> Decision:
-    action = Action(kind=kind, value="down" if kind == "scroll" else None) if kind else None
+    element_id = 1 if kind == "click" else None
+    value = "down" if kind == "scroll" else None
+    action = Action(kind=kind, element_id=element_id, value=value) if kind else None
     code = None if action else "PARSE_FAILED"
     return Decision(action, error_code=code, prompt_tokens=11, completion_tokens=7, model="m")
 
@@ -373,8 +375,10 @@ def limits(**values) -> bench.BenchConfig:
         ([decision("scroll"), decision("done")], {}, {}, ("done", 2, None)),
         ([decision("scroll")] * 3, {}, {}, ("max_steps", 3, None)),
         ([decision(None)] * 3, {}, {}, ("fail", 3, None)),  # 행동 없는 step 3번 (운영 규칙)
+        # 같은 화면에서 click 3번 — step 상한 5 전에, 세 번째 관측의 step 뒤에 끝난다 (운영 규칙)
+        ([decision("click")] * 3, {}, {"max_steps": 5}, ("stuck", 3, None)),
         # 토큰 상한 20: step 마다 18 토큰 → 36 이 된 뒤 다음 step 전에 멈춘다
-        ([decision("scroll")] * 3, {}, {"max_tokens": 20}, ("max_steps", 2, None)),
+        ([decision("scroll")] * 3, {}, {"max_tokens": 20}, ("token_limit", 2, None)),
         ([SLOW], {}, {"max_seconds": 1}, ("timeout", 0, None)),
         ([INNER_TIMEOUT], {}, {}, ("fail", 0, "TimeoutError")),
         (
@@ -391,6 +395,7 @@ def limits(**values) -> bench.BenchConfig:
         "done",
         "max-steps",
         "no-action",
+        "same-screen",
         "token-cap",
         "time-limit",
         "inner-timeout",

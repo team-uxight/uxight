@@ -129,7 +129,7 @@ class BenchConfig(BaseModel):
     repeat: PositiveInt = 1  # Persona 하나가 Task 하나를 도는 횟수
     concurrency: PositiveInt = 1  # 동시에 도는 Persona(브라우저) 수
     # 한도. step · 시간은 운영 정책과 같은 뜻이다. 토큰은 Persona 실행 하나마다 센다
-    # (운영은 회차 안 Persona 가 나눠 쓴다). 넘으면 운영처럼 max_steps 로 끝낸다.
+    # (운영은 회차 안 Persona 가 나눠 쓴다). 넘으면 운영처럼 token_limit 으로 끝낸다.
     max_steps: PositiveInt
     max_seconds: PositiveInt
     max_tokens: PositiveInt | None = None
@@ -370,6 +370,7 @@ async def run_persona(
             try:
                 for step_no in range(1, config.max_steps + 1):
                     if config.max_tokens and tokens >= config.max_tokens:
+                        outcome = "token_limit"
                         break
                     step = await agent.step()
                     steps.append(

@@ -3,7 +3,7 @@ import contextlib
 import logging
 from collections.abc import AsyncIterator, Awaitable
 from dataclasses import dataclass
-from typing import Literal, TypeVar
+from typing import TypeVar
 
 from ..db import settings
 from ..driver.dom_driver import DomDriver
@@ -19,6 +19,7 @@ from .step_log_writer import step_log_writer
 from .step_rules import (
     BLOCK_REASONS,
     MAX_CONSECUTIVE_NO_ACTION,
+    MAX_SAME_SCREEN,
     action_log,
     persona_outcome,
     step_cost_usd,
@@ -392,15 +393,17 @@ class RunOrchestrator:
         max_seconds: float,
         cancel_event: asyncio.Event,
         driver: DomDriver,
-    ) -> Literal["done", "max_steps", "timeout", "cancelled", "fail"]:
+    ) -> PersonaOutcome:
         persona_id = persona["persona_id"]
         step_log_writer.prepare(run_id, persona_id)
         prices = self._run_prices[run_id]
         spent = 0.0  # 이 Persona 가 쓴 LLM 비용(USD)의 정확한 합계 — 반올림하지 않은 값
-        # 마지막 화면 스크린샷의 파일 번호 n+1 (n = 마지막으로 로그에 쓴 step 번호). 한도나
-        # 시간 상한으로 끝날 때 마지막 행동을 브라우저에 보냈으면 그 행동 뒤 화면을 한 장 더
-        # 남긴다. 남기지 않는 끝이면 None.
+        # 마지막 화면 스크린샷의 파일 번호 n+1 (n = 마지막으로 로그에 쓴 step 번호). 한도 · 시간
+        # 상한 · 같은 화면(stuck)으로 끝날 때 마지막 행동을 브라우저에 보냈으면 그 행동 뒤 화면을
+        # 한 장 더 남긴다. 남기지 않는 끝이면 None.
         last_screen_step: int | None = None
+        # 종료 이유. step 상한까지 루프를 돌면 이 값 그대로다.
+        outcome: PersonaOutcome = "max_steps"
         # 브라우저(driver)는 부른 쪽이 열고 닫는다. 어느 경로로 return하든 닫히며 컨텍스트, 페이지도
         # 함께 폐기된다. 시간 상한은 자리를 잡은 뒤 브라우저 시작부터 잰다. 넘으면 진행 중인 스텝을
         # 끊고 TimeoutError 로 빠져나간다. 마지막 화면 스크린샷과 브라우저 닫기는 시간 상한이 풀린
@@ -429,6 +432,9 @@ class RunOrchestrator:
                         audit_log_repository.add_limit_reached(
                             run_id, persona_id, {"persona_id": persona_id, "step": step_no, **limit}
                         )
+                        # 회차 토큰 상한과 하루 예산 모두 token_limit 이다. 어느 쪽인지는
+                        # 감사 로그의 reason(max_tokens · daily_token_budget)에 남는다.
+                        outcome = "token_limit"
                         break
                     finished, step = await self._run_unless_cancelled(agent.step(), cancel_event)
                     if not finished:
@@ -507,8 +513,8 @@ class RunOrchestrator:
                         )
                         cancel_event.set()  # 같은 런의 다른 페르소나도 멈추게 한다.
                         return "cancelled"
-                    if outcome := persona_outcome(agent.history):
-                        if outcome == "fail":
+                    if ended := persona_outcome(agent.history):
+                        if ended == "fail":
                             logger.warning(
                                 "run=%s persona=%s %s consecutive steps without action (last %s)",
                                 run_id,
@@ -516,7 +522,17 @@ class RunOrchestrator:
                                 MAX_CONSECUTIVE_NO_ACTION,
                                 step.result.error_code,
                             )
-                        return outcome
+                        if ended != "stuck":
+                            return ended  # done · fail 은 마지막 화면을 남기지 않는다
+                        # stuck 은 한도로 끝날 때처럼 마지막 화면을 남긴다.
+                        logger.warning(
+                            "run=%s persona=%s same screen %s times in a row",
+                            run_id,
+                            persona_id,
+                            MAX_SAME_SCREEN,
+                        )
+                        outcome = ended
+                        break
         except TimeoutError:
             if not deadline.expired():
                 # 스텝 안에서 난 다른 시간 초과(LLM 호출 하나에 건 상한 등)는 시간 상한이 아니라
@@ -527,8 +543,6 @@ class RunOrchestrator:
                 "run=%s persona=%s exceeded max_seconds=%s", run_id, persona_id, max_seconds
             )
             outcome = "timeout"
-        else:
-            outcome = "max_steps"  # step 상한 · 토큰 상한 · 하루 예산으로 루프를 나왔다
         if last_screen_step is not None:
             await self._save_last_screenshot(
                 run_id, persona_id, driver, last_screen_step, cancel_event
@@ -572,7 +586,8 @@ class RunOrchestrator:
                 LAST_SCREENSHOT_TIMEOUT_SECONDS,
             )
         except Exception:
-            # 실패가 이미 정해진 Persona 결과(max_steps · timeout)를 덮지 않게 기록만 한다.
+            # 실패가 이미 정해진 Persona 결과(max_steps · token_limit · stuck · timeout)를 덮지 않게
+            # 기록만 한다.
             logger.exception("run=%s persona=%s 마지막 화면 스크린샷 실패", run_id, persona_id)
 
     def _token_limit_reached(self, run_id: int) -> dict | None:

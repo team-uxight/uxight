@@ -22,6 +22,32 @@ uv run python -m uxight_agent.usage_report --log data/llm-usage.jsonl data/bench
 
 단가는 OpenRouter 기준이고(`usage_report.py` 의 단가표), 호출마다 그때의 단가로 센 `cost_usd` 가 같이 남는다. 단가표가 나중에 바뀌어도 지난 비용은 안 바뀐다.
 
+## Persona 종료 이유 (GACA-218)
+
+`run_personas.status` 의 끝 값이다. Persona 진행 API(`GET /api/runs/{runId}/personas`)가 그대로 넘긴다.
+
+| 값 | 뜻 |
+| --- | --- |
+| `done` | Agent 가 done 을 냈다 (성공, 메인 판정 기준) |
+| `max_steps` | step 상한까지 돌았다 |
+| `token_limit` | 토큰 상한으로 끝났다. 회차 토큰 상한과 하루 토큰 예산 둘 다 이 값이다 (아래) |
+| `stuck` | 같은 화면이 3번 이어져 끝냈다 (아래) |
+| `timeout` | 시간 상한에 걸렸다 |
+| `fail` | 실행 오류로 끝났거나, 행동을 얻지 못한 step 이 3번 이어졌다 |
+| `cancelled` | 회차가 취소됐다 |
+
+- `token_limit` 의 두 상한은 감사 로그 `agent.limit_reached` 의 `reason` 으로 가른다.
+  - `max_tokens`: 회차 토큰 상한(정책 `max_tokens`)이다. 회차 안 Persona 가 나눠 쓴다.
+  - `daily_token_budget`: 하루 토큰 예산(`policies.daily_token_budget`)이다. 오늘 시작한 회차의 토큰 합으로 센다.
+- `stuck` 은 같은 화면(step 로그의 `elements_hash`)의 관측이 3번 이어지면, 세 번째 관측의 step 까지 마치고 끝낸다.
+  - 관측 사이의 행동이 브라우저에 보낸 click · back 일 때만 센다. 다른 행동 뒤에는 처음부터 다시 센다.
+  - scroll · type · 입력칸 click 은 세지 않는다. 요소 줄에는 화면 아래 요소도 있고, 입력값 · 체크 상태는 없다. 세면 읽으려고 스크롤하거나 폼을 채우는 Persona 가 끝난다.
+  - 도메인 · 파괴적 행동 차단으로 막힌 행동도 세지 않는다. 세면 가드 켬 조건만 더 자주 끝나 가드 켬 · 끔 A/B test 가 기운다.
+  - 행동을 얻지 못한 step 은 `fail` 규칙이 맡는다.
+- `max_steps` · `token_limit` · `stuck` · `timeout` 은 마지막 행동 뒤 화면을 `step-<n+1>.png` 로 남길 수 있다.
+- 진행률(`runs.progress`)은 `done` · `max_steps` · `token_limit` · `stuck` 을 센다.
+- benchmark 의 `personas.jsonl` 에 있는 `outcome` 도 같은 값을 쓴다.
+
 ## 성능 benchmark (GACA-179)
 
 같은 사본 · Task · Persona 로 변형(관측 모드 등)만 바꿔 돌리고, 지표를 표 하나로 낸다.
