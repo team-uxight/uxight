@@ -112,7 +112,7 @@ class Variant(BaseModel):
 
     observation: Literal["dom", "som"] = "dom"
     body_text: bool = True  # 끄면 관측에서 본문 글을 뺀다 — 본문 글(GACA-217)의 효과 비교
-    # on = 집행(운영 값). off = 가드 끔 — 가드 셋이 막을지 판단만 기록한다 (GACA-180)
+    # on = 가드 켬(운영 값). off = 가드 끔 — 가드 셋이 막을지 판단만 기록한다 (GACA-180)
     guard: GuardMode = "on"
     # 자리만 있다. 지금 코드에 스위치가 없어 운영 값만 받는다. 다중 진단은 GACA-181
     diagnosis: Literal["single"] = "single"
@@ -345,11 +345,11 @@ async def run_persona(
     화면 그림은 저장하지 않는다 (step 로그의 screenshot 은 null).
     가드 끔 변형이고 guard_log 를 주면 가드 판단 기록(guard_lines 줄)을 거기에 더한다 (GACA-180).
     decider 는 이 실행의 가드 모드(job.guard)로 만든 것이어야 한다.
-    가드 끔 변형이 있는 benchmark 면 집행 변형도 허용 밖 하위 요청 차단으로 돈다(두 조건을 같게).
+    가드 끔 변형이 있는 benchmark 면 가드 켬 변형도 허용 밖 하위 요청 차단으로 돈다(두 조건을 같게).
     """
     persona_id = job.persona["persona_id"]
     steps: list[dict] = []
-    guards: list[dict] = []  # 가드가 걸린 것 (guard_lines). 집행이면 막은 것이다
+    guards: list[dict] = []  # 가드가 걸린 것 (guard_lines). 가드 켬이면 막은 것이다
     cost: float | None = 0.0  # 이 실행의 LLM 비용(USD). 단가 없는 step 이 하나라도 있으면 None
     outcome, error, seconds = "max_steps", None, 0.0
     block_outside = config.has_guard_off
@@ -420,10 +420,11 @@ def guard_lines(job: Job, step_no: int, step: StepResult) -> list[dict]:
 
     - 지시문 표시(page_text): 프롬프트 페이지 글에 붙인(가드 끔이면 붙였을) 조각 수(marks)와 걸린
       패턴 이름(reason). 글 원문은 남기지 않는다. 관측 전 되돌린 step 은 LLM 을 부르지 않아 없다.
-    - 행동 가드(domain · destructive): 집행이면 막은, 가드 끔이면 막았을 결과. reason 은 집행이면
-      step 로그 result.error 에 남는 문구이고, destination 은 계정 · 쿼리를 뺀 목적지다.
+    - 행동 가드(domain · destructive): 가드 켬이면 막은, 가드 끔이면 막았을 결과.
+      reason 은 가드 켬이면 step 로그 result.error 에 남는 문구이고, destination 은 계정 · 쿼리를
+      뺀 목적지다.
       http(s) 가 아닌 목적지는 둘 다 scheme 만 남긴다("data:"). data: · javascript: · mailto:
-      주소에는 페이지 글 · 코드 · 메일 주소가 그대로 들어 있다. 집행 step 로그 문구는 그대로다.
+      주소에는 페이지 글 · 코드 · 메일 주소가 그대로 들어 있다. 가드 켬의 step 로그 문구는 그대로다.
     """
     base = {"run_id": job.run_id, "persona_id": job.persona["persona_id"], "step": step_no}
     action = action_log(step.action)
@@ -521,7 +522,7 @@ async def _run_jobs(
 
     async def one(job: Job) -> None:
         guard_log: list[dict] = []
-        # 집행 변형은 예전처럼 make_decider(run_id) 로 만든다 — 시험 · 데모 판단기를 그대로 쓰게.
+        # 가드 켬 변형은 예전처럼 make_decider(run_id) 로 만든다 — 시험 · 데모 판단기를 그대로 쓰게.
         mode = {"guard": job.guard} if job.guard == "off" else {}
         async with slots:
             decider = make_decider(job.run_id, **mode)

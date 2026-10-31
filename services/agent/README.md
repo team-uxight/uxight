@@ -46,7 +46,7 @@ uv run python -m uxight_agent.bench ../../config/bench-school.json --out data/be
 | `sites[].answers` | 결함 사본의 정답 파일 |
 | `sites[].findings` | `{변형 이름: 진단 결과 파일}`. 진단 결과는 findings 표의 행을 담은 JSON 배열이다. 원본 사본이나 정답 파일이 있는 사이트에만 쓴다 |
 | `sites[].allowed_domains` | 회차의 허용 도메인과 같다. 시작 URL 의 호스트는 늘 허용한다 |
-| `variants` | 변형 이름 → 바꿀 값. `observation` 은 `dom` 또는 `som`, `body_text` 는 `false` 면 관측에서 본문 글을 뺀다(기본 `true`), `guard` 는 `on`(집행, 기본) 또는 `off`(가드 끔 — 판단만 기록, 아래) |
+| `variants` | 변형 이름 → 바꿀 값. `observation` 은 `dom` 또는 `som`, `body_text` 는 `false` 면 관측에서 본문 글을 뺀다(기본 `true`), `guard` 는 `on`(가드 켬, 기본) 또는 `off`(가드 끔 — 판단만 기록, 아래) |
 | `variants` 의 자리만 있는 칸 | `diagnosis` 는 `single` 만 받는다. 다중 진단(GACA-181)이 생기면 값을 더한다 |
 | `repeat` · `concurrency` | 반복 수 · 동시에 도는 Persona 수 |
 | `max_steps` · `max_seconds` · `max_tokens` | 한도. 토큰 상한은 Persona 실행 하나마다 센다 |
@@ -80,7 +80,7 @@ uv run python -m uxight_agent.bench ../../config/bench-school.json --out data/be
   - 운영 Watcher 는 이 차단을 쓰지 않는다.
 - 새 창 규칙 · 늦은 이동 되돌리기 · 자동 요청의 파괴적 경로 검사와 한도는 두 조건 모두 그대로다.
 - `guard-log.jsonl` 한 줄: `run_id` · `persona_id` · `step`, `guard`(`domain` · `destructive` · `page_text`), `reason`, `action`(step 로그 모양), `destination`(계정 · 쿼리 뺀 목적지), `marks`(지시문 표시 조각 수).
-  - `reason`: 행동 가드는 집행했다면 step 로그 `result.error` 에 남았을 문구, 지시문 표시는 걸린 패턴 이름이다. 페이지 글 원문은 남기지 않는다.
+  - `reason`: 행동 가드는 가드 켬이었다면 step 로그 `result.error` 에 남았을 문구, 지시문 표시는 걸린 패턴 이름이다. 페이지 글 원문은 남기지 않는다.
   - http(s) 가 아닌 목적지는 `destination` · `reason` 모두 scheme 만 남긴다(`data:` · `javascript:` · `mailto:`). 그 주소에 페이지 글 · 코드 · 메일 주소가 그대로 있어서다.
 - 표의 가드 칸은 행의 합계다. 가드 `on` 은 실제로 막은 수 · 붙인 표시 수, `off` 는 막지 않고 기록한 수다.
   - 도메인 가드 · 파괴 가드: 가드가 걸린 행동 수.
