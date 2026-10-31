@@ -231,11 +231,18 @@ class _CopyHandler(http.server.SimpleHTTPRequestHandler):
         pass
 
 
+class _CopyServer(http.server.ThreadingHTTPServer):
+    # 연결 대기 줄. 기본값 5 는 브라우저가 페이지를 열며 한꺼번에 여는 연결에 넘친다. Mac 에서는
+    # 넘친 연결이 끊겨(ERR_CONNECTION_RESET) 사본의 스크립트 · 그림이 무작위로 빠지고, 같은
+    # 페이지의 관측이 실행마다 달라진다 (GACA-180).
+    request_queue_size = 128
+
+
 @contextlib.contextmanager
 def serve(folder: Path) -> Iterator[str]:
     """folder 를 http://127.0.0.1:<빈 포트> 로 띄우고 그 주소를 준다. 나가면 내린다."""
     handler = functools.partial(_CopyHandler, directory=str(folder))
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    server = _CopyServer(("127.0.0.1", 0), handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
         yield f"http://127.0.0.1:{server.server_address[1]}"
