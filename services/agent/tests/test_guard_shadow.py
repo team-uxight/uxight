@@ -15,10 +15,12 @@ import csv
 import dataclasses
 import functools
 import json
+import socket
 import threading
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -710,18 +712,76 @@ INSIDE_CASES = {
     "inside-blank": "<a href='/case/next' target='_blank'>go</a>",
     "inside-iframe": IFRAME + "<a href='/case/next' target='f'>go</a>",
     "inside-fetch": "<button onclick=\"fetch('/case/x',{method:'POST'})\">go</button>",
+    "inside-websocket": (
+        "<button onclick=\"new WebSocket('ws://' + location.host + '/ws')\">go</button>"
+    ),
     "outside-image": "<button onclick=\"new Image().src = '{ext}/pixel'\">go</button>",
 }
+# route 를 거치지 않는 연결 (GACA-180 재확인). 엄격 차단의 브라우저 설정이 막는다 — 닫힌 프록시,
+# WebRTC UDP · QUIC 끄기, service worker 막기. 'go' 는 가드에 걸리지 않아 두 조건 모두 눌린다.
+# {xsite} 는 허용 밖 서버를 다른 site(localhost)로 부르는 주소, {stun} · {quic} 은 UDP 받이 포트다.
+SCRIPTS = {
+    "/worker.js": "fetch('{ext}/worker-fetch', {mode: 'no-cors'}).catch(() => {});"
+    " try { new WebSocket('{ws}/worker-ws'); } catch (e) {}",
+    "/shared.js": "fetch('{ext}/shared-fetch', {mode: 'no-cors'}).catch(() => {});"
+    " try { new WebSocket('{ws}/shared-ws'); } catch (e) {}",
+    "/sw.js": "self.addEventListener('install', (e) => { self.skipWaiting();"
+    " e.waitUntil(fetch('{ext}/sw-install', {mode: 'no-cors'}).catch(() => {})); });"
+    " self.addEventListener('activate', (e) => { e.waitUntil(clients.claim());"
+    " try { new WebSocket('{ws}/sw-ws'); } catch (err) {} });",
+}
+HOLE_CASES = {
+    "worker-dedicated": "<button onclick=\"new Worker('/worker.js')\">go</button>",
+    "worker-shared": "<button onclick=\"new SharedWorker('/shared.js')\">go</button>",
+    # 허용 링크만 눌러도 떠날 때 나간다
+    "pagehide-beacon": "<a href='/case/next'>go</a><script>addEventListener('pagehide', () => {"
+    " navigator.sendBeacon('{ext}/pagehide-beacon', 'x'); fetch('{ext}/pagehide-keepalive',"
+    " {method: 'POST', body: 'x', keepalive: true, mode: 'no-cors'}); });</script>",
+    "speculation-rules": "<button onclick=\"const s = document.createElement('script');"
+    " s.type = 'speculationrules'; s.textContent = JSON.stringify({prefetch: [{source: 'list',"
+    " urls: ['{xsite}/spec-prefetch']}], prerender: [{source: 'list',"
+    " urls: ['{xsite}/spec-prerender']}]}); document.head.appendChild(s)\">go</button>",
+    "webrtc-stun": '<button onclick="const pc = new RTCPeerConnection({iceServers:'
+    " [{urls: 'stun:127.0.0.1:{stun}'}]}); pc.createDataChannel('x');"
+    ' pc.createOffer().then((o) => pc.setLocalDescription(o))">go</button>',
+    "webtransport": "<button onclick=\"try { new WebTransport('https://127.0.0.1:{quic}/wt')"
+    '.ready.catch(() => {}); } catch (e) {}">go</button>',
+    "service-worker": "<script>navigator.serviceWorker.register('/sw.js')</script>"
+    "<button onclick=\"fetch('/case/x').catch(() => {})\">go</button>",
+}
+
+
+def _udp_sink(hits: list[str]) -> socket.socket:
+    """127.0.0.1 의 빈 포트로 오는 UDP 를 hits 에 남긴다. 소켓을 닫으면 그친다."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind(("127.0.0.1", 0))
+    sock.settimeout(0.2)
+    port = sock.getsockname()[1]
+
+    def receive() -> None:
+        while True:
+            try:
+                data, _ = sock.recvfrom(4096)
+            except TimeoutError:
+                continue
+            except OSError:
+                return
+            hits.append(f"UDP {port} {len(data)}B")
+
+    threading.Thread(target=receive, daemon=True).start()
+    return sock
 
 
 @pytest.fixture(scope="module")
 def case_site():
-    """시험 페이지 /case/<이름> 을 내는 허용 사이트와 허용 밖 서버. 둘 다 받은 요청을 센다.
+    """시험 페이지 /case/<이름> 을 내는 허용 사이트, 허용 밖 서버, UDP 받이 둘.
 
-    (허용 사이트 주소, 사이트가 받은 요청, 밖 서버가 받은 요청)을 준다.
+    base(허용 사이트 주소)와 받은 것 — allowed(사이트) · outside(밖 서버) · udp — 를 준다.
+    요청은 '메서드 경로' 글이다.
     """
     allowed_hits: list[str] = []
     outside_hits: list[str] = []
+    udp_hits: list[str] = []
 
     class Outside(BaseHTTPRequestHandler):
         def log_message(self, *args) -> None:
@@ -740,16 +800,26 @@ def case_site():
 
     outside = _serve(Outside)
     port = outside.server_address[1]
-    pages = {
-        f"/case/{name}": "<!doctype html><meta charset='utf-8'><p>page</p>"
-        + html.replace("{ext}", f"http://127.0.0.1:{port}").replace(
-            "{ws}", f"ws://127.0.0.1:{port}"
-        )
-        for name, html in {
-            **{name: html for name, (html, _) in LEAK_CASES.items()},
-            **INSIDE_CASES,
-        }.items()
+    stun, quic = _udp_sink(udp_hits), _udp_sink(udp_hits)
+    fill = {
+        "{ext}": f"http://127.0.0.1:{port}",
+        "{ws}": f"ws://127.0.0.1:{port}",
+        "{xsite}": f"http://localhost:{port}",
+        "{stun}": str(stun.getsockname()[1]),
+        "{quic}": str(quic.getsockname()[1]),
     }
+
+    def filled(text: str) -> str:
+        for key, value in fill.items():
+            text = text.replace(key, value)
+        return text
+
+    cases = {**{n: h for n, (h, _) in LEAK_CASES.items()}, **INSIDE_CASES, **HOLE_CASES}
+    pages = {
+        f"/case/{name}": "<!doctype html><meta charset='utf-8'><p>page</p>" + filled(html)
+        for name, html in cases.items()
+    }
+    scripts = {path: filled(js) for path, js in SCRIPTS.items()}
 
     class Allowed(BaseHTTPRequestHandler):
         def log_message(self, *args) -> None:
@@ -757,30 +827,45 @@ def case_site():
 
         def do_GET(self) -> None:
             allowed_hits.append(f"{self.command} {self.path}")
+            script = scripts.get(self.path)
             self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header(
+                "Content-Type", "text/javascript" if script else "text/html; charset=utf-8"
+            )
             self.end_headers()
-            self.wfile.write(pages.get(self.path, "<p>blank</p>").encode())
+            self.wfile.write((script or pages.get(self.path, "<p>blank</p>")).encode())
 
         def do_POST(self) -> None:
             self.rfile.read(int(self.headers.get("Content-Length") or 0))
             self.do_GET()
 
     allowed = _serve(Allowed)
-    yield f"http://127.0.0.1:{allowed.server_address[1]}", allowed_hits, outside_hits
+    yield SimpleNamespace(
+        base=f"http://127.0.0.1:{allowed.server_address[1]}",
+        allowed=allowed_hits,
+        outside=outside_hits,
+        udp=udp_hits,
+    )
     allowed.shutdown()
     outside.shutdown()
+    stun.close()
+    quic.close()
 
 
-async def _click_case(url: str, text: str, guard: str) -> tuple[StepResult, DomDriver]:
-    """엄격 요청 차단 드라이버로 url 을 열고 text 요소를 한 번 누른다."""
+async def _click_case(
+    url: str, text: str, guard: str, wait: float = 0.8
+) -> tuple[StepResult, DomDriver]:
+    """엄격 요청 차단 드라이버로 url 을 열고 text 요소를 한 번 누른 뒤 wait 초 기다린다.
+
+    기다리는 동안 늦게 나가는 요청(0.4초 뒤 이동 · 추측 prefetch 등)도 서버에 닿는다.
+    """
     async with DomDriver(allowed_hosts=allowed_hosts(url, []), strict_requests=True) as driver:
         await driver.start(url)
         agent = PersonaAgent(
             {"persona_id": 1}, {}, driver, ClickTexts(text), driver._allowed_hosts, guard
         )
         step = await agent.step()
-        await asyncio.sleep(0.8)  # 늦게 나가는 요청(0.4초 뒤 이동 등)도 기다린다
+        await asyncio.sleep(wait)
         return step, driver
 
 
@@ -788,20 +873,55 @@ async def _click_case(url: str, text: str, guard: str) -> tuple[StepResult, DomD
 def test_strict_blocking_keeps_both_conditions_inside(case_site, case: str) -> None:
     # 그림자에서 실행된 클릭의 하위 요청 · iframe 이동 · WebSocket 도 밖에 닿지 않는다.
     # 엄격 요청 차단은 그림자 변형이 있는 benchmark 의 모든 변형에 켜므로 두 조건을 다 본다.
-    base, _, outside = case_site
-    outside.clear()
-    url, text = f"{base}/case/{case}", LEAK_CASES[case][1]
+    case_site.outside.clear()
+    url, text = f"{case_site.base}/case/{case}", LEAK_CASES[case][1]
 
     async def both() -> list[tuple[StepResult, DomDriver]]:
         return await asyncio.gather(*(_click_case(url, text, guard) for guard in ("on", "shadow")))
 
     _, (_, shadow) = asyncio.run(both())
 
-    assert outside == []
+    assert case_site.outside == []
     # 그림자에서는 클릭이 실행되고 드라이버가 끊었다 — 요청이 아예 없어서 지나간 것이 아니다.
     # data: 주소로 가는 맨 위 이동은 Chromium 이 스스로 막아 요청이 없다.
     if case != "data-top":
         assert shadow.blocked_requests + shadow.blocked_subrequests >= 1
+
+
+@pytest.mark.parametrize("case", HOLE_CASES)
+def test_strict_blocking_stops_connections_route_cannot_see(case_site, case: str) -> None:
+    # worker · service worker 안의 요청, 떠날 때의 beacon, 추측 prefetch, WebRTC · QUIC 는 route 를
+    # 거치지 않는다. 브라우저 설정이 막아 두 조건 모두 밖 서버 · UDP 받이에 아무것도 닿지 않는다.
+    case_site.outside.clear()
+    case_site.udp.clear()
+    url = f"{case_site.base}/case/{case}"
+
+    async def both() -> list[tuple[StepResult, DomDriver]]:
+        return await asyncio.gather(
+            *(_click_case(url, "go", guard, wait=2.0) for guard in ("on", "shadow"))
+        )
+
+    asyncio.run(both())
+
+    assert (case_site.outside, case_site.udp) == ([], [])
+
+
+def test_strict_blocking_blocks_service_workers(case_site) -> None:
+    # 막지 않으면 service worker 안의 WebSocket 이 route 를 지나 밖으로 나갔다(재확인 probe).
+    # 지금은 닫힌 프록시도 그 연결을 막으므로, 등록이 남지 않는지를 따로 본다.
+    case_site.outside.clear()
+    url = f"{case_site.base}/case/service-worker"
+
+    async def registrations() -> int:
+        async with DomDriver(allowed_hosts=allowed_hosts(url, []), strict_requests=True) as driver:
+            await driver.start(url)
+            await asyncio.sleep(1.5)  # 등록 · 설치 · 켜기를 기다린다
+            return await driver._page.evaluate(
+                "async () => (await navigator.serviceWorker.getRegistrations()).length"
+            )
+
+    assert asyncio.run(registrations()) == 0
+    assert case_site.outside == []
 
 
 @pytest.mark.parametrize(
@@ -811,32 +931,97 @@ def test_strict_blocking_keeps_both_conditions_inside(case_site, case: str) -> N
         ("inside-blank", "GET /case/next", "/case/next"),  # 새 창 주소를 주 창에서 연다
         ("inside-iframe", "GET /case/next", "/case/inside-iframe"),  # iframe 만 바뀐다
         ("inside-fetch", "POST /case/x", "/case/inside-fetch"),
+        # 허용 주소 WebSocket 은 서버에 닿고, 하위 요청 끊김에 들지 않는다
+        ("inside-websocket", "GET /ws", "/case/inside-websocket"),
     ],
 )
 def test_strict_blocking_keeps_allowed_requests(
     case_site, case: str, reached: str, path_after: str
 ) -> None:
-    base, allowed, _ = case_site
-    allowed.clear()
+    case_site.allowed.clear()
 
-    step, driver = asyncio.run(_click_case(f"{base}/case/{case}", "go", "on"))
+    step, driver = asyncio.run(_click_case(f"{case_site.base}/case/{case}", "go", "on"))
 
     assert step.result.ok is True
-    assert reached in allowed
-    assert (step.result.url_after or step.observation.url) == f"{base}{path_after}"
+    assert reached in case_site.allowed
+    assert (step.result.url_after or step.observation.url) == f"{case_site.base}{path_after}"
     assert driver.blocked_subrequests == 0
 
 
 def test_strict_subrequest_does_not_block_the_step(case_site) -> None:
     # 엄격 차단이 끊은 하위 요청은 행동을 차단으로 만들지 않고 따로 센다.
     # 분석용 이미지 하나로 step 이 DOMAIN_BLOCKED 가 되면 안 된다.
-    base, _, outside = case_site
-    outside.clear()
+    case_site.outside.clear()
 
-    step, driver = asyncio.run(_click_case(f"{base}/case/outside-image", "go", "on"))
+    step, driver = asyncio.run(_click_case(f"{case_site.base}/case/outside-image", "go", "on"))
 
     assert (step.result.ok, step.result.error_code) == (True, None)
-    assert (driver.blocked_requests, driver.blocked_subrequests, outside) == (0, 1, [])
+    assert (driver.blocked_requests, driver.blocked_subrequests, case_site.outside) == (0, 1, [])
+
+
+def test_strict_start_page_opens_without_allowed_hosts(case_site) -> None:
+    # 시작 주소는 늘 허용이다. 엄격 차단의 프록시 예외에도 들어가야 시작 페이지가 열린다 —
+    # 그래서 허용 호스트를 브라우저를 띄우기 전에 정한다.
+    url = f"{case_site.base}/case/inside-link"
+
+    async def run() -> Observation:
+        async with DomDriver(strict_requests=True) as driver:
+            await driver.start(url)
+            return await driver.observe()
+
+    assert asyncio.run(run()).url == url
+
+
+def test_strict_launch_options_bypass_only_allowed_host_ports() -> None:
+    # 닫힌 프록시의 예외는 허용 호스트:포트뿐이다. 같은 호스트의 다른 포트는 프록시로 간다.
+    # IPv6 는 [ ] 로 감싸고, 포트가 없는 로컬 파일 키는 뺀다. 운영(엄격 꺼짐)은 그대로 띄운다.
+    hosts = frozenset({"127.0.0.1:5000", "copy.example:443", "::1:8080", "file:"})
+
+    strict = DomDriver(allowed_hosts=hosts, strict_requests=True)._launch_options()
+
+    assert strict["proxy"] == {
+        "server": "http://127.0.0.1:9",
+        "bypass": "<-loopback>,127.0.0.1:5000,[::1]:8080,copy.example:443",
+    }
+    assert set(strict["args"]) == {
+        "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+        "--disable-quic",
+    }
+    assert DomDriver(allowed_hosts=hosts)._launch_options() == {}
+
+
+def test_strict_bypass_reaches_ipv6_copy() -> None:
+    # 프록시 예외를 Chromium 규칙대로 써야 IPv6 사본에 직접 잇는다. 틀리면 닫힌 프록시로 가서
+    # 시작 페이지부터 열리지 않는다.
+    class Page6(BaseHTTPRequestHandler):
+        def log_message(self, *args) -> None:
+            pass
+
+        def do_GET(self) -> None:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write("<p>IPv6 사본</p>".encode())
+
+    class Server6(ThreadingHTTPServer):
+        address_family = socket.AF_INET6
+
+    try:
+        server = Server6(("::1", 0), Page6)
+    except OSError:
+        pytest.skip("IPv6 루프백이 없다")
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = f"http://[::1]:{server.server_address[1]}/"
+
+    async def run() -> Observation:
+        async with DomDriver(allowed_hosts=allowed_hosts(url, []), strict_requests=True) as driver:
+            await driver.start(url)
+            return await driver.observe()
+
+    try:
+        assert "IPv6 사본" in asyncio.run(run()).text
+    finally:
+        server.shutdown()
 
 
 def test_shadow_records_keep_only_the_scheme_of_non_http_destinations() -> None:

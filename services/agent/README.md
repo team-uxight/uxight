@@ -74,7 +74,8 @@ uv run python -m uxight_agent.bench ../../config/bench-school.json --out data/be
 - **그림자 모드는 막을 행동을 실제로 실행한다.** 그래서 그림자 변형이 하나라도 있으면 모든 사이트가 `--serve` 로 띄운 사본이어야 하고, `allowed_domains` 는 비워야 한다. 아니면 브라우저를 띄우기 전에 멈춘다.
 - 드라이버의 요청 단계 차단은 주 창 · 새 창 이동만 끊는다. 실행된 클릭이 낸 하위 요청(fetch · 이미지 · beacon · ping) · iframe 이동 · WebSocket 은 그것만으로는 밖에 닿는다.
   - 그래서 그림자 변형이 있는 benchmark 는 모든 변형에 **엄격 요청 차단**을 켠다. 두 조건이 같은 조건에서 돌게 하려는 것이다.
-  - 엄격 차단은 허용 밖 하위 요청 · iframe 이동을 끊고, WebSocket 은 모두 가짜로 받고, service worker 를 막는다.
+  - 엄격 차단은 두 겹이다. route 에서 허용 밖 하위 요청 · iframe 이동을 끊고, 허용 밖 WebSocket 은 가짜로 받는다.
+  - route 를 거치지 않는 연결(worker · service worker 안의 요청, 떠날 때의 beacon · keepalive fetch, 추측 prefetch · prerender)은 브라우저 설정이 막는다. 허용 호스트:포트 말고는 모두 닫힌 프록시로 보내고, WebRTC 의 UDP 와 QUIC 를 끄고, service worker 를 막는다.
   - 사본이 허용 밖에서 받는 글꼴 · 분석 스크립트도 끊기므로, 엄격 차단을 켠 결과와 끈 결과(GACA-179 benchmark)는 바로 비교하지 않는다.
   - 운영 Watcher 는 엄격 차단을 쓰지 않는다.
 - 새 창 규칙 · 늦은 이동 되돌리기 · 자동 요청의 파괴적 경로 검사와 한도는 두 조건 모두 그대로다.
@@ -85,7 +86,7 @@ uv run python -m uxight_agent.bench ../../config/bench-school.json --out data/be
   - 도메인 가드 · 파괴 가드: 가드가 걸린 행동 수.
   - 지시문 표시: 프롬프트 페이지 글의 표시 조각 수.
   - 요청 끊김: 드라이버가 요청 단계에서 끊은 허용 밖 이동 요청 수(주 창 · 새 창).
-  - 하위 요청 끊김: 엄격 차단이 끊은 수. 엄격 차단을 켜지 않은 benchmark 는 `—`.
+  - 하위 요청 끊김: 엄격 차단이 route 에서 끊은 수. 닫힌 프록시가 막은 연결은 세지 못한다. 엄격 차단을 켜지 않은 benchmark 는 `—`.
   - CuP: 성공했고 행동 가드가 한 번도 걸리지 않은 실행의 비율. 지시문 표시는 넣지 않는다.
 - 그림자 모드는 bench 에서만 켠다. 운영 Watcher · 정책 · env 로는 켤 수 없다.
 
