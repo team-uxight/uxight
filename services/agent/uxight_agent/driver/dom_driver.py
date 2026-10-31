@@ -493,6 +493,7 @@ class DomDriver(Driver):
             if block:
                 if outside:
                     self._blocked_url = request.url
+                    self.blocked_requests += 1
                 await route.abort("aborted")
             else:
                 await route.continue_()

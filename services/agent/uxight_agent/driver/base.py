@@ -63,6 +63,9 @@ class Driver(ABC):
         # 허용 도메인('호스트:포트', guard.domain). 드라이버는 이 밖으로 이동하지 않는다.
         # start(url) 의 주소는 늘 허용이다.
         self._allowed_hosts = allowed_hosts
+        # 요청 단계에서 끊은 허용 밖 이동 요청 수 (guard.domain 2단계).
+        # 성능 benchmark 가 가드 조건마다 센다 (GACA-180). 운영은 읽지 않는다.
+        self.blocked_requests = 0
 
     @abstractmethod
     async def start(self, url: str) -> None:
