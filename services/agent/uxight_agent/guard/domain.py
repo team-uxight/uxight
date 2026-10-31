@@ -13,6 +13,9 @@ http · https 가 아닌 주소(javascript: · mailto: 등)는 모두 밖으로 
    창에서 연다 (GACA-225). 주 창의 이동이라 이 단계와 3단계를 그대로 거치고, 파괴적 행동
    가드의 경로 검사도 거친다.
 3. 행동 뒤: 그래도 허용 밖 주소에 와 있으면(리다이렉트 등) 행동 전 주소로 되돌린다 — DomDriver.
+   행동이 끝난 뒤 주 창이 늦게 허용 밖으로 가면(스크립트가 나중에 바꾼 주소의 리다이렉트 등)
+   다음 관측 · 행동 전에 마지막 허용 주소로 되돌리고 차단으로 남긴다. 허용 밖 페이지에서는
+   관측도 행동도 하지 않는다 (GACA-224).
 """
 
 from urllib.parse import urlsplit
@@ -77,6 +80,8 @@ def blocked_destination(
 
 
 def safe_destination(url: str) -> str:
-    """로그에 남길 목적지. 쿼리 · 조각(토큰이 들어 있을 수 있다)을 빼고 길이를 자른다."""
+    """로그에 남길 목적지. 계정(user:pw@) · 쿼리 · 조각(토큰이 들어 있을 수 있다)을 빼고
+    길이를 자른다."""
     parts = urlsplit(url)
-    return parts._replace(query="", fragment="").geturl()[:MAX_DESTINATION_LENGTH]
+    netloc = parts.netloc.rpartition("@")[2]
+    return parts._replace(netloc=netloc, query="", fragment="").geturl()[:MAX_DESTINATION_LENGTH]

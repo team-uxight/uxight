@@ -11,7 +11,7 @@ from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from uxight_agent.driver import som_driver
 from uxight_agent.driver.base import Observation
-from uxight_agent.driver.dom_driver import DomDriver
+from uxight_agent.driver.dom_driver import ID_ATTRIBUTE, DomDriver
 from uxight_agent.driver.som_driver import MARK_ATTRIBUTE, STILL_WAIT_MS, SomDriver
 from uxight_agent.schemas import Action
 
@@ -376,6 +376,39 @@ def test_reobserved_when_document_changes_before_marks() -> None:
     assert observation.title == "SoM fixture"
     assert len(observation.element_map) == 8
     assert observation.screenshot is not None
+
+
+def test_reobserved_when_page_leaves_before_marks() -> None:
+    # 번호를 붙인 뒤 주 창이 허용 밖으로 간다 (늦은 이동, GACA-224).
+    # 허용 밖 페이지에 번호 요소가 있어 덧그림 확인을 통과해도 그 그림은 내보내지 않는다.
+    # 되돌린 뒤 다시 찍는다.
+    async def scenario() -> tuple[Observation, str]:
+        async with SomDriver() as driver:
+            await driver.start(PAGE_URL)
+            page = driver._page
+            real_observe_page = driver._observe_page
+            calls = 0
+
+            async def observe_then_leave() -> Observation:
+                nonlocal calls
+                calls += 1
+                observation = await real_observe_page()
+                if calls == 1:
+                    # about:blank 는 http(s) 가 아니라 허용 밖이다.
+                    await page.goto("about:blank")
+                    await page.set_content(f'<a {ID_ATTRIBUTE}="1" href="#">밖</a>')
+                return observation
+
+            driver._observe_page = observe_then_leave
+            return await driver.observe(), page.url
+
+    observation, url = asyncio.run(scenario())
+
+    assert observation.blocked == "about:blank"
+    assert observation.title == "SoM fixture"
+    assert len(observation.element_map) == 8
+    assert observation.screenshot is not None
+    assert url == PAGE_URL
 
 
 def test_stuck_screenshot_cut_and_retried(monkeypatch) -> None:

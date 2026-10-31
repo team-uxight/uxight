@@ -21,6 +21,12 @@ ID_ATTRIBUTE = "data-ux-id"
 # 1ms 안). 빈 창을 먼저 열고 주소를 나중에 넣는 스크립트를 위해 둔다.
 # 행동이 새 창을 열지 않았으면 기다리지 않는다.
 NEW_WINDOW_WAIT_MS = 1_000
+# 늦은 이동을 되돌리는 횟수의 상한 — Persona 하나에 (GACA-224).
+# 늦은 이동은 행동이 끝난 뒤 주 창이 허용 밖으로 간 것이다.
+# 예: 스크립트가 나중에 바꾼 주소가 302 로 허용 밖에 보낸다.
+# 되돌린 페이지가 또 허용 밖으로 보내면 되돌릴 때마다 허용 밖 요청이 한 번씩 늘고 step 만 쓴다.
+# 넘으면 관측이 오류를 내 Persona 를 끝낸다.
+MAX_LATE_RETURNS = 3
 
 # 화면 그림에서 값을 가릴 입력칸. 버튼 · 체크 계열 input 은 보이는 값이 사용자 입력이 아니라서 뺀다.
 MASK_SELECTOR = (
@@ -385,7 +391,9 @@ _COLLECT_ELEMENTS_JS = """
     return text + takeIds(lastUnit);
   };
 
-  return { items, text: bodyText() };
+  // 글을 모은 문서의 주소 · 제목도 같이 돌려준다 (GACA-224). 한 번의 실행은 한 문서라
+  // 관측의 글과 주소가 같은 문서의 것이다. 도메인 가드가 이 주소로 판정한다.
+  return { items, text: bodyText(), url: location.href, title: document.title };
 }
 """
 
@@ -416,6 +424,15 @@ class DomDriver(Driver):
         self._target_id: str | None = None  # 주 창의 CDP target id (= 주 창 main frame id)
         self._context_id: str | None = None  # 주 창의 browser context id
         self._element_map: dict[int, dict] = {}
+        # 늦은 이동 (GACA-224)
+        # - _last_allowed_url: 마지막으로 허용 안에서 본 주 창 주소. 늦은 이동을 되돌릴 곳이다.
+        #   _remember() 만 바꾼다
+        # - _late_returns: 늦은 이동을 되돌린 횟수 (MAX_LATE_RETURNS 까지)
+        # - _left_url: 이번 관측 전에 되돌린 허용 밖 주소 (계정 · 쿼리 뺌). observe() 가 시작할 때
+        #   비운다
+        self._last_allowed_url: str | None = None
+        self._late_returns = 0
+        self._left_url: str | None = None
 
     async def start(self, url: str) -> None:
         self._playwright = await async_playwright().start()
@@ -432,6 +449,7 @@ class DomDriver(Driver):
         # 새 창(target=_blank)도 같은 context 라 함께 막힌다.
         await self._page.context.route("**/*", self._guard_navigation)
         await self._page.goto(url, wait_until="domcontentloaded", timeout=NAVIGATION_TIMEOUT_MS)
+        self._remember(url)
 
     async def _guard_navigation(self, route) -> None:
         """허용 밖으로 가는 top-level 이동 요청을 끊는다 (guard.domain 2단계).
@@ -484,6 +502,7 @@ class DomDriver(Driver):
             pass
 
     async def observe(self) -> Observation:
+        self._left_url = None
         observation = await self._observe_page()
         # step 로그용 화면 그림 (모델에는 글 관측만 간다). 입력칸은 단색 막으로 가린 채 찍는다.
         # 찍지 못하면 그림 없이 진행한다 — 그 step 로그의 screenshot 은 null 이다.
@@ -497,26 +516,94 @@ class DomDriver(Driver):
             )
         except PlaywrightError:
             screenshot = None
+        # 찍는 사이 주 창이 허용 밖으로 갔으면 허용 밖 페이지의 그림일 수 있어 버린다 (GACA-224).
+        if not is_allowed(page.url, self._allowed_hosts):
+            screenshot = None
         return dataclasses.replace(observation, screenshot=screenshot)
 
     async def _observe_page(self) -> Observation:
-        """요소 목록과 본문 글만 관측한다 (화면 그림 없음)."""
+        """요소 목록과 본문 글만 관측한다 (화면 그림 없음).
+
+        주 창이 허용 밖에 와 있으면 모으기 전에 마지막 허용 주소로 되돌린다 (늦은 이동, GACA-224).
+        행동이 끝난 뒤 일어난 이동은 act() 의 3단계 되돌리기를 거치지 않는다.
+        허용 판정은 글을 모은 문서의 주소로 한다(_collect_elements 가 글과 함께 돌려준다).
+        모으는 사이 허용 밖으로 갔으면 모은 것을 버리고 다시 되돌린다.
+        허용 밖 페이지의 글 · 요소 · 제목은 관측에 넣지 않는다.
+        되돌린 허용 밖 주소는 관측의 blocked 로 남는다.
+        되돌리기는 상한이 있어(_return_inside) 이 반복은 끝난다. 되돌리지 못하면 오류를 낸다.
+        """
         page = self._require_page()
-        collected = await self._collect_elements(page)
+        while True:
+            url = page.url
+            if is_allowed(url, self._allowed_hosts):
+                collected = await self._collect_elements(page)
+                url = collected["url"]
+                if is_allowed(url, self._allowed_hosts):
+                    break
+            self._left_url = self._left_url or safe_destination(url)
+            if not await self._return_inside():
+                safe = safe_destination(page.url)
+                raise RuntimeError(f"주 창을 허용 주소로 되돌리지 못했습니다: {safe}")
+        self._remember(url)
         items = collected["items"]
         self._element_map = {item["id"]: item for item in items}
         return Observation(
-            url=page.url,
-            title=_clean(await page.title()),
+            url=url,
+            title=_clean(collected["title"]),
             dom="\n".join(self._format_element(item) for item in items),
             text=_body_text(collected["text"]),
             element_map=dict(self._element_map),
+            blocked=self._left_url,
         )
+
+    async def _return_inside(self) -> bool:
+        """허용 밖에 와 있는 주 창을 마지막 허용 주소로 되돌린다 (GACA-224). 돌아왔으면 True.
+
+        늦은 이동을 되돌리는 것은 Persona 하나에 MAX_LATE_RETURNS 번까지다.
+        되돌린 주소도 허용 밖으로 보내면(리다이렉트) 더 되돌리지 않는다.
+        다시 가 봐야 허용 밖 요청만 는다.
+        되돌릴 곳이 없으면(시작 주소부터 파괴적 경로) 되돌리지 않는다.
+        """
+        if self._last_allowed_url is None or self._late_returns >= MAX_LATE_RETURNS:
+            return False
+        self._late_returns += 1
+        page = self._require_page()
+        with contextlib.suppress(PlaywrightError):
+            await page.goto(
+                self._last_allowed_url, wait_until="domcontentloaded", timeout=NAVIGATION_TIMEOUT_MS
+            )
+        if is_allowed(page.url, self._allowed_hosts):
+            return True
+        self._late_returns = MAX_LATE_RETURNS
+        return False
+
+    def _remember(self, url: str) -> None:
+        """주 창 주소를 되돌릴 곳으로 기억한다 (GACA-224).
+
+        허용 밖 주소와 파괴적 경로(destructive_path — /member/delete.do 등)는 기억하지 않고
+        이전 값을 둔다. 되돌리기는 그 주소를 다시 GET 한다 — 상태를 바꾸는 GET 을 되풀이하지
+        않게.
+        """
+        if is_allowed(url, self._allowed_hosts) and not destructive_path(url):
+            self._last_allowed_url = url
 
     async def act(self, action: Action) -> ActionResult:
         # 요구사항: 실패 시 예외 대신 결과를 반환한다. 어떤 예외든 여기서 결과로 바꾼다.
         page = self._require_page()
         before = page.url
+        if not is_allowed(before, self._allowed_hosts):
+            # 관측 뒤 주 창이 늦게 허용 밖으로 갔다 — 행동을 정하는 사이 일어난 이동 (GACA-224).
+            # 허용 밖 페이지에서는 행동하지 않는다. 마지막 허용 주소로 되돌리고 차단으로 남긴다.
+            await self._return_inside()
+            safe = safe_destination(before)
+            return ActionResult(
+                ok=False,
+                error=f"Action blocked by domain policy: {safe}",
+                error_code="DOMAIN_BLOCKED",
+                destination=safe,
+                late=True,
+                url_after=page.url if is_allowed(page.url, self._allowed_hosts) else None,
+            )
         # 행동 전부터 열린 창(페이지가 스스로 띄운 창)은 먼저 닫는다. 그래야 행동 뒤에 보는 창과
         # 새 창의 이동 요청이 이번 행동의 것이다 (GACA-225).
         # 그중 주 창이 연 창이 있었으면 이번 행동의 새 창도 따르지 않는다. 타이머로 창을 거듭 여는
@@ -549,15 +636,17 @@ class DomDriver(Driver):
             first_line = str(e).splitlines()[0] if str(e) else ""
             result = ActionResult(ok=False, error=f"{type(e).__name__}: {first_line}")
         # 요청을 끊지 못한 이동(리다이렉트 등)으로 허용 밖에 와 있으면 행동 전 주소로 되돌린다
-        # (guard.domain 3단계).
+        # (guard.domain 3단계). 행동 전 주소가 파괴적 경로면 다시 GET 하지 않고
+        # 마지막으로 기억한 주소로 되돌린다 (GACA-224).
         outside = None if is_allowed(page.url, self._allowed_hosts) else page.url
-        if outside:
+        back_to = self._last_allowed_url if destructive_path(before) else before
+        if outside and back_to:
             try:
                 await page.goto(
-                    before, wait_until="domcontentloaded", timeout=NAVIGATION_TIMEOUT_MS
+                    back_to, wait_until="domcontentloaded", timeout=NAVIGATION_TIMEOUT_MS
                 )
             except PlaywrightError:
-                pass  # 되돌리지 못해도 차단으로 기록한다. 다음 관측은 지금 주소를 본다.
+                pass  # 되돌리지 못해도 차단으로 기록한다. 다음 관측이 마지막 허용 주소로 되돌린다.
         destination = self._blocked_url or outside
         if destination:
             safe = safe_destination(destination)
@@ -566,9 +655,13 @@ class DomDriver(Driver):
                 error=f"Action blocked by domain policy: {safe}",
                 error_code="DOMAIN_BLOCKED",
                 destination=safe,
+                late=result.late,  # _perform 이 행동하지 않은 늦은 이동이면 그대로 둔다
             )
-        # 행동 뒤 주소 (step 로그 result.url_after).
-        return dataclasses.replace(result, url_after=page.url)
+        self._remember(page.url)
+        # 행동 뒤 주소 (step 로그 result.url_after). 되돌리지 못해 허용 밖이면 None 이다 —
+        # 허용 밖 주소의 원문(계정 · 토큰이 들어 있을 수 있다)을 로그에 남기지 않는다.
+        url_after = page.url if is_allowed(page.url, self._allowed_hosts) else None
+        return dataclasses.replace(result, url_after=url_after)
 
     async def _new_window_to_follow(self) -> str | None:
         """이번 행동이 연 새 창을 닫고, 그 대신 주 창에서 열 주소를 돌려준다 (GACA-225).
@@ -640,7 +733,10 @@ class DomDriver(Driver):
         self._page = None
 
     async def _collect_elements(self, page: Page) -> dict:
-        """{"items": 요소 목록, "text": 본문 글}. 한 스크립트로 모아 둘이 같은 문서를 본다."""
+        """{"items": 요소 목록, "text": 본문 글, "url" · "title": 그 문서의 주소 · 제목}.
+
+        한 스크립트로 모아 모두 같은 문서의 것이다.
+        """
         # 직전 click으로 페이지 이동이 진행 중이면 실행 컨텍스트가 사라질 수 있어 한 번 더 시도한다.
         # 페이지 스크립트가 새 창을 여는 순간에 관측이 끼면 TreeWalker 의 거르개(JS 콜백)를 부르지
         # 못해 실패한다('callback is no longer runnable'). 이것도 한 번 더 시도한다 (GACA-225).
@@ -690,16 +786,34 @@ class DomDriver(Driver):
                 error=f"element_map에 없는 요소 ID: {action.element_id}",
                 error_code="ELEMENT_NOT_FOUND",
             )
-        locator = page.locator(f'[{ID_ATTRIBUTE}="{action.element_id}"]')
-
-        if action.kind == "click":
-            await locator.click(timeout=ACTION_TIMEOUT_MS)
-        elif action.kind == "type":
-            if action.value is None:
-                return ActionResult(ok=False, error="type 행동에 입력값(value)이 없습니다")
-            await locator.fill(action.value, timeout=ACTION_TIMEOUT_MS)
-        else:
+        if action.kind == "type" and action.value is None:
+            return ActionResult(ok=False, error="type 행동에 입력값(value)이 없습니다")
+        if action.kind not in ("click", "type"):
             return ActionResult(ok=False, error=f"지원하지 않는 행동: {action.kind}")
+        # 번호 요소를 handle 로 잡고, 그 요소가 든 문서가 허용 주소일 때만 그 handle 에 행동한다
+        # (GACA-224). Locator 는 행동을 기다리는 사이(가림 막 · 애니메이션) 문서가 바뀌면
+        # 새 문서에서 같은 번호를 다시 찾는다.
+        # 허용 밖 페이지가 같은 번호 속성을 심어 두면 거기서 누르고, 입력값이 허용 밖으로 나간다.
+        # handle 은 문서가 바뀌면 떨어져 행동이 실패한다.
+        # 문서 주소는 handle 이 든 문서에서 location.href 로 읽는다. location 은 페이지가
+        # 다시 정의할 수 없다. el.ownerDocument 같은 보통 속성은 허용 밖 페이지가 위조한다.
+        locator = page.locator(f'[{ID_ATTRIBUTE}="{action.element_id}"]')
+        handle = await locator.element_handle(timeout=ACTION_TIMEOUT_MS)
+        document = await handle.evaluate("() => location.href")
+        if not is_allowed(document, self._allowed_hosts):
+            # 찾는 사이 페이지가 스스로 허용 밖으로 갔다 — 행동하지 않은 늦은 이동이다.
+            safe = safe_destination(document)
+            return ActionResult(
+                ok=False,
+                error=f"Action blocked by domain policy: {safe}",
+                error_code="DOMAIN_BLOCKED",
+                destination=safe,
+                late=True,
+            )
+        if action.kind == "click":
+            await handle.click(timeout=ACTION_TIMEOUT_MS)
+        else:
+            await handle.fill(action.value, timeout=ACTION_TIMEOUT_MS)
         return ActionResult(ok=True)
 
     def _require_page(self) -> Page:

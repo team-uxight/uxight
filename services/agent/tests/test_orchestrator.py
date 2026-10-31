@@ -717,6 +717,54 @@ def test_destructive_click_is_blocked_and_audited(
     assert "탈퇴" in detail["error"]
 
 
+def test_page_returned_before_observation_is_logged_and_audited(
+    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 첫 관측 전에 주 창이 늦게 허용 밖으로 가 있어 드라이버가 되돌렸다 (GACA-224).
+    decided: list[Observation] = []
+
+    class LateRedirectDriver(Driver):
+        observes = 0
+
+        async def start(self, url: str) -> None:
+            pass
+
+        async def observe(self) -> Observation:
+            self.observes += 1
+            blocked = "https://evil.example/" if self.observes == 1 else None
+            return Observation(url="https://example.com/", title="t", dom="", blocked=blocked)
+
+        async def act(self, action: Action) -> ActionResult:
+            return ActionResult(ok=True)
+
+        async def close(self) -> None:
+            pass
+
+    class DoneDecider(Decider):
+        async def decide(self, persona, task, observation, history) -> Decision:
+            decided.append(observation)
+            return Decision(Action(kind="done"))
+
+    monkeypatch.setattr(orchestrator_module, "DomDriver", LateRedirectDriver)
+    use_decider(monkeypatch, DoneDecider())
+
+    asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)], max_steps=5)))
+
+    assert fakes.personas.statuses == {1: "done"}
+    assert len(decided) == 1  # 되돌린 step 은 LLM 을 부르지 않았다
+    lines = (persona_folder(fakes) / "steps.jsonl").read_text(encoding="utf-8").splitlines()
+    first = json.loads(lines[0])
+    assert set(first["result"]) == {"ok", "url_after", "error", "error_code"}  # late 는 안 쓴다
+    assert first["action"] is None
+    assert first["result"]["error_code"] == "DOMAIN_BLOCKED"
+    assert first["blocked"] == {"is": True, "reason": "domain"}
+    ((_, _, detail),) = fakes.audits.rows
+    assert detail["step"] == 1
+    assert detail["reason"] == "domain"
+    assert detail["destination"] == "https://evil.example/"
+    assert detail["action"] is None
+
+
 def scroll_with_tokens(prompt: int, completion: int) -> Decision:
     return Decision(
         Action(kind="scroll", value="down"), prompt_tokens=prompt, completion_tokens=completion
