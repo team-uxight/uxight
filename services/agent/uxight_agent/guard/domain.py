@@ -80,6 +80,8 @@ def blocked_destination(
 
 
 def safe_destination(url: str) -> str:
-    """로그에 남길 목적지. 쿼리 · 조각(토큰이 들어 있을 수 있다)을 빼고 길이를 자른다."""
+    """로그에 남길 목적지. 계정(user:pw@) · 쿼리 · 조각(토큰이 들어 있을 수 있다)을 빼고
+    길이를 자른다."""
     parts = urlsplit(url)
-    return parts._replace(query="", fragment="").geturl()[:MAX_DESTINATION_LENGTH]
+    netloc = parts.netloc.rpartition("@")[2]
+    return parts._replace(netloc=netloc, query="", fragment="").geturl()[:MAX_DESTINATION_LENGTH]

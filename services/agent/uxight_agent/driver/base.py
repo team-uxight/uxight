@@ -10,13 +10,17 @@ class ActionResult:
 
     error_code 는 step 로그의 오류 코드다 (행동 로그 명세 3.8). 실행하지 않은 step(파싱 실패 ·
     차단 · LLM 호출 실패)도 이 결과로 남긴다.
+    late 는 늦은 이동을 되돌린 DOMAIN_BLOCKED 다 — 관측 전이나 행동 전에 페이지가 스스로
+    허용 밖으로 갔고, 이 step 의 행동이 간 것이 아니다 (GACA-224).
+    프롬프트의 '지난 행동' 문구만 다르게 하고 로그에는 쓰지 않는다.
     """
 
     ok: bool
     error: str | None = None
     error_code: str | None = None
     url_after: str | None = None  # 행동 뒤 페이지 주소. 모르면 None (로그엔 행동 전 주소)
-    destination: str | None = None  # DOMAIN_BLOCKED 일 때 막은 목적지 (쿼리 뺌, 200자 안)
+    destination: str | None = None  # DOMAIN_BLOCKED 일 때 막은 목적지 (계정 · 쿼리 뺌, 200자 안)
+    late: bool = False
 
 
 @dataclass(frozen=True)
@@ -28,7 +32,7 @@ class Observation:
     글이 있는 표 칸 · 문단 안에 번호 요소가 있으면 글 뒤에 그 요소 번호가 ' [n]' 으로 붙는다
     (GACA-222).
     링크 요소의 url 은 브라우저가 풀어 쓴 목적지다 — 도메인 가드가 이것으로 막는다.
-    blocked 는 관측 전에 드라이버가 되돌린 허용 밖 주소다(쿼리 뺌, 200자 안).
+    blocked 는 관측 전에 드라이버가 되돌린 허용 밖 주소다(계정 · 쿼리 뺌, 200자 안).
     행동이 끝난 뒤 주 창이 늦게 허용 밖으로 갔다 (GACA-224). 관측은 되돌린 화면이고,
     허용 밖 페이지의 글은 들어 있지 않다.
     screenshot은 입력칸을 가린 화면 PNG 바이트다. SoM 방식은 번호 박스를 그린 그림(모델 입력),

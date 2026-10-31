@@ -754,6 +754,7 @@ def test_page_returned_before_observation_is_logged_and_audited(
     assert len(decided) == 1  # 되돌린 step 은 LLM 을 부르지 않았다
     lines = (persona_folder(fakes) / "steps.jsonl").read_text(encoding="utf-8").splitlines()
     first = json.loads(lines[0])
+    assert set(first["result"]) == {"ok", "url_after", "error", "error_code"}  # late 는 안 쓴다
     assert first["action"] is None
     assert first["result"]["error_code"] == "DOMAIN_BLOCKED"
     assert first["blocked"] == {"is": True, "reason": "domain"}

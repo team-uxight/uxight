@@ -101,6 +101,11 @@ def _history_text(history: list) -> str:
                 did += f" {action.value}"
         if step.result.ok:
             outcome = "성공"
+        elif step.result.late:
+            # 페이지가 스스로 허용 밖으로 가 되돌린 차단이다 (GACA-224).
+            # 이 행동이 허용 밖으로 간 것이 아니라서, 링크 차단 문구를 쓰면
+            # 모델이 멀쩡한 요소를 피한다.
+            outcome = "실행 안 됨 (페이지가 허용 도메인 밖으로 넘어가 이전 화면으로 되돌림)"
         elif step.result.error_code == "DOMAIN_BLOCKED":
             outcome = "차단됨 (허용 도메인 밖 링크)"
         elif step.result.error_code == "DESTRUCTIVE_ACTION_BLOCKED":

@@ -92,6 +92,7 @@ class PersonaAgent:
                 error=f"Page moved outside domain policy: {observation.blocked}",
                 error_code="DOMAIN_BLOCKED",
                 destination=observation.blocked,
+                late=True,
             )
         elif decision.action is None:
             # 행동을 얻지 못한 step 은 브라우저에서 아무것도 하지 않고 기록만 남긴다.

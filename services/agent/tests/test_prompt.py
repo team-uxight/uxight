@@ -115,6 +115,27 @@ def test_history_shows_recent_steps_only() -> None:
     assert text.count("번째:") == HISTORY_STEPS
 
 
+def test_history_shows_late_navigation_apart_from_outside_link() -> None:
+    # 늦은 이동을 되돌린 차단(GACA-224)은 이 행동이 허용 밖으로 간 것이 아니다.
+    # 링크 차단 문구로 보이면 모델이 멀쩡한 요소를 피한다.
+    # 보통 링크 차단의 문구는 그대로다(10/30 bench 와 비교).
+    now = datetime.now().astimezone()
+    link = ActionResult(ok=False, error_code="DOMAIN_BLOCKED")
+    late = ActionResult(ok=False, error_code="DOMAIN_BLOCKED", late=True)
+    history = [
+        StepResult(OBSERVATION, Decision(Action(kind="click", element_id=1)), link, now, now),
+        StepResult(OBSERVATION, Decision(None), late, now, now),  # 관측 전 되돌림
+        StepResult(OBSERVATION, Decision(Action(kind="click", element_id=2)), late, now, now),
+    ]
+
+    text = _user_text(history)
+
+    returned = "실행 안 됨 (페이지가 허용 도메인 밖으로 넘어가 이전 화면으로 되돌림)"
+    assert "- 1번째: click 1번 → 차단됨 (허용 도메인 밖 링크)" in text
+    assert f"- 2번째: 행동 없음 → {returned}" in text
+    assert f"- 3번째: click 2번 → {returned}" in text
+
+
 def test_page_text_cannot_forge_fence_brackets() -> None:
     observation = Observation(
         url="https://copy.example/",
