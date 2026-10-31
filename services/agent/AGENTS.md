@@ -7,6 +7,8 @@
 - `cost_usd` 칸은 소수 4자리다. Persona 행은 그 Persona 사용량 합계의 4자리 반올림이고, `runs` 는 Persona 행의 합이다. 따라서 Persona 가 여럿이면 `runs` 값이 사용량 기록 전체 합의 반올림과 0.0001~0.0002 다를 수 있다.
 - 서버(agent 컨테이너)는 코드의 기본 단가표만 쓴다. `LLM_PRICES` 는 CLI(`usage_report`) · bakeoff · bench 용이다.
 - 성능 benchmark(`bench.py` · `bench_metrics.py`, GACA-179)는 운영 코드로 돌되 DB 를 불러오지 않는다. Watcher 와 같이 쓰는 step 규칙(로그 14칸 · 성공 판정 · 비용 · Persona 를 끝낼지)은 `watcher/step_rules.py` 에 있고, 이 파일도 DB 를 불러오지 않는다.
+- 가드 그림자 모드(GACA-180)는 `PersonaAgent` · `LLMDecider` 의 `guard="shadow"` 다. 막을 행동을 실행하고 지시문 표시를 붙이지 않는다. bench 에서만 넘긴다. 운영 Watcher 는 넘기지 않고(기본값 `on`), 정책 · env 로 켜는 길을 만들지 않는다.
+- 그림자 변형이 있는 bench 는 `--serve` 사본에서만 돈다(`check_shadow_sites`). 모든 변형에 드라이버의 엄격 요청 차단(`strict_requests=True`)을 켠다 — route 에서 허용 밖 하위 요청 · iframe 이동 · WebSocket 을 끊고, route 를 거치지 않는 연결(worker · 떠날 때의 beacon · 추측 prefetch · WebRTC · QUIC)은 브라우저 설정(닫힌 프록시 · UDP · QUIC 끄기 · service worker 막기)으로 막는다. 운영 Watcher 는 엄격 차단을 켜지 않는다(기본값 꺼짐).
 - 끊긴 step(LLM 응답 뒤 시간 상한 · 취소 · 행동 오류)의 토큰 · 비용은 사용량 기록(`llm-usage.jsonl`)에만 남고 DB 에서는 빠진다. 토큰은 이번 변경 전부터 같은 방식으로 빠졌다.
 - 한도(step · 토큰 · 하루 예산 · 시간)로 끝난 Persona 는 마지막 행동 뒤 화면을 `step-<n+1>.png` 로 남길 수 있다. 파일 번호는 마지막 step 번호 + 1 이다. 이 화면의 로그 줄은 없다.
 - 마지막 화면이 없는 경우: `done` · `fail` · 취소로 끝남, 마지막 step 의 행동을 브라우저에 보내지 않음(파싱 실패 · 가드 차단 등), 찍기 실패. 이때 스크린샷 조회는 404 다.
