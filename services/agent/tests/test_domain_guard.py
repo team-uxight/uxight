@@ -325,7 +325,7 @@ def two_sites():
                 self.wfile.write(SPAM_FRAME.encode())
                 return
             if self.path.startswith("/trap"):
-                self.wfile.write(TRAP_PAGE.encode())
+                self.wfile.write(TRAP_PAGE.replace("{allowed}", allowed_origin).encode())
                 return
             self.wfile.write(b"<html><body>outside</body></html>")
 
@@ -345,7 +345,8 @@ def two_sites():
             for name, html in UNRELATED_WINDOW_PAGES.items()
         }
         | {f"/late/{ms}": LATE_PAGE.replace("{ms}", str(ms)) for ms in LATE_DELAYS_MS}
-        | {"/covered": COVERED_PAGE, "/next": NEXT_PAGE, DELETE_PATH: DELETE_PAGE}
+        | {"/covered": COVERED_PAGE, "/rerender": RERENDER_PAGE, "/next": NEXT_PAGE}
+        | {DELETE_PATH: DELETE_PAGE}
     )
 
     class Allowed(BaseHTTPRequestHandler):
@@ -368,7 +369,8 @@ def two_sites():
         do_POST = do_GET
 
     allowed = _serve(Allowed)
-    yield f"http://127.0.0.1:{allowed.server_address[1]}/", ext, hits
+    allowed_origin = f"http://127.0.0.1:{allowed.server_address[1]}"
+    yield f"{allowed_origin}/", ext, hits
     allowed.shutdown()
     external.shutdown()
 
@@ -519,9 +521,13 @@ LATE_PAGE = (
 LATE_DELAYS_MS = (800, 1200)
 # 허용 밖 trap 페이지. 우리 번호 속성(data-ux-id, 공개 저장소에 있다)을 심어 두고, 거기서 누르거나
 # 입력하면 밖 서버로 알린다.
+# 요소의 ownerDocument 도 허용 주소({allowed}, 밖 서버가 채운다)처럼 보이게 위조한다.
+# 보통 속성이라 페이지가 다시 정의할 수 있다 — 드라이버는 위조할 수 없는 location 을 본다.
 # 알림 주소는 location.origin 으로 만든다 — trap 주소에 계정(user:pw@)이 있어, 상대 주소로
 # 보내면 fetch 가 거절한다.
 TRAP_PAGE = (
+    "<script>Object.defineProperty(Node.prototype, 'ownerDocument',"
+    " { get: () => ({ location: { href: '{allowed}/' } }) })</script>"
     '<button data-ux-id="1" onclick="fetch(location.origin + \'/clicked\')">trap</button>'
     '<input data-ux-id="2"'
     " oninput=\"fetch(location.origin + '/typed?v=' + encodeURIComponent(this.value))\">"
@@ -657,7 +663,7 @@ def test_action_is_not_done_on_page_that_left_while_waiting(two_sites, action: A
 def test_element_on_outside_page_is_not_acted_on(two_sites) -> None:
     # 행동 전 확인과 요소를 찾는 사이 주 창이 허용 밖 trap 으로 간 경우(아주 짧은 틈)다.
     # _perform 을 바로 불러 만든다. 요소가 든 문서의 주소를 보고 행동하지 않는다.
-    target, _, hits = two_sites
+    target, ext, hits = two_sites
     url = f"{target}late/800"
     hits.clear()
 
@@ -672,7 +678,47 @@ def test_element_on_outside_page_is_not_acted_on(two_sites) -> None:
 
     result = asyncio.run(run())
 
-    assert result.ok is False
+    # 행동하지 않은 늦은 이동으로 바로 남긴다. 3단계 때 주 창이 허용으로 돌아와 있어도 차단이다.
+    assert (result.error_code, result.destination, result.late) == (
+        "DOMAIN_BLOCKED",
+        _trap(ext),
+        True,
+    )
+    assert not [hit for hit in hits if hit.startswith(TRAP_SIGNALS)]
+
+
+# 다시 그리는 사이 늦은 이동 (GACA-224 재확인): 관측 뒤 300ms 에 버튼을 지우고(다시 그리는 중),
+# 1초 뒤 허용 밖 trap 으로 간다. 요소를 찾는 동안 trap 이 같은 번호(1)를 심는다.
+RERENDER_PAGE = (
+    "<button>go</button><script>setTimeout(() => document.querySelector('button').remove(), 300);"
+    " setTimeout(() => location.href = '/late-redir', 1000)</script>"
+)
+
+
+def test_element_found_on_page_that_left_while_searching_is_not_acted_on(two_sites) -> None:
+    # 찾은 요소의 문서가 허용 밖이라 누르지 않는다. trap 이 ownerDocument 를 위조해도 같다.
+    # 행동하지 않은 늦은 이동이라 되돌린 뒤에도 late 로 남는다.
+    target, ext, hits = two_sites
+    url = f"{target}rerender"
+    hits.clear()
+
+    async def run():
+        async with DomDriver(allowed_hosts=allowed_hosts(url, [])) as driver:
+            await driver.start(url)
+            await driver.observe()  # 'go' 가 1번이다
+            await asyncio.sleep(0.5)  # 정하는 사이 버튼이 지워진다
+            result = await driver.act(Action(kind="click", element_id=1))
+            await asyncio.sleep(0.5)  # trap 에서 눌렸다면 그 알림이 서버에 닿게
+            return result
+
+    result = asyncio.run(run())
+
+    assert (result.error_code, result.destination, result.late) == (
+        "DOMAIN_BLOCKED",
+        _trap(ext),
+        True,
+    )
+    assert result.url_after == url
     assert not [hit for hit in hits if hit.startswith(TRAP_SIGNALS)]
 
 

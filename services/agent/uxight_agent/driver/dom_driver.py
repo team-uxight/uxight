@@ -655,6 +655,7 @@ class DomDriver(Driver):
                 error=f"Action blocked by domain policy: {safe}",
                 error_code="DOMAIN_BLOCKED",
                 destination=safe,
+                late=result.late,  # _perform 이 행동하지 않은 늦은 이동이면 그대로 둔다
             )
         self._remember(page.url)
         # 행동 뒤 주소 (step 로그 result.url_after). 되돌리지 못해 허용 밖이면 None 이다 —
@@ -794,11 +795,21 @@ class DomDriver(Driver):
         # 새 문서에서 같은 번호를 다시 찾는다.
         # 허용 밖 페이지가 같은 번호 속성을 심어 두면 거기서 누르고, 입력값이 허용 밖으로 나간다.
         # handle 은 문서가 바뀌면 떨어져 행동이 실패한다.
+        # 문서 주소는 handle 이 든 문서에서 location.href 로 읽는다. location 은 페이지가
+        # 다시 정의할 수 없다. el.ownerDocument 같은 보통 속성은 허용 밖 페이지가 위조한다.
         locator = page.locator(f'[{ID_ATTRIBUTE}="{action.element_id}"]')
         handle = await locator.element_handle(timeout=ACTION_TIMEOUT_MS)
-        document = await handle.evaluate("(el) => el.ownerDocument.location.href")
+        document = await handle.evaluate("() => location.href")
         if not is_allowed(document, self._allowed_hosts):
-            return ActionResult(ok=False)  # act() 의 3단계가 되돌리고 차단으로 남긴다
+            # 찾는 사이 페이지가 스스로 허용 밖으로 갔다 — 행동하지 않은 늦은 이동이다.
+            safe = safe_destination(document)
+            return ActionResult(
+                ok=False,
+                error=f"Action blocked by domain policy: {safe}",
+                error_code="DOMAIN_BLOCKED",
+                destination=safe,
+                late=True,
+            )
         if action.kind == "click":
             await handle.click(timeout=ACTION_TIMEOUT_MS)
         else:
