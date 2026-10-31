@@ -3,6 +3,8 @@
     uv run python -m uxight_agent.usage_report                    # 전체, 역할별
     uv run python -m uxight_agent.usage_report --days 1 --by run  # 최근 하루, 실행별
     uv run python -m uxight_agent.usage_report --days 1 --slack --alert-usd 5   # 서버 cron 용
+    # 운영 + benchmark 를 묶어 서버 전체
+    uv run python -m uxight_agent.usage_report --log data/llm-usage.jsonl data/bench/*/usage.jsonl
 
 - 단가는 USD / 100만 토큰 (입력, 출력, 캐시된 입력). 기본표에 없는 모델은 env 로 준다:
   LLM_PRICES='{"example/model": [1.00, 2.00, 0.10]}'.
@@ -110,7 +112,8 @@ def summarize(rows: list[dict[str, Any]], by: str, table: PriceTable) -> dict:
         g["input"] += row["input_tokens"]
         g["output"] += row["output_tokens"]
         g["reasoning"] += row["reasoning_tokens"]
-        usd = cost_usd(row, table)
+        # 부를 때 남긴 비용이 있으면 그대로 쓴다 — 단가표가 바뀌어도 지난 비용은 안 바뀐다.
+        usd = row["cost_usd"] if row.get("cost_usd") is not None else cost_usd(row, table)
         if usd is None:
             unpriced += 1
         else:
@@ -154,7 +157,11 @@ def post_slack(text: str, url: str) -> None:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument(
-        "--log", type=Path, default=None, help="기본: LLM_USAGE_LOG 또는 data/llm-usage.jsonl"
+        "--log",
+        type=Path,
+        nargs="+",
+        default=None,
+        help="여러 개면 묶어서 센다. 기본: LLM_USAGE_LOG 또는 data/llm-usage.jsonl",
     )
     ap.add_argument("--days", type=int, default=None, help="최근 N일만")
     ap.add_argument("--by", choices=sorted(GROUP_KEYS), default="role")
@@ -162,7 +169,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--alert-usd", type=float, default=None, help="이 금액을 넘으면 경고")
     args = ap.parse_args(argv)
 
-    rows = load(args.log or usage_log_path(), args.days)
+    rows = [row for path in args.log or [usage_log_path()] for row in load(path, args.days)]
     summary = summarize(rows, args.by, price_table())
     span = f"최근 {args.days}일" if args.days else "전체"
     report = render(summary, args.by, f"LLM 사용량 ({span}, {args.by}별)")
