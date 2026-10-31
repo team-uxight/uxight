@@ -350,10 +350,21 @@ class RunOrchestrator:
         self, run_id: int, persona_id: int, hosts: frozenset[str]
     ) -> AsyncIterator[DomDriver]:
         """나갈 때 브라우저를 닫되 BROWSER_CLOSE_TIMEOUT_SECONDS 까지만 기다린다."""
-        driver = DomDriver(allowed_hosts=hosts)
+        # 운영 회차도 허용 밖 하위 요청 차단을 켠다 (GACA-227). 허용 링크에 붙은 허용 밖 ping,
+        # iframe 으로 보내는 폼, beacon, 떠날 때의 beacon 이 허용 밖으로 나가지 않는다.
+        driver = DomDriver(allowed_hosts=hosts, block_outside_subrequests=True)
         try:
             yield driver
         finally:
+            if driver.blocked_outside_subrequests:
+                # 대상 사이트가 허용 밖에서 받는 자원(CDN 스크립트 · 글꼴 · iframe)도 끊긴다.
+                # 화면이 사람이 보는 것과 다르면 그 호스트를 허용 도메인에 넣는다.
+                logger.info(
+                    "run=%s persona=%s blocked %s outside subrequests",
+                    run_id,
+                    persona_id,
+                    driver.blocked_outside_subrequests,
+                )
             # 닫기가 멈추면 자리를 쥔 채 결과 기록까지 막히고, 그동안 감시 태스크가 heartbeat 를
             # 계속 써서 멈춤(stale) 표시도 뜨지 않는다. 상한을 넘으면 브라우저가 남더라도 진행한다.
             try:
