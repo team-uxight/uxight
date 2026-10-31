@@ -1,11 +1,14 @@
+import asyncio
+import contextlib
 import dataclasses
 import json
 import re
 import unicodedata
 
-from playwright.async_api import Browser, Page, Playwright, async_playwright
+from playwright.async_api import Browser, CDPSession, Page, Playwright, async_playwright
 from playwright.async_api import Error as PlaywrightError
 
+from ..guard.destructive import destructive_path
 from ..guard.domain import host_key, is_allowed, safe_destination
 from ..schemas import Action
 from .base import ActionResult, Driver, Observation
@@ -13,6 +16,11 @@ from .base import ActionResult, Driver, Observation
 NAVIGATION_TIMEOUT_MS = 15_000
 ACTION_TIMEOUT_MS = 5_000
 ID_ATTRIBUTE = "data-ux-id"
+# 행동이 연 새 창에 이동 요청이 아직 없을 때 기다리는 상한.
+# 새 창의 첫 이동 요청은 보통 click 이 돌아올 때 이미 가드에 닿아 있다(10/31 측정: 60번 모두
+# 1ms 안). 빈 창을 먼저 열고 주소를 나중에 넣는 스크립트를 위해 둔다.
+# 행동이 새 창을 열지 않았으면 기다리지 않는다.
+NEW_WINDOW_WAIT_MS = 1_000
 
 # 화면 그림에서 값을 가릴 입력칸. 버튼 · 체크 계열 input 은 보이는 값이 사용자 입력이 아니라서 뺀다.
 MASK_SELECTOR = (
@@ -197,9 +205,22 @@ _COLLECT_ELEMENTS_JS = """
     const alpha = inner.includes('/') ? inner.split('/')[1] : inner.split(',')[3];
     return alpha === undefined ? 1 : parseFloat(alpha) / (alpha.trim().endsWith('%') ? 100 : 1);
   };
+  // clip-path: inset(위 오른쪽 아래 왼쪽) 이 남기는 상자. 값은 px 또는 %, round 는 보지 않는다.
+  // 읽지 못하는 값(calc 등)이면 NaN 상자가 되어 어떤 글과도 겹치지 않는다.
+  const insetBox = (el, clipPath) => {
+    const [top, right = top, bottom = top, left = right] = clipPath
+      .slice(6, clipPath.indexOf(')')).split(' round ')[0].trim().split(/\\s+/);
+    const r = el.getBoundingClientRect();
+    const size = (value, length) => parseFloat(value) * (value.endsWith('%') ? length / 100 : 1);
+    return {
+      left: r.left + size(left, r.width), right: r.right - size(right, r.width),
+      top: r.top + size(top, r.height), bottom: r.bottom - size(bottom, r.height),
+    };
+  };
   // 글 조각을 감싼 요소마다 한 번만 잰다 — 같은 요소 안의 글 조각마다 조상을 다시 오르지 않게.
   // - shown: 보이는가
-  // - clips: 글을 자르는 overflow hidden · clip 조상의 상자
+  // - clips: 글을 자르는 overflow hidden · clip 조상의 상자와 clip-path: inset() 이 남기는 상자
+  //   (GACA-225). inset(50%) 처럼 다 가리면 빈 상자다. 다른 모양(polygon 등)은 보지 않는다.
   // - block · cell: 줄 나눔용
   const boxes = new Map();
   const boxOf = (node) => {
@@ -215,6 +236,7 @@ _COLLECT_ELEMENTS_JS = """
       if (/hidden|clip/.test(`${upStyle.overflowX} ${upStyle.overflowY}`)) {
         clips.push(up.getBoundingClientRect());
       }
+      if (upStyle.clipPath.startsWith('inset(')) clips.push(insetBox(up, upStyle.clipPath));
       if (upStyle.position === 'fixed') break; // 고정 위치 요소는 그 위 조상의 상자에 잘리지 않는다
     }
     const block = blockOf(node);
@@ -230,8 +252,65 @@ _COLLECT_ELEMENTS_JS = """
   };
   const inView = (r) => r.width > 0 && r.height > 0
     && r.top < innerHeight && r.bottom > 0 && r.left < innerWidth && r.right > 0;
-  const overlaps = (r, clip) => r.right > clip.left && r.left < clip.right
-    && r.bottom > clip.top && r.top < clip.bottom;
+  // 겹친 넓이가 있어야 겹친다 — 빈 상자(다 가린 clip-path)와는 겹치지 않는다.
+  const overlaps = (r, clip) => Math.min(r.right, clip.right) > Math.max(r.left, clip.left)
+    && Math.min(r.bottom, clip.bottom) > Math.max(r.top, clip.top);
+
+  // 클릭이 걸린 칸 (GACA-225): 링크 · 버튼 · 입력칸이 아닌데 손가락 커서(cursor: pointer)인 요소.
+  // 사이트 스크립트가 클릭을 받는다 — 학교 사본 졸업 페이지의 학번 칸은 누르면 새 창을 연다.
+  // 번호는 위 요소들 다음부터 붙인다. 번호 요소가 넘치지 않게 아래를 모두 지킨 것만 넣는다.
+  // - 가장 바깥 요소만: 손가락 커서는 자식에게 물려지므로 부모도 손가락 커서면 뺀다.
+  // - 번호 요소 안이 아니고, 안에 번호 요소도 없다 — 그 번호를 누르면 된다.
+  //   라벨은 이어진 입력칸에 번호가 있으면 뺀다.
+  // - 칸이 보이고 보이는 글이 있다. 글은 본문 글과 같은 기준(감싼 요소 · 글자색 · 자르는 조상
+  //   상자)을 지킨 글 조각만 쓰고, 가로로 화면 밖인 글(text-indent)도 뺀다. 화면 아래 글은
+  //   링크처럼 남긴다 — 스크롤하면 보인다.
+  //   글 없이 aria-label · title 만 있는 칸(아이콘만 있는 칸)은 번호가 없다.
+  // - 글이 maxValueLength 자 안이다. 번호 요소 안 글은 본문 글에서 빠지므로, 글이 요소 줄
+  //   하나에 다 들어가는 것만 넣는다. 큰 상자를 넣으면 그 안 글을 잃는다.
+  // 파괴적 행동 가드는 이 요소(pointer)를 버튼으로 본다.
+  const shownText = (el) => {
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    const range = document.createRange();
+    let text = '';
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (!node.textContent.trim() || node.parentNode.localName === 'textarea') continue;
+      range.selectNodeContents(node);
+      const box = boxOf(node);
+      const shown = box.shown && Array.from(range.getClientRects()).some((r) => r.width > 0
+        && r.height > 0 && r.right > 0 && r.left < innerWidth && r.bottom + scrollY > 0
+        && box.clips.every((clip) => overlaps(r, clip)));
+      if (shown) text += ` ${node.textContent}`;
+    }
+    return text;
+  };
+  for (const el of document.body?.querySelectorAll('*') ?? []) {
+    if (getComputedStyle(el).cursor !== 'pointer'
+      || getComputedStyle(el.parentElement).cursor === 'pointer'
+      || el.closest(`${selector}, [${idAttr}]`) || el.querySelector(`[${idAttr}]`)
+      || el.control?.hasAttribute(idAttr) || visibilityOf(el) !== 'visible') {
+      continue;
+    }
+    const text = shownText(el).trim().replace(/\\s+/g, ' ');
+    if (!text || text.length > maxValueLength) continue;
+    el.setAttribute(idAttr, String(nextId));
+    items.push({
+      id: nextId,
+      tag: el.tagName.toLowerCase(),
+      text,
+      role: el.getAttribute('role'),
+      // 가드가 볼 이름: 칸과 칸 안쪽 요소의 aria-label · title, 안의 img alt. 칸 안의 ✕
+      // 아이콘(title '삭제')을 눌러도 가드가 걸리게 안쪽까지 모으고, 뒤쪽 이름을 놓치지 않게
+      // 자르지 않는다. 관측 글에는 넣지 않는다.
+      hint: [el, ...el.querySelectorAll('[aria-label], [title]')]
+        .flatMap((named) => [named.getAttribute('aria-label'), named.getAttribute('title')])
+        .concat(Array.from(el.querySelectorAll('img[alt]'), (img) => img.alt))
+        .filter(Boolean).join(' '),
+      pointer: true,
+    });
+    nextId++;
+  }
+
   // 칸 · 블록 → 그 안 번호 요소의 번호(문서 순서).
   // 표 칸 안의 요소는 그 칸에 두고, 아니면 감싼 블록에 둔다.
   const idsByUnit = new Map();
@@ -317,16 +396,36 @@ class DomDriver(Driver):
     def __init__(self, headless: bool = True, allowed_hosts: frozenset[str] = frozenset()) -> None:
         super().__init__(allowed_hosts)
         self._blocked_url: str | None = None  # 이번 행동 중 끊은 이동의 목적지
+        # 이번 행동의 새 창 · 이동 요청 (GACA-225). act() 가 행동마다 비운다.
+        # - _page_opened_window: 행동 전에 주 창이 스스로 창을 열었다 — 새 창을 따르지 않는다
+        # - _navigated: 주 창이나 새 창의 이동 요청이 왔다 (새 창 기다림을 끝낸다)
+        # - _main_navigated: 주 창의 이동 요청이 왔다 — 그러면 새 창은 따르지 않는다
+        # - _new_window_url: 새 창의 첫 허용 주소 GET. 따를지는 act() 가 정한다
+        self._page_opened_window = False
+        self._navigated = asyncio.Event()
+        self._main_navigated = False
+        self._new_window_url: str | None = None
         self._headless = headless
         self._playwright: Playwright | None = None
         self._browser: Browser | None = None
         self._page: Page | None = None
+        self._cdp: CDPSession | None = None  # 새 창을 보고 닫는 브라우저 CDP 세션
+        # 닫은 창의 CDP target id. 다른 프로세스에 뜬 창(target=_blank 기본값)은 닫은 뒤에도
+        # 수십 ms 동안 목록에 남는다(10/31 측정: 35ms) — 다음 행동이 남은 창으로 보지 않게.
+        self._closed_windows: set[str] = set()
+        self._target_id: str | None = None  # 주 창의 CDP target id (= 주 창 main frame id)
+        self._context_id: str | None = None  # 주 창의 browser context id
         self._element_map: dict[int, dict] = {}
 
     async def start(self, url: str) -> None:
         self._playwright = await async_playwright().start()
         self._browser = await self._playwright.chromium.launch(headless=self._headless)
         self._page = await self._browser.new_page()
+        session = await self._page.context.new_cdp_session(self._page)
+        target = (await session.send("Target.getTargetInfo"))["targetInfo"]
+        self._target_id, self._context_id = target["targetId"], target["browserContextId"]
+        await session.detach()
+        self._cdp = await self._browser.new_browser_cdp_session()
         start_host = host_key(url)
         if start_host:
             self._allowed_hosts = self._allowed_hosts | {start_host}
@@ -342,6 +441,8 @@ class DomDriver(Driver):
         주 창(self._page)이 아닌 창, 곧 새 창의 이동은 주소와 상관없이 끊는다. 허용된 주소도
         리다이렉트로 허용 밖 주소에 닿을 수 있고(route 는 리다이렉트를 보지 못한다), 새 창에는
         3단계 되돌리기가 없다. Agent 는 새 창을 보지 않는다.
+        대신 행동 중 새 창의 첫 허용 주소 GET 을 남긴다 (GACA-225). 행동이 연 창이면 act() 가
+        그 주소를 주 창에서 연다. 주 창의 이동이라 이 처리기와 3단계 되돌리기를 거친다.
         이 처리기는 예외를 내면 안 된다. 낸 예외는 Playwright 가 다음 API 호출(관측의 page.evaluate
         등)에서 대신 던지고, 그 요청은 이어지지도 끊기지도 않은 채 멈춘다 (GACA-223).
         그래서 판정하지 못한 이동은 끊고, 끊기 · 잇기에서 난 오류는 밖으로 내지 않는다.
@@ -351,11 +452,24 @@ class DomDriver(Driver):
         try:
             if request.is_navigation_request():
                 outside = not is_allowed(request.url, self._allowed_hosts)
-                frame = request.frame
-                block = frame.page is not self._page or (outside and frame.parent_frame is None)
+                try:
+                    frame = request.frame
+                except PlaywrightError:
+                    # 주소를 넘겨 연 새 창(target=_blank · window.open)은 첫 이동부터 끊기므로
+                    # Playwright 가 끝내 그 창을 모른다. 그래서 그 창의 모든 이동에서
+                    # request.frame 이 오류를 낸다.
+                    frame = None
+                new_window = frame is None or frame.page is not self._page
+                top = frame is None or frame.parent_frame is None
+                block = new_window or (outside and top)
+                if top:
+                    # 폼 POST 는 주 창에서 다시 보낼 수 없어(page.goto 는 GET) 남기지 않는다.
+                    if not new_window:
+                        self._main_navigated = True
+                    elif self._new_window_url is None and not outside and request.method == "GET":
+                        self._new_window_url = request.url
+                    self._navigated.set()
         except Exception:
-            # 주소를 넘겨 연 새 창(target=_blank · window.open)은 첫 이동부터 끊기므로 Playwright 가
-            # 끝내 그 창을 모른다. 그래서 그 창의 모든 이동에서 request.frame 이 오류를 낸다.
             block = True
         try:
             if block:
@@ -403,9 +517,34 @@ class DomDriver(Driver):
         # 요구사항: 실패 시 예외 대신 결과를 반환한다. 어떤 예외든 여기서 결과로 바꾼다.
         page = self._require_page()
         before = page.url
+        # 행동 전부터 열린 창(페이지가 스스로 띄운 창)은 먼저 닫는다. 그래야 행동 뒤에 보는 창과
+        # 새 창의 이동 요청이 이번 행동의 것이다 (GACA-225).
+        # 그중 주 창이 연 창이 있었으면 이번 행동의 새 창도 따르지 않는다. 타이머로 창을 거듭 여는
+        # 페이지에서는 행동 중에 생긴 창을 클릭이 열었는지 가를 수 없다.
+        leftovers = await self._windows()
+        await self._close_windows(leftovers)
+        self._page_opened_window = any(
+            window.get("openerFrameId") == self._target_id for window in leftovers
+        )
         self._blocked_url = None
+        self._main_navigated = False
+        self._new_window_url = None
+        self._navigated.clear()
         try:
             result = await self._perform(action)
+            url = await self._new_window_to_follow()
+            if url and (reason := destructive_path(url)):
+                # 새 창으로 열려던 주소도 링크 목적지처럼 파괴적 행동 가드의 경로 검사를 거친다.
+                result = ActionResult(
+                    ok=False,
+                    error=f"Action blocked as destructive: {reason}",
+                    error_code="DESTRUCTIVE_ACTION_BLOCKED",
+                )
+            elif url:
+                # 새 창으로 열려던 허용 주소를 주 창에서 연다 (GACA-225).
+                # 사람은 새 탭에서 이어 본다. step 로그의 url_after 가 이 주소가 된다.
+                # 허용 밖으로 리다이렉트되면 아래 3단계가 되돌린다.
+                await page.goto(url, wait_until="domcontentloaded", timeout=NAVIGATION_TIMEOUT_MS)
         except Exception as e:
             first_line = str(e).splitlines()[0] if str(e) else ""
             result = ActionResult(ok=False, error=f"{type(e).__name__}: {first_line}")
@@ -431,6 +570,66 @@ class DomDriver(Driver):
         # 행동 뒤 주소 (step 로그 result.url_after).
         return dataclasses.replace(result, url_after=page.url)
 
+    async def _new_window_to_follow(self) -> str | None:
+        """이번 행동이 연 새 창을 닫고, 그 대신 주 창에서 열 주소를 돌려준다 (GACA-225).
+
+        행동 전부터 있던 창은 act() 가 먼저 닫았으므로, 지금 열린 창은 이번 행동 중 생긴 창이다.
+        따르는 것은 행동이 연 창뿐이다 (_opened_by_action). iframe 이 연 창 · 한꺼번에 둘 이상
+        열린 창은 따르지 않는다. 이번 행동에서 이동을 끊었거나 주 창이 움직였어도 따르지 않는다.
+        따를 창의 이동 요청이 아직 없으면 NEW_WINDOW_WAIT_MS 까지 기다린다.
+        기다리는 사이 다른 창이 열리면 따르지 않는다 — 남은 주소가 그 창의 것일 수 있다.
+        """
+        windows = await self._windows()
+        if self._opened_by_action(windows) and not self._navigated.is_set():
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(self._navigated.wait(), NEW_WINDOW_WAIT_MS / 1000)
+            windows = await self._windows()
+        await self._close_windows(windows)
+        if self._opened_by_action(windows) and not (self._blocked_url or self._main_navigated):
+            return self._new_window_url
+        return None
+
+    def _opened_by_action(self, windows: list[dict]) -> bool:
+        """행동이 연 창이다: 새 창이 하나뿐이고, 그 창을 주 창의 main frame 이 열었다.
+
+        여는 frame 은 CDP openerFrameId 로 본다. page target 의 id 는 그 main frame 의 id 와 같다.
+        행동 전에 주 창이 스스로 창을 연 페이지면 아니라고 본다 (act() 의 _page_opened_window).
+        """
+        return (
+            not self._page_opened_window
+            and len(windows) == 1
+            and windows[0].get("openerFrameId") == self._target_id
+        )
+
+    async def _windows(self) -> list[dict]:
+        """주 창 말고 열린 창 (CDP target 정보 — 주 창과 같은 browser context 의 page 만).
+
+        가드가 이동을 끊은 새 창은 빈 창으로 브라우저가 닫힐 때까지 남는다. Playwright 가 모르는
+        창도 있어 CDP 로 보고 닫는다. CDP 오류면 빈 목록이다 — 창을 닫지도 따르지도 않는다.
+        """
+        try:
+            targets = (await self._cdp.send("Target.getTargets"))["targetInfos"]
+        except PlaywrightError:
+            return []
+        return [
+            target
+            for target in targets
+            if target["type"] == "page"
+            and target.get("browserContextId") == self._context_id
+            and target["targetId"] not in (self._target_id, *self._closed_windows)
+        ]
+
+    async def _close_windows(self, windows: list[dict]) -> None:
+        """창을 닫는다. 닫지 못한 창은 넘어간다 — 다음 행동 때 다시 닫는다.
+
+        target=_blank 링크는 창마다 renderer 프로세스를 하나씩 띄운다(10/31 측정: 20번 누르면
+        renderer 22개, 메모리 약 1.4GB).
+        """
+        for window in windows:
+            with contextlib.suppress(PlaywrightError):
+                await self._cdp.send("Target.closeTarget", {"targetId": window["targetId"]})
+                self._closed_windows.add(window["targetId"])
+
     async def close(self) -> None:
         if self._browser is not None:
             await self._browser.close()
@@ -443,6 +642,8 @@ class DomDriver(Driver):
     async def _collect_elements(self, page: Page) -> dict:
         """{"items": 요소 목록, "text": 본문 글}. 한 스크립트로 모아 둘이 같은 문서를 본다."""
         # 직전 click으로 페이지 이동이 진행 중이면 실행 컨텍스트가 사라질 수 있어 한 번 더 시도한다.
+        # 페이지 스크립트가 새 창을 여는 순간에 관측이 끼면 TreeWalker 의 거르개(JS 콜백)를 부르지
+        # 못해 실패한다('callback is no longer runnable'). 이것도 한 번 더 시도한다 (GACA-225).
         for attempt in range(2):
             await page.wait_for_load_state("domcontentloaded", timeout=NAVIGATION_TIMEOUT_MS)
             try:
@@ -457,7 +658,8 @@ class DomDriver(Driver):
                     },
                 )
             except Exception as e:
-                if attempt == 1 or "Execution context was destroyed" not in str(e):
+                transient = ("Execution context was destroyed", "callback is no longer runnable")
+                if attempt == 1 or not any(message in str(e) for message in transient):
                     raise
         return {"items": [], "text": ""}
 
