@@ -1,7 +1,9 @@
 """도메인 이탈 차단 (GACA-152). 사본(로컬 http 서버) 밖 링크는 누르지 않고 차단을 남긴다."""
 
 import asyncio
+import contextlib
 import json
+import re
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -30,6 +32,9 @@ from uxight_agent.repositories.audit_log_repository import AuditLogRepository
 from uxight_agent.schemas import Action
 
 PAGE = "domain_links.html"
+# 허용 밖 하위 요청 차단을 켠 설정(운영)과 끈 설정. 끄면 브라우저가 밖 페이지를 실제로 연 경우에도
+# 막는지 본다 — 허용 밖 하위 요청 차단은 그 앞 겹이다 (GACA-227).
+BLOCKING = pytest.mark.parametrize("block", [True, False], ids=["block-on", "block-off"])
 
 
 def test_allowed_hosts_are_snapshot_plus_target_host_and_port() -> None:
@@ -163,11 +168,15 @@ def test_blocked_action_audit_detail_is_object(
 
 
 # 클릭 전에는 목적지를 알 수 없거나 속는 이동 — 브라우저가 이동 요청을 끊거나 되돌려야 막힌다.
+# 'redirect form post' 는 폼 POST 가 허용 주소(/redir)에서 허용 밖으로 리다이렉트한다.
+# 버튼 이름이 '검색' 이라 파괴적 행동 가드는 통과한다.
 BYPASS_PAGE = """<!doctype html><html><head><meta charset="utf-8"></head><body>
 <a href="javascript:location.href='{ext}'">js link</a>
 <svg width="200" height="40"><a href="{ext}"><text x="5" y="20">svg link</text></a></svg>
 <a href="/redir">redirect link</a>
 <form action="{ext}" method="get"><button type="submit">form go</button></form>
+<form method="post" action="/redir">
+<button type="submit" aria-label="검색">redirect form post</button></form>
 <a href="/inside" onmousedown="this.href='{ext}'">rewrite link</a>
 </body></html>"""
 
@@ -176,11 +185,11 @@ BYPASS_PAGE = """<!doctype html><html><head><meta charset="utf-8"></head><body>
 # 'go' 를 누르는 페이지들이다. 처음 17가지는 GACA-223 보안 리뷰 probe 의 시나리오다.
 # 빈 창에 주소를 나중에 넣는 두 가지만 300ms 를 100ms 로 줄였다 — 기다리는 상한(500ms)과 거리를
 # 두려고.
-# 허용된 주소는 대부분 허용 밖으로 보내는 리다이렉트(/redir)다. 따라가면 주 창이 허용 밖 주소에
-# 한 번 닿고 3단계가 되돌린다. 같은 창 링크(위 'redirect link')와 같다.
-# 새 창이 스스로 요청을 보냈다면 허용 밖 요청이 하나 더 는다.
-# 행동 뒤 결과: (주 창 경로 — None 이면 그대로, 허용 밖 요청 수, 오류 코드)
-REVERTED = (None, 1, "DOMAIN_BLOCKED")  # 따라간 주소가 허용 밖으로 리다이렉트 → 3단계가 되돌린다
+# 허용된 주소는 대부분 허용 밖으로 보내는 리다이렉트(/redir)다. 따라가면 주 창이 허용 밖으로
+# 가려다 막힌 프록시에서 끊기고 3단계가 되돌린다. 같은 창 링크(위 'redirect link')와 같다.
+# 허용 밖 하위 요청 차단으로 허용 밖 서버에는 요청이 닿지 않는다 (GACA-227).
+# 행동 뒤 결과: (주 창 경로 — None 이면 그대로, 허용 밖 서버에 닿은 요청 수, 오류 코드)
+REVERTED = (None, 0, "DOMAIN_BLOCKED")  # 따라간 주소가 허용 밖으로 리다이렉트 → 3단계가 되돌린다
 FOLLOWED = ("inside", 0, None)  # 따라가 주 창이 그 주소로 간다
 BLOCKED = (None, 0, "DOMAIN_BLOCKED")  # 허용 밖 주소 → 끊고 차단으로 남긴다
 STAYED = (None, 0, None)  # 따르지 않는다
@@ -365,7 +374,7 @@ def two_sites():
             self.end_headers()
             self.wfile.write(body.encode())
 
-        # 새 창의 폼 POST 가 새어 나가면 /redir 를 거쳐 허용 밖 요청으로 잡힌다.
+        # 폼 POST 도 GET 과 같이 답한다. POST /redir 는 302 로 허용 밖에 보낸다 (GACA-227).
         do_POST = do_GET
 
     allowed = _serve(Allowed)
@@ -376,7 +385,8 @@ def two_sites():
 
 
 @pytest.mark.parametrize(
-    "label", ["js link", "svg link", "redirect link", "form go", "rewrite link"]
+    "label",
+    ["js link", "svg link", "redirect link", "form go", "rewrite link", "redirect form post"],
 )
 def test_navigation_outside_is_blocked_whatever_the_route(two_sites, label: str) -> None:
     target, ext, hits = two_sites
@@ -395,13 +405,34 @@ def test_navigation_outside_is_blocked_whatever_the_route(two_sites, label: str)
     step, url_after_wait = asyncio.run(run())
 
     assert step.result.error_code == "DOMAIN_BLOCKED"
-    assert ext in step.result.destination  # js 링크는 javascript:… 그대로
+    # js 링크는 javascript:… 그대로. 리다이렉트는 오류 화면 주소가 아니라 가려던 주소다 (GACA-227).
+    assert ext in step.result.destination
     # 클릭 전에 막은 step 은 브라우저 행동이 없어 url_after 가 없다 — 로그엔 행동 전 주소.
     assert (step.result.url_after or step.observation.url) == target
     assert url_after_wait == target
-    if label != "redirect link":
-        # 리다이렉트는 같은 도메인 요청의 응답이라 외부 요청이 한 번 나간 뒤 되돌린다.
-        assert hits == []
+    if label in ("redirect link", "redirect form post"):
+        # 눌렀으니 행동 뒤 주소(url_after)가 있고, 되돌린 허용 주소여야 한다. 오류 화면이 뜨기 전에
+        # 되돌리면 이 값이 비어 버린다 (GACA-227).
+        assert step.result.url_after == target
+    # 리다이렉트도 허용 밖 하위 요청 차단으로 허용 밖 서버에 닿지 않는다 (GACA-227).
+    assert hits == []
+
+
+def test_start_address_that_redirects_outside_is_reported(two_sites) -> None:
+    # 시작 주소(/redir)가 허용 밖으로 리다이렉트한다. 허용 밖 하위 요청 차단을 켜면 그 이동은 막힌
+    # 프록시에서 끊긴다. start() 는 막힌 프록시의 오류 대신 가려던 주소를 알리고, 허용 밖 서버에는
+    # 닿지 않는다 (GACA-227).
+    target, ext, hits = two_sites
+    hits.clear()
+
+    async def run():
+        async with DomDriver(allowed_hosts=allowed_hosts(target, [])) as driver:
+            await driver.start(f"{target}redir")
+
+    with pytest.raises(RuntimeError, match=f"리다이렉트됐습니다: {re.escape(ext)}"):
+        asyncio.run(run())
+
+    assert hits == []
 
 
 @pytest.mark.parametrize("case", NEW_WINDOW_CASES)
@@ -484,9 +515,14 @@ setInterval(() => window.open(to), 50)</script>"""
 @pytest.mark.parametrize("page", UNRELATED_WINDOW_PAGES)
 def test_window_not_opened_by_action_is_not_followed(two_sites, page: str) -> None:
     url = f"{two_sites[0]}unrelated/{page}"
+    # 브라우저가 허용 밖 iframe 을 실제로 연 경우에도 막는지 보는 경우만 허용 밖 하위 요청 차단을
+    # 끈다 — 그 차단은 앞 겹이라 켜면 iframe 이 열리지 않아 창도 뜨지 않는다 (GACA-227).
+    block = page != "iframe-popup-interval"
 
     async def run():
-        async with DomDriver(allowed_hosts=allowed_hosts(url, [])) as driver:
+        async with DomDriver(
+            allowed_hosts=allowed_hosts(url, []), block_outside_subrequests=block
+        ) as driver:
             await driver.start(url)
             # 가드가 새 창의 이동을 끊으면 requestfailed 가 온다. 창이 한 번 뜬 뒤에 행동한다.
             aborted = asyncio.Event()
@@ -542,6 +578,11 @@ def _trap(ext: str) -> str:
     return ext.replace("/outside", "/trap")
 
 
+def _trap_opened(hits: list[str]) -> bool:
+    """허용 밖 서버가 trap 페이지 요청을 받았다 — 브라우저가 trap 을 실제로 열었다."""
+    return any(hit.split("?")[0] == "/trap" for hit in hits)
+
+
 class LateClicker(Decider):
     """'go' 를 누른다. 첫 step 뒤로는 think 초 생각한 뒤 정한다 (LLM 응답 시간)."""
 
@@ -556,10 +597,11 @@ class LateClicker(Decider):
         return await ClickByText("go").decide(persona, task, observation, history)
 
 
+@BLOCKING
 @pytest.mark.parametrize("delay_ms", LATE_DELAYS_MS)
 @pytest.mark.parametrize("arrives", ["before-observe", "while-deciding"])
 def test_late_navigation_outside_is_returned_and_blocked(
-    two_sites, arrives: str, delay_ms: int
+    two_sites, arrives: str, delay_ms: int, block: bool
 ) -> None:
     target, ext, hits = two_sites
     url = f"{target}late/{delay_ms}"
@@ -567,7 +609,9 @@ def test_late_navigation_outside_is_returned_and_blocked(
     hits.clear()
 
     async def run():
-        async with DomDriver(allowed_hosts=allowed_hosts(url, [])) as driver:
+        async with DomDriver(
+            allowed_hosts=allowed_hosts(url, []), block_outside_subrequests=block
+        ) as driver:
             await driver.start(url)
             decider = LateClicker(wait if arrives == "while-deciding" else 0)
             agent = PersonaAgent({"persona_id": 1}, {}, driver, decider, driver._allowed_hosts)
@@ -597,17 +641,19 @@ def test_late_navigation_outside_is_returned_and_blocked(
         assert "trap" not in observation.dom
     # 늦은 이동 하나는 차단 하나로 남는다. 되돌린 뒤의 관측은 차단이 아니다.
     assert after.blocked is None
-    # 허용 밖 요청은 늦은 이동이 낸 하나뿐이다. 되돌리기는 허용 밖으로 가지 않고,
-    # trap 에서 누르거나 입력하지 않았다.
-    assert [hit.split("?")[0] for hit in hits] == ["/trap"]
+    # 허용 밖 서버에 닿은 요청: 허용 밖 하위 요청 차단을 켜면 늦은 이동도 닿지 않는다 (GACA-227).
+    # 끄면 늦은 이동이 낸 하나뿐이다. 되돌리기는 허용 밖으로 가지 않고, trap 에서 누르거나
+    # 입력하지 않았다.
+    assert [hit.split("?")[0] for hit in hits] == ([] if block else ["/trap"])
     if arrives == "before-observe":
         # 관측 전에 되돌렸다. LLM 을 부르지 않고 차단만 남긴다.
         assert late.observation.blocked == _trap(ext)
         assert late.action is None
         assert calls == 1
     else:
-        # 행동을 정하는 사이 허용 밖으로 갔다. trap 에도 같은 번호(1)가 있지만 누르지 않는다.
-        # 누르려 했다면 번호 요소를 찾다가 ACTION_TIMEOUT_MS 를 다 쓴다.
+        # 행동을 정하는 사이 허용 밖으로 갔다. 허용 밖 하위 요청 차단을 끄면 trap 에도 같은
+        # 번호(1)가 있지만 누르지 않는다. 켜면 trap 이 열리지 않고 주 창에는 오류 화면이 떠서
+        # 그 번호가 없다 (GACA-227). 누르려 했다면 번호 요소를 찾다가 ACTION_TIMEOUT_MS 를 다 쓴다.
         assert late.action == Action(kind="click", element_id=1)
         assert late.browser_ms < ACTION_TIMEOUT_MS
 
@@ -632,20 +678,26 @@ COVERED_PAGE = (
 )
 
 
+@BLOCKING
 @pytest.mark.parametrize(
     "action",
     [Action(kind="click", element_id=1), Action(kind="type", element_id=2, value="비밀 1234")],
     ids=["click", "type"],
 )
-def test_action_is_not_done_on_page_that_left_while_waiting(two_sites, action: Action) -> None:
+def test_action_is_not_done_on_page_that_left_while_waiting(
+    two_sites, action: Action, block: bool
+) -> None:
     # Locator 로 행동하면 기다리는 사이 바뀐 문서에서 같은 번호를 다시 찾아,
     # trap 에서 누르고 입력한다. 결과는 차단이나 실패다.
+    # 이 공격은 trap 이 실제로 열려야 본다 — 허용 밖 하위 요청 차단을 켜면 열리지 않는다 (GACA-227).
     target, _, hits = two_sites
     url = f"{target}covered"
     hits.clear()
 
     async def run():
-        async with DomDriver(allowed_hosts=allowed_hosts(url, [])) as driver:
+        async with DomDriver(
+            allowed_hosts=allowed_hosts(url, []), block_outside_subrequests=block
+        ) as driver:
             await driver.start(url)
             agent = PersonaAgent(
                 {"persona_id": 1}, {}, driver, Fixed(action), driver._allowed_hosts
@@ -658,17 +710,23 @@ def test_action_is_not_done_on_page_that_left_while_waiting(two_sites, action: A
 
     assert step.result.ok is False
     assert not [hit for hit in hits if hit.startswith(TRAP_SIGNALS)]
+    assert _trap_opened(hits) == (not block)
 
 
-def test_element_on_outside_page_is_not_acted_on(two_sites) -> None:
+@BLOCKING
+def test_element_on_outside_page_is_not_acted_on(two_sites, block: bool) -> None:
     # 행동 전 확인과 요소를 찾는 사이 주 창이 허용 밖 trap 으로 간 경우(아주 짧은 틈)다.
     # _perform 을 바로 불러 만든다. 요소가 든 문서의 주소를 보고 행동하지 않는다.
+    # 허용 밖 하위 요청 차단을 켜면 trap 이 열리지 않고 주 창이 오류 화면이라 번호 요소가 없다.
+    # 그래도 가려던 trap 주소와 late 로 남는다 (GACA-227).
     target, ext, hits = two_sites
     url = f"{target}late/800"
     hits.clear()
 
     async def run():
-        async with DomDriver(allowed_hosts=allowed_hosts(url, [])) as driver:
+        async with DomDriver(
+            allowed_hosts=allowed_hosts(url, []), block_outside_subrequests=block
+        ) as driver:
             await driver.start(url)
             await driver.observe()  # 'go' 가 1번이다
             await _leave(driver, "/late-redir")
@@ -685,6 +743,7 @@ def test_element_on_outside_page_is_not_acted_on(two_sites) -> None:
         True,
     )
     assert not [hit for hit in hits if hit.startswith(TRAP_SIGNALS)]
+    assert _trap_opened(hits) == (not block)
 
 
 # 다시 그리는 사이 늦은 이동 (GACA-224 재확인): 관측 뒤 300ms 에 버튼을 지우고(다시 그리는 중),
@@ -695,15 +754,22 @@ RERENDER_PAGE = (
 )
 
 
-def test_element_found_on_page_that_left_while_searching_is_not_acted_on(two_sites) -> None:
+@BLOCKING
+def test_element_found_on_page_that_left_while_searching_is_not_acted_on(
+    two_sites, block: bool
+) -> None:
     # 찾은 요소의 문서가 허용 밖이라 누르지 않는다. trap 이 ownerDocument 를 위조해도 같다.
     # 행동하지 않은 늦은 이동이라 되돌린 뒤에도 late 로 남는다.
+    # 허용 밖 하위 요청 차단을 켜면 trap 이 열리지 않고 주 창이 오류 화면이라 번호 요소가 없다.
+    # 그래도 가려던 trap 주소와 late 로 남는다 (GACA-227).
     target, ext, hits = two_sites
     url = f"{target}rerender"
     hits.clear()
 
     async def run():
-        async with DomDriver(allowed_hosts=allowed_hosts(url, [])) as driver:
+        async with DomDriver(
+            allowed_hosts=allowed_hosts(url, []), block_outside_subrequests=block
+        ) as driver:
             await driver.start(url)
             await driver.observe()  # 'go' 가 1번이다
             await asyncio.sleep(0.5)  # 정하는 사이 버튼이 지워진다
@@ -720,12 +786,21 @@ def test_element_found_on_page_that_left_while_searching_is_not_acted_on(two_sit
     )
     assert result.url_after == url
     assert not [hit for hit in hits if hit.startswith(TRAP_SIGNALS)]
+    assert _trap_opened(hits) == (not block)
 
 
 async def _leave(driver: DomDriver, to: str = "/redir") -> None:
     """늦은 이동을 일으킨다: 행동과 상관없이 주 창이 to 로 가고, 302 로 허용 밖에 닿는다."""
+
+    def outside(url: str) -> bool:
+        return not is_allowed(url, driver._allowed_hosts)
+
     await driver._page.evaluate(f"setTimeout(() => location.href = '{to}')")
-    await driver._page.wait_for_url(lambda url: not is_allowed(url, driver._allowed_hosts))
+    # 허용 밖 하위 요청 차단을 켜면 그 이동은 막힌 프록시에서 끊겨 첫 기다림이 오류로 끝나고,
+    # 주 창에는 그 뒤에 오류 화면이 뜬다 (GACA-227). 그 화면이 뜰 때까지 다시 기다린다.
+    with contextlib.suppress(PlaywrightError):
+        await driver._page.wait_for_url(outside)
+    await driver._page.wait_for_url(outside)
 
 
 def test_late_returns_are_capped_per_persona(two_sites) -> None:
@@ -742,7 +817,8 @@ def test_late_returns_are_capped_per_persona(two_sites) -> None:
                 await _leave(driver)
                 observations.append(await driver.observe())
             await _leave(driver)
-            with pytest.raises(RuntimeError, match="되돌리지 못했습니다"):
+            # 오류 문구의 주소는 오류 화면(chrome-error://)이 아니라 가려던 주소다 (GACA-227).
+            with pytest.raises(RuntimeError, match=f"되돌리지 못했습니다: {re.escape(ext)}"):
                 await driver.observe()
             return observations
 
@@ -750,7 +826,7 @@ def test_late_returns_are_capped_per_persona(two_sites) -> None:
 
     assert [o.blocked for o in observations] == [ext] * MAX_LATE_RETURNS
     assert [o.url for o in observations] == [target] * MAX_LATE_RETURNS
-    assert len(hits) == MAX_LATE_RETURNS + 1  # 늦은 이동마다 하나. 넘은 뒤로는 되돌리지 않는다
+    assert hits == []  # 허용 밖 하위 요청 차단으로 허용 밖 서버에 닿지 않는다 (GACA-227)
 
 
 def test_late_return_stops_when_return_address_leaves_too(two_sites) -> None:
@@ -761,7 +837,11 @@ def test_late_return_stops_when_return_address_leaves_too(two_sites) -> None:
     hits.clear()
 
     async def run():
-        async with DomDriver(allowed_hosts=allowed_hosts(target, [])) as driver:
+        # 브라우저가 밖 페이지를 실제로 연 경우에도 막는지 본다 — 허용 밖 하위 요청 차단은
+        # 그 앞 겹이다 (GACA-227). 되돌려 본 횟수를 허용 밖 서버에 닿은 요청 수로 센다.
+        async with DomDriver(
+            allowed_hosts=allowed_hosts(target, []), block_outside_subrequests=False
+        ) as driver:
             await driver.start(target)
             driver._last_allowed_url = f"{target}redir"
             await _leave(driver)
@@ -925,15 +1005,20 @@ def test_return_address_is_last_allowed_page(two_sites) -> None:
     assert [o.url for o in returned] == [f"{target}late/1200", f"{target}inside"]
 
 
-def test_text_from_page_that_left_and_came_back_is_dropped(two_sites) -> None:
+@BLOCKING
+def test_text_from_page_that_left_and_came_back_is_dropped(two_sites, block: bool) -> None:
     # 확인과 모으기 사이 주 창이 허용 밖에 닿았다가, 모은 뒤 곧 허용 주소로 돌아온다.
     # 예: SSO 처럼 거쳐 가는 페이지.
     # 모은 뒤의 주 창 주소는 허용이지만, 글은 그 글을 모은 문서의 주소로 판정해 버린다.
+    # 허용 밖 하위 요청 차단을 켜면 밖 페이지('outside')는 열리지 않고, 모은 문서는 오류 화면이다
+    # (GACA-227).
     target, ext, hits = two_sites
     hits.clear()
 
     async def run():
-        async with DomDriver(allowed_hosts=allowed_hosts(target, [])) as driver:
+        async with DomDriver(
+            allowed_hosts=allowed_hosts(target, []), block_outside_subrequests=block
+        ) as driver:
             await driver.start(target)
             real_collect = driver._collect_elements
             calls = 0
@@ -943,7 +1028,9 @@ def test_text_from_page_that_left_and_came_back_is_dropped(two_sites) -> None:
                 calls += 1
                 if calls > 1:
                     return await real_collect(page)
-                await page.goto(f"{target}redir")  # 확인한 직후 허용 밖에 닿았다
+                # 허용 밖 하위 요청 차단을 켜면 이 이동은 막힌 프록시에서 끊겨 goto 가 오류를 낸다.
+                with contextlib.suppress(PlaywrightError):
+                    await page.goto(f"{target}redir")  # 확인한 직후 허용 밖에 닿았다
                 collected = await real_collect(page)  # 그래서 허용 밖 페이지의 글을 모은다
                 await page.goto(target)  # 그 페이지가 곧 허용 주소로 돌려보냈다
                 return collected
@@ -957,7 +1044,8 @@ def test_text_from_page_that_left_and_came_back_is_dropped(two_sites) -> None:
     assert observation.blocked == ext
     assert observation.url == target
     assert "outside" not in observation.text
-    assert len(hits) == 1
+    # 허용 밖 서버에 닿은 요청: 허용 밖 하위 요청 차단을 켜면 0 이다.
+    assert len(hits) == (0 if block else 1)
 
 
 def test_step_screenshot_of_page_that_left_is_dropped(two_sites) -> None:

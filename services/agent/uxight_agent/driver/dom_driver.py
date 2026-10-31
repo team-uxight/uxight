@@ -27,9 +27,16 @@ NEW_WINDOW_WAIT_MS = 1_000
 # 되돌린 페이지가 또 허용 밖으로 보내면 되돌릴 때마다 허용 밖 요청이 한 번씩 늘고 step 만 쓴다.
 # 넘으면 관측이 오류를 내 Persona 를 끝낸다.
 MAX_LATE_RETURNS = 3
-# 허용 밖 하위 요청 차단의 막힌 프록시 (bench 전용, GACA-180).
+# 허용 밖 하위 요청 차단의 막힌 프록시 (GACA-180 · 227).
 # 아무도 듣지 않는 포트라 연결이 바로 실패한다.
 DEAD_PROXY = "http://127.0.0.1:9"
+# 막힌 프록시에서 끊긴 주 창 이동 뒤 뜨는 Chromium 오류 화면과, 그 화면을 기다리는 상한.
+ERROR_PAGE = re.compile(r"^chrome-error://")
+ERROR_PAGE_WAIT_MS = 2000
+# 막힌 프록시로 보낸 요청이 실패할 때의 오류 (Playwright request.failure).
+PROXY_FAILURES = frozenset(
+    {"net::ERR_PROXY_CONNECTION_FAILED", "net::ERR_TUNNEL_CONNECTION_FAILED"}
+)
 # 허용 밖 하위 요청 차단이 끄는 연결 — 프록시를 거치지 않는 WebRTC 의 UDP 와 QUIC.
 BROWSER_BLOCK_ARGS = (
     "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
@@ -413,10 +420,14 @@ class DomDriver(Driver):
         self,
         headless: bool = True,
         allowed_hosts: frozenset[str] = frozenset(),
-        block_outside_subrequests: bool = False,
+        block_outside_subrequests: bool = True,
     ) -> None:
         super().__init__(allowed_hosts, block_outside_subrequests)
         self._blocked_url: str | None = None  # 이번 행동 중 끊은 이동의 목적지
+        # 막힌 프록시에서 끊긴 주 창 이동의 주소 (GACA-227). 허용 주소가 허용 밖으로
+        # 리다이렉트하면 route 는 그 요청을 보지 못하고, 주 창에는 오류 화면(chrome-error://)이
+        # 뜬다. act() 가 행동마다, 관측이 끝날 때 비운다.
+        self._failed_main_url: str | None = None
         # 이번 행동의 새 창 · 이동 요청 (GACA-225). act() 가 행동마다 비운다.
         # - _page_opened_window: 행동 전에 주 창이 스스로 창을 열었다 — 새 창을 따르지 않는다
         # - _navigated: 주 창이나 새 창의 이동 요청이 왔다 (새 창 기다림을 끝낸다)
@@ -460,6 +471,8 @@ class DomDriver(Driver):
         # 그 fetch 처리기가 답한 요청은 route 에 오지 않는다.
         options = {"service_workers": "block"} if self._block_outside_subrequests else {}
         self._page = await self._browser.new_page(**options)
+        if self._block_outside_subrequests:
+            self._page.on("requestfailed", self._note_failed_navigation)
         session = await self._page.context.new_cdp_session(self._page)
         target = (await session.send("Target.getTargetInfo"))["targetInfo"]
         self._target_id, self._context_id = target["targetId"], target["browserContextId"]
@@ -473,11 +486,18 @@ class DomDriver(Driver):
             await self._page.context.route_web_socket(
                 self._outside_web_socket, self._block_web_socket
             )
-        await self._page.goto(url, wait_until="domcontentloaded", timeout=NAVIGATION_TIMEOUT_MS)
+        try:
+            await self._page.goto(url, wait_until="domcontentloaded", timeout=NAVIGATION_TIMEOUT_MS)
+        except PlaywrightError:
+            if self._failed_main_url is None:
+                raise
+            # 시작 주소가 허용 밖으로 리다이렉트했다. 막힌 프록시 오류 대신 가려던 곳을 알린다.
+            safe = safe_destination(self._failed_main_url)
+            raise RuntimeError(f"시작 주소가 허용 밖으로 리다이렉트됐습니다: {safe}") from None
         self._remember(url)
 
     def _launch_options(self) -> dict:
-        """브라우저 실행 설정. 허용 밖 하위 요청 차단(bench 전용, GACA-180)이 아니면 비어 있다.
+        """브라우저 실행 설정. 허용 밖 하위 요청 차단(GACA-180 · 227)을 끄면 비어 있다.
 
         route 를 거치지 않는 연결도 막는다 — worker · service worker 안의 요청, 페이지를 떠날 때의
         beacon · keepalive fetch, 추측 prefetch · prerender. 허용 호스트:포트 말고는 모두 막힌
@@ -517,7 +537,7 @@ class DomDriver(Driver):
         이 처리기는 예외를 내면 안 된다. 낸 예외는 Playwright 가 다음 API 호출(관측의 page.evaluate
         등)에서 대신 던지고, 그 요청은 이어지지도 끊기지도 않은 채 멈춘다 (GACA-223).
         그래서 판정하지 못한 이동은 끊고, 끊기 · 잇기에서 난 오류는 밖으로 내지 않는다.
-        허용 밖 하위 요청 차단(bench 전용, GACA-180)을 켜면 위에서 그냥 두는 하위 요청과 iframe
+        허용 밖 하위 요청 차단(GACA-180 · 227)을 켜면 위에서 그냥 두는 하위 요청과 iframe
         이동도 끊는다. 이것은 blocked_outside_subrequests 로 따로 세고 _blocked_url 은 그대로 둔다.
         페이지가 밖으로 보내는 분석용 이미지 하나로 행동이 차단이 되지 않게 하려는 것이다.
         """
@@ -606,10 +626,11 @@ class DomDriver(Driver):
                 url = collected["url"]
                 if is_allowed(url, self._allowed_hosts):
                     break
-            self._left_url = self._left_url or safe_destination(url)
+            self._left_url = self._left_url or safe_destination(self._outside_destination(url))
             if not await self._return_inside():
-                safe = safe_destination(page.url)
+                safe = safe_destination(self._outside_destination(page.url))
                 raise RuntimeError(f"주 창을 허용 주소로 되돌리지 못했습니다: {safe}")
+        self._failed_main_url = None  # 관측이 썼다 — 다음 오류 화면에 옛 주소를 쓰지 않게
         self._remember(url)
         items = collected["items"]
         self._element_map = {item["id"]: item for item in items}
@@ -643,6 +664,30 @@ class DomDriver(Driver):
         self._late_returns = MAX_LATE_RETURNS
         return False
 
+    def _note_failed_navigation(self, request) -> None:
+        """주 창 이동이 막힌 프록시에서 끊겼으면 그 주소를 남긴다 (GACA-227).
+
+        허용 주소가 허용 밖으로 리다이렉트하면 route 는 그 요청을 보지 못한다. 브라우저는 막힌
+        프록시로 보내 실패하고, 주 창에는 오류 화면(chrome-error://chromewebdata/)이 뜬다.
+        목적지 기록(act · 관측의 blocked)이 오류 화면 주소가 되지 않게 실제로 가려던 주소를 쓴다.
+        route 가 끊은 이동(ERR_ABORTED · ERR_BLOCKED_BY_CLIENT)은 _blocked_url 이 이미 남긴다.
+        """
+        with contextlib.suppress(Exception):  # 이벤트 처리기는 예외를 내지 않는다
+            if (
+                request.failure in PROXY_FAILURES
+                and request.is_navigation_request()
+                and self._page is not None
+                and request.frame == self._page.main_frame
+                and not is_allowed(request.url, self._allowed_hosts)
+            ):
+                self._failed_main_url = request.url
+
+    def _outside_destination(self, url: str) -> str:
+        """허용 밖 주 창 주소의 목적지. 막힌 프록시가 끊은 이동의 오류 화면이면 가려던 주소다."""
+        if ERROR_PAGE.match(url) and self._failed_main_url:
+            return self._failed_main_url
+        return url
+
     def _remember(self, url: str) -> None:
         """주 창 주소를 되돌릴 곳으로 기억한다 (GACA-224).
 
@@ -660,8 +705,9 @@ class DomDriver(Driver):
         if not is_allowed(before, self._allowed_hosts):
             # 관측 뒤 주 창이 늦게 허용 밖으로 갔다 — 행동을 정하는 사이 일어난 이동 (GACA-224).
             # 허용 밖 페이지에서는 행동하지 않는다. 마지막 허용 주소로 되돌리고 차단으로 남긴다.
+            safe = safe_destination(self._outside_destination(before))
+            self._failed_main_url = None
             await self._return_inside()
-            safe = safe_destination(before)
             return ActionResult(
                 ok=False,
                 error=f"Action blocked by domain policy: {safe}",
@@ -680,6 +726,7 @@ class DomDriver(Driver):
             window.get("openerFrameId") == self._target_id for window in leftovers
         )
         self._blocked_url = None
+        self._failed_main_url = None
         self._main_navigated = False
         self._new_window_url = None
         self._navigated.clear()
@@ -705,15 +752,24 @@ class DomDriver(Driver):
         # (guard.domain 3단계). 행동 전 주소가 파괴적 경로면 다시 GET 하지 않고
         # 마지막으로 기억한 주소로 되돌린다 (GACA-224).
         outside = None if is_allowed(page.url, self._allowed_hosts) else page.url
+        # 막힌 프록시에서 끊긴 주 창 이동(GACA-227)은 오류 화면이 늦게 뜰 수 있다(폼 POST 뒤
+        # 리다이렉트). 아직 허용 주소에 있어도 되돌린다 — 오류 화면이 다음 관측의 늦은 이동이
+        # 되지 않게.
+        failed = self._failed_main_url
+        if failed and not outside:
+            # 오류 화면이 뜨기 전에 되돌리면, 늦게 뜬 오류 화면이 되돌리는 이동을 끊는다.
+            with contextlib.suppress(PlaywrightError):
+                await page.wait_for_url(ERROR_PAGE, timeout=ERROR_PAGE_WAIT_MS)
+            outside = None if is_allowed(page.url, self._allowed_hosts) else page.url
         back_to = self._last_allowed_url if destructive_path(before) else before
-        if outside and back_to:
+        if (outside or failed) and back_to:
             try:
                 await page.goto(
                     back_to, wait_until="domcontentloaded", timeout=NAVIGATION_TIMEOUT_MS
                 )
             except PlaywrightError:
                 pass  # 되돌리지 못해도 차단으로 기록한다. 다음 관측이 마지막 허용 주소로 되돌린다.
-        destination = self._blocked_url or outside
+        destination = self._blocked_url or failed or outside
         if destination:
             safe = safe_destination(destination)
             result = ActionResult(
@@ -864,8 +920,16 @@ class DomDriver(Driver):
         # 문서 주소는 handle 이 든 문서에서 location.href 로 읽는다. location 은 페이지가
         # 다시 정의할 수 없다. el.ownerDocument 같은 보통 속성은 허용 밖 페이지가 위조한다.
         locator = page.locator(f'[{ID_ATTRIBUTE}="{action.element_id}"]')
-        handle = await locator.element_handle(timeout=ACTION_TIMEOUT_MS)
-        document = await handle.evaluate("() => location.href")
+        try:
+            handle = await locator.element_handle(timeout=ACTION_TIMEOUT_MS)
+        except PlaywrightError:
+            if is_allowed(page.url, self._allowed_hosts):
+                raise
+            # 찾는 사이 페이지가 스스로 허용 밖으로 가 요소를 찾지 못했다. 막힌 프록시가 끊은
+            # 이동이면 주 창이 오류 화면이라 번호 요소가 없다 (GACA-227).
+            document = self._outside_destination(page.url)
+        else:
+            document = await handle.evaluate("() => location.href")
         if not is_allowed(document, self._allowed_hosts):
             # 찾는 사이 페이지가 스스로 허용 밖으로 갔다 — 행동하지 않은 늦은 이동이다.
             safe = safe_destination(document)

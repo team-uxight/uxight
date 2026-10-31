@@ -137,8 +137,12 @@ class Browsers:
 
 def fake_driver_class(browsers: Browsers) -> type[Driver]:
     class FakeDriver(Driver):
-        def __init__(self, allowed_hosts: frozenset[str] = frozenset()) -> None:
-            super().__init__(allowed_hosts)
+        def __init__(
+            self,
+            allowed_hosts: frozenset[str] = frozenset(),
+            block_outside_subrequests: bool = False,
+        ) -> None:
+            super().__init__(allowed_hosts, block_outside_subrequests)
             self._started = False
 
         async def start(self, url: str) -> None:
@@ -989,8 +993,12 @@ def screen_driver_class(final_call: int | None = None, final: str = "") -> type[
     """
 
     class ScreenDriver(Driver):
-        def __init__(self, allowed_hosts: frozenset[str] = frozenset()) -> None:
-            super().__init__(allowed_hosts)
+        def __init__(
+            self,
+            allowed_hosts: frozenset[str] = frozenset(),
+            block_outside_subrequests: bool = False,
+        ) -> None:
+            super().__init__(allowed_hosts, block_outside_subrequests)
             self.observes = 0
             self.acts = 0
 
@@ -1312,6 +1320,31 @@ def test_watcher_keeps_guards_on_whatever_policy_or_env(
     assert detail["reason"] == "destructive"
     # 서버 설정(env)에도 가드 모드 칸이 없다.
     assert [name for name in Settings.model_fields if "guard" in name] == []
+
+
+def test_watcher_blocks_outside_subrequests(
+    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 운영 회차의 브라우저도 허용 밖 하위 요청 차단을 켠다 (GACA-227).
+    # 허용 링크에 붙은 허용 밖 ping, iframe 으로 보내는 폼, beacon, 떠날 때의 beacon 을 실제
+    # 브라우저로 막는지는 test_guard_off 의 허용 밖 하위 요청 차단 시험이 본다.
+    made: list[bool] = []
+
+    class RecordingDriver(fake_driver_class(fakes.browsers)):
+        def __init__(
+            self,
+            allowed_hosts: frozenset[str] = frozenset(),
+            block_outside_subrequests: bool = False,
+        ) -> None:
+            super().__init__(allowed_hosts, block_outside_subrequests)
+            made.append(self._block_outside_subrequests)
+
+    monkeypatch.setattr(orchestrator_module, "DomDriver", RecordingDriver)
+    use_decider(monkeypatch, ScriptedDecider(Decision(Action(kind="done"))))
+
+    asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)])))
+
+    assert made == [True]
 
 
 def test_watcher_decider_marks_page_instructions(
