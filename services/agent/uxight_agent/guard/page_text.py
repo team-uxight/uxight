@@ -43,10 +43,10 @@ def mark_instructions(text: str) -> tuple[str, list[str]]:
     패턴은 원문이 아니라 다듬은 글(_search_text)에서 찾는다.
     - 전각 · 호환 문자는 NFKC 로 바꾼다 ("시스템：" → "시스템:").
     - 제로폭 · soft hyphen · 방향 제어 같은 보이지 않는 서식 문자(Cf)는 지운다.
-    원문의 [[ · ]] 는 하나로 줄여 표시를 흉내 내지 못하게 한다 (_collapse_marks).
+    원문의 [[ · ]] 는 하나로 줄여 표시를 흉내 내지 못하게 한다 (collapse_marks).
     그래서 이미 표시한 글에 다시 쓰면 표시가 망가진다 — 원문에 한 번만 쓴다.
     """
-    text = _collapse_marks(text)
+    text = collapse_marks(text)
     search, origin = _search_text(text)
 
     spans: list[tuple[int, int]] = []
@@ -78,11 +78,12 @@ def mark_instructions(text: str) -> tuple[str, list[str]]:
     return "".join(parts), hits
 
 
-def _collapse_marks(text: str) -> str:
+def collapse_marks(text: str) -> str:
     """[[ · ]] 처럼 이어진 같은 괄호를 하나로 줄인다.
 
     찾기용 글과 같은 기준으로 괄호를 본다 — 전각 괄호("［")도 괄호이고, 괄호 사이에 낀
     서식 문자("[\u200b[")는 없는 글자로 보고 함께 지운다.
+    지시문 표시를 붙이지 않는 그림자 모드(GACA-180)의 프롬프트도 이것은 쓴다.
     """
     kept: list[str] = []
     bracket = ""  # 마지막으로 남긴 괄호 (그 뒤로 서식 문자만 왔을 때)

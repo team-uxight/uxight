@@ -401,8 +401,13 @@ _COLLECT_ELEMENTS_JS = """
 class DomDriver(Driver):
     """DOM 기반 Driver. 상호작용 요소에 ID를 붙여 텍스트로 보여주고, 그 ID로 행동한다."""
 
-    def __init__(self, headless: bool = True, allowed_hosts: frozenset[str] = frozenset()) -> None:
-        super().__init__(allowed_hosts)
+    def __init__(
+        self,
+        headless: bool = True,
+        allowed_hosts: frozenset[str] = frozenset(),
+        strict_requests: bool = False,
+    ) -> None:
+        super().__init__(allowed_hosts, strict_requests)
         self._blocked_url: str | None = None  # 이번 행동 중 끊은 이동의 목적지
         # 이번 행동의 새 창 · 이동 요청 (GACA-225). act() 가 행동마다 비운다.
         # - _page_opened_window: 행동 전에 주 창이 스스로 창을 열었다 — 새 창을 따르지 않는다
@@ -437,7 +442,10 @@ class DomDriver(Driver):
     async def start(self, url: str) -> None:
         self._playwright = await async_playwright().start()
         self._browser = await self._playwright.chromium.launch(headless=self._headless)
-        self._page = await self._browser.new_page()
+        # 엄격 요청 차단은 service worker 를 막는다.
+        # 그 fetch 처리기가 답한 요청은 route 에 오지 않는다.
+        options = {"service_workers": "block"} if self._strict_requests else {}
+        self._page = await self._browser.new_page(**options)
         session = await self._page.context.new_cdp_session(self._page)
         target = (await session.send("Target.getTargetInfo"))["targetInfo"]
         self._target_id, self._context_id = target["targetId"], target["browserContextId"]
@@ -448,8 +456,16 @@ class DomDriver(Driver):
             self._allowed_hosts = self._allowed_hosts | {start_host}
         # 새 창(target=_blank)도 같은 context 라 함께 막힌다.
         await self._page.context.route("**/*", self._guard_navigation)
+        if self._strict_requests:
+            # WebSocket 은 route 를 거치지 않는다. 모두 가짜로 받아 서버에 붙지 않게 한다.
+            # 첫 이동 전에 건다 — 뒤에 걸면 그 전에 연 문서의 연결은 샌다.
+            await self._page.context.route_web_socket(lambda _url: True, self._block_web_socket)
         await self._page.goto(url, wait_until="domcontentloaded", timeout=NAVIGATION_TIMEOUT_MS)
         self._remember(url)
+
+    def _block_web_socket(self, ws) -> None:
+        """엄격 요청 차단: WebSocket 을 서버에 잇지 않는다(connect_to_server 를 부르지 않음)."""
+        self.blocked_subrequests += 1
 
     async def _guard_navigation(self, route) -> None:
         """허용 밖으로 가는 top-level 이동 요청을 끊는다 (guard.domain 2단계).
@@ -464,9 +480,12 @@ class DomDriver(Driver):
         이 처리기는 예외를 내면 안 된다. 낸 예외는 Playwright 가 다음 API 호출(관측의 page.evaluate
         등)에서 대신 던지고, 그 요청은 이어지지도 끊기지도 않은 채 멈춘다 (GACA-223).
         그래서 판정하지 못한 이동은 끊고, 끊기 · 잇기에서 난 오류는 밖으로 내지 않는다.
+        엄격 요청 차단(bench 전용, GACA-180)을 켜면 위에서 그냥 두는 허용 밖 하위 요청과 iframe
+        이동도 끊는다. 이것은 blocked_subrequests 로 따로 세고 _blocked_url 은 그대로 둔다.
+        페이지가 밖으로 보내는 분석용 이미지 하나로 행동이 차단이 되지 않게 하려는 것이다.
         """
         request = route.request
-        block = outside = False
+        block = outside = strict = False
         try:
             if request.is_navigation_request():
                 outside = not is_allowed(request.url, self._allowed_hosts)
@@ -487,14 +506,23 @@ class DomDriver(Driver):
                     elif self._new_window_url is None and not outside and request.method == "GET":
                         self._new_window_url = request.url
                     self._navigated.set()
+            # 엄격 요청 차단: 위에서 그냥 두는 허용 밖 요청(하위 요청 · iframe 이동)도 끊는다.
+            if (
+                self._strict_requests
+                and not block
+                and not is_allowed(request.url, self._allowed_hosts)
+            ):
+                block = strict = True
         except Exception:
             block = True
         try:
             if block:
-                if outside:
+                if strict:
+                    self.blocked_subrequests += 1
+                elif outside:
                     self._blocked_url = request.url
                     self.blocked_requests += 1
-                await route.abort("aborted")
+                await route.abort("blockedbyclient" if strict else "aborted")
             else:
                 await route.continue_()
         except PlaywrightError:

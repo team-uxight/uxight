@@ -59,13 +59,20 @@ class Driver(ABC):
     # 관측 방식 (step 로그 observation.mode). 화면 그림을 모델에 보내는 드라이버는 "som".
     mode = "dom"
 
-    def __init__(self, allowed_hosts: frozenset[str] = frozenset()) -> None:
+    def __init__(
+        self, allowed_hosts: frozenset[str] = frozenset(), strict_requests: bool = False
+    ) -> None:
         # 허용 도메인('호스트:포트', guard.domain). 드라이버는 이 밖으로 이동하지 않는다.
         # start(url) 의 주소는 늘 허용이다.
         self._allowed_hosts = allowed_hosts
+        # 엄격 요청 차단 (bench 전용, GACA-180). 켜면 허용 밖으로 하위 요청 · iframe 이동 ·
+        # WebSocket 도 보내지 않는다. 운영 Watcher 는 켜지 않는다.
+        self._strict_requests = strict_requests
         # 요청 단계에서 끊은 허용 밖 이동 요청 수 (guard.domain 2단계).
         # 성능 benchmark 가 가드 조건마다 센다 (GACA-180). 운영은 읽지 않는다.
         self.blocked_requests = 0
+        # 엄격 요청 차단이 끊은 수. 위와 따로 센다 — 이것으로는 행동이 차단이 되지 않는다.
+        self.blocked_subrequests = 0
 
     @abstractmethod
     async def start(self, url: str) -> None:

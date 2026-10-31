@@ -13,7 +13,7 @@ import json
 import unicodedata
 
 from ..driver.base import Observation
-from ..guard.page_text import MARK_START, mark_instructions
+from ..guard.page_text import MARK_START, collapse_marks, mark_instructions
 
 # 지난 행동은 최근 것만 넣는다 — step 이 늘어도 프롬프트가 계속 길어지지 않게.
 HISTORY_STEPS = 5
@@ -53,7 +53,7 @@ def build_messages(
 
     history 는 지난 StepResult 목록이다. 최근 HISTORY_STEPS 개의 행동과 결과만 넣는다.
     mark=False 면 페이지 글에 지시문 표시를 붙이지 않는다 — 가드 그림자 모드(GACA-180, bench 만).
-    시스템 지시는 그대로다.
+    페이지 글의 [[ · ]] 는 그때도 하나로 줄인다. 시스템 지시는 그대로다.
     """
     sections = [
         "## Persona\n" + _persona_text(persona),
@@ -130,8 +130,8 @@ def instruction_marks(observation: Observation) -> tuple[int, list[str]]:
 
 def _page_text(observation: Observation, mark: bool = True) -> str:
     page = _page_data(observation)
-    if mark:
-        page, _ = mark_instructions(page)
+    # 표시를 붙이지 않아도 페이지가 쓴 가짜 표시([[ ]])는 줄인다 — 시스템 지시가 그 모양을 말한다.
+    page = mark_instructions(page)[0] if mark else collapse_marks(page)
     return f"{PAGE_START}\n{page}\n{PAGE_END}"
 
 
@@ -156,7 +156,7 @@ def _page_data(observation: Observation) -> str:
 def _collapse_fences(text: str) -> str:
     """이어진 같은 쪽 괄호(<< · ＜＜ · 사이에 서식 · 결합 문자가 낀 것)를 하나로 줄인다.
 
-    지시문 표시의 [[ · ]] 를 줄이는 것(page_text._collapse_marks)과 같은 생각이다.
+    지시문 표시의 [[ · ]] 를 줄이는 것(page_text.collapse_marks)과 같은 생각이다.
     """
     kept: list[str] = []
     last = ""  # 마지막으로 남긴 괄호 쪽 ("<" · ">"), 괄호가 아니면 ""

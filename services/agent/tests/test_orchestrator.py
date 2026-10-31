@@ -1318,6 +1318,9 @@ def test_watcher_decider_marks_page_instructions(
     monkeypatch: pytest.MonkeyPatch, scripted_llm
 ) -> None:
     # 운영 판단기는 페이지 글에 지시문 표시를 붙인다 — 그림자 모드(표시 없음)는 bench 에서만 켠다.
+    # env 에 그림자 값을 넣어도 실제 make_decider 경로는 집행이다.
+    for name in ("GUARD", "GUARD_MODE", "AGENT_GUARD"):
+        monkeypatch.setenv(name, "shadow")
     done = '{"reasoning": "끝", "action": {"kind": "done", "element_id": null, "value": null}}'
     llm, requests = scripted_llm(done)
     monkeypatch.setattr(orchestrator_module, "_llm", llm)
