@@ -174,3 +174,42 @@ def test_steps_jsonl_to_metrics_table(tmp_path):
 
     print("\n실제 steps.jsonl 기반 Persona별 지표")
     print(table)
+
+
+def test_pr46_persona_metrics_fixture():
+    """PR #46 공통 예시 로그의 Persona별 지표 기댓값을 검증한다."""
+    from pathlib import Path
+
+    from uxight_agent.watcher.persona_metrics import format_metrics_table
+
+    run_dir = Path(__file__).parent / "fixtures" / "runs" / "9001"
+    if not run_dir.exists():
+        import pytest
+
+        pytest.skip("PR #46 공통 예시 로그가 아직 병합되지 않았습니다.")
+
+    expected = {
+        "1": (0, 0, 0, 0, 3),
+        "2": (4, 4, 0, 0, 12),
+        "3": (0, 4, 1, 1, 7),
+        "4": (4, 7, 1, 0, 15),
+        "5": (1, 1, 0, 1, 5),
+    }
+
+    metrics_by_persona = read_run_metrics(run_dir)
+
+    assert set(metrics_by_persona) == set(expected)
+
+    for persona_id, values in expected.items():
+        metrics = metrics_by_persona[persona_id]
+        actual = (
+            metrics["backtrack_count"],
+            metrics["repeat_screen_count"],
+            metrics["execution_error_count"],
+            metrics["blocked_count"],
+            metrics["step_count"],
+        )
+        assert actual == values, f"Persona {persona_id}: {actual} != {values}"
+
+    print("\nPR #46 공통 예시 로그 기반 Persona별 지표")
+    print(format_metrics_table(metrics_by_persona))
