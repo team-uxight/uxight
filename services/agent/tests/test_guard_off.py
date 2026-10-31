@@ -413,11 +413,9 @@ def test_only_guard_off_jobs_pass_guard_to_make_decider(
     assert (tmp_path / "guard-log.jsonl").read_text(encoding="utf-8") == ""
 
 
-def test_subrequest_blocking_for_every_variant_of_a_guard_off_bench(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # 가드 끔 변형이 있는 benchmark 는 가드 켬 변형도 허용 밖 하위 요청 차단으로 돈다 —
-    # 두 조건을 같게. 없으면 끄고, 하위 요청 끊김은 세지 않는다(0 이 아니라 None).
+def test_subrequest_blocking_for_every_bench_variant(monkeypatch: pytest.MonkeyPatch) -> None:
+    # benchmark 의 모든 변형은 운영 Watcher 처럼 허용 밖 하위 요청 차단으로 돈다 (GACA-227).
+    # 가드 끔 변형이 있든 없든 같고, 하위 요청 끊김을 센다.
     monkeypatch.setattr(Page, "blocking", [])
     monkeypatch.setitem(bench.DRIVERS, "dom", Page)
     on_job = dataclasses.replace(JOB, variant="guard_on", guard="on")
@@ -426,14 +424,14 @@ def test_subrequest_blocking_for_every_variant_of_a_guard_off_bench(
         record, _ = asyncio.run(bench.run_persona(on_job, Done(), {}, config))
         seen.append(record["subrequest_blocked"])
 
-    assert Page.blocking == [False, True]
-    assert seen == [None, 0]
+    assert Page.blocking == [True, True]
+    assert seen == [0, 0]
 
 
 SETTINGS = {"observation": "dom", "body_text": True, "guard": "off", "diagnosis": "single"}
 
 
-def persona_record(success: bool, **guards: int | None) -> dict:
+def persona_record(success: bool, **guards: int) -> dict:
     return {
         "success": success,
         "error": None,
@@ -468,13 +466,6 @@ def test_guard_totals_and_cup() -> None:
     assert bench_metrics.summarize("guard_off", SETTINGS, "attack", [])["cup"] is None
     (line,) = csv.DictReader(bench_metrics.render_csv([row], {}).splitlines())
     assert (line["guard"], line["subrequest_blocked"], line["cup"]) == ("off", "3", "0.4")
-    # 허용 밖 하위 요청 차단이 꺼진 benchmark 는 하위 요청 끊김을 세지 않는다.
-    # 칸은 0 이 아니라 '—' 다.
-    off = bench_metrics.summarize(
-        "v", SETTINGS, "s", [persona_record(True), persona_record(True, subrequest_blocked=None)]
-    )
-    assert off["subrequest_blocked"] is None
-    assert bench_metrics.render_md([off]).splitlines()[2].strip("|").split("|")[19].strip() == "—"
 
 
 def _jsonl(path: Path) -> list[dict]:
@@ -551,7 +542,7 @@ def test_bench_runs_guard_on_and_off_on_same_page(
     assert off_steps[0]["blocked"] == {"is": True, "reason": "domain"}  # 드라이버가 끊었다
     assert off_steps[1]["result"]["url_after"].endswith("/member/withdraw.do")  # 눌렀다
     # 표: 가드 켬은 막은 수, 가드 끔은 기록한 수. 요청 끊김은 가드 끔에서 1. 둘 다 CuP 0.
-    # 허용 밖 하위 요청 차단은 두 변형 모두 켜졌다(하위 요청 끊김 칸이 '—' 가 아니라 0).
+    # 허용 밖 하위 요청 차단은 두 변형 모두 켜졌다(하위 요청 끊김 칸이 0).
     with (out / "summary.csv").open(encoding="utf-8") as f:
         rows = {r["variant"]: r for r in csv.DictReader(f)}
     fields = ["success_rate", *bench_metrics.GUARD_FIELDS, "cup"]
@@ -719,6 +710,8 @@ INSIDE_CASES = {
         "<button onclick=\"new WebSocket('ws://' + location.host + '/ws')\">go</button>"
     ),
     "outside-image": "<button onclick=\"new Image().src = '{ext}/pixel'\">go</button>",
+    # 허용 링크에 붙은 허용 밖 ping — 운영(가드 켬)에서 실제로 나가던 길 (GACA-227)
+    "inside-link-outside-ping": "<a href='/case/next' ping='{ext}/ping'>go</a>",
 }
 # route 를 거치지 않는 연결 (GACA-180 재확인). 허용 밖 하위 요청 차단의 브라우저 설정이 막는다 —
 # 막힌 프록시, WebRTC UDP · QUIC 끄기, service worker 막기.
@@ -878,8 +871,7 @@ async def _click_case(
 @pytest.mark.parametrize("case", LEAK_CASES)
 def test_subrequest_blocking_keeps_both_conditions_inside(case_site, case: str) -> None:
     # 가드 끔에서 실행된 클릭의 하위 요청 · iframe 이동 · WebSocket 도 밖에 닿지 않는다.
-    # 허용 밖 하위 요청 차단은 가드 끔 변형이 있는 benchmark 의 모든 변형에 켜므로
-    # 두 조건을 다 본다.
+    # 허용 밖 하위 요청 차단은 운영 Watcher 와 benchmark 의 모든 변형에 켜므로 두 조건을 다 본다.
     case_site.outside.clear()
     url, text = f"{case_site.base}/case/{case}", LEAK_CASES[case][1]
 
@@ -957,12 +949,14 @@ def test_subrequest_blocking_keeps_allowed_requests(
     assert driver.blocked_outside_subrequests == 0
 
 
-def test_blocked_subrequest_does_not_block_the_step(case_site) -> None:
+@pytest.mark.parametrize("case", ["outside-image", "inside-link-outside-ping"])
+def test_blocked_subrequest_does_not_block_the_step(case_site, case: str) -> None:
     # 허용 밖 하위 요청 차단이 끊은 하위 요청은 행동을 차단으로 만들지 않고 따로 센다.
-    # 분석용 이미지 하나로 step 이 DOMAIN_BLOCKED 가 되면 안 된다.
+    # 분석용 이미지 하나, 허용 링크에 붙은 허용 밖 ping 하나로 step 이 DOMAIN_BLOCKED 가 되면
+    # 안 된다.
     case_site.outside.clear()
 
-    step, driver = asyncio.run(_click_case(f"{case_site.base}/case/outside-image", "go", "on"))
+    step, driver = asyncio.run(_click_case(f"{case_site.base}/case/{case}", "go", "on"))
 
     assert (step.result.ok, step.result.error_code) == (True, None)
     assert (driver.blocked_requests, driver.blocked_outside_subrequests, case_site.outside) == (
@@ -987,7 +981,8 @@ def test_subrequest_blocking_start_page_opens_without_allowed_hosts(case_site) -
 
 def test_subrequest_blocking_launch_options_bypass_only_allowed_host_ports() -> None:
     # 막힌 프록시의 예외는 허용 호스트:포트뿐이다. 같은 호스트의 다른 포트는 프록시로 간다.
-    # IPv6 는 [ ] 로 감싸고, 포트가 없는 로컬 파일 키는 뺀다. 운영(이 차단 꺼짐)은 그대로 띄운다.
+    # IPv6 는 [ ] 로 감싸고, 포트가 없는 로컬 파일 키는 뺀다.
+    # 기본값은 켬이다 (GACA-227). 이 차단을 끈 드라이버(시험뿐)는 그대로 띄운다.
     hosts = frozenset({"127.0.0.1:5000", "copy.example:443", "::1:8080", "file:"})
 
     blocking = DomDriver(allowed_hosts=hosts, block_outside_subrequests=True)._launch_options()
@@ -1000,7 +995,7 @@ def test_subrequest_blocking_launch_options_bypass_only_allowed_host_ports() -> 
         "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
         "--disable-quic",
     }
-    assert DomDriver(allowed_hosts=hosts)._launch_options() == {}
+    assert DomDriver(allowed_hosts=hosts, block_outside_subrequests=False)._launch_options() == {}
 
 
 def test_subrequest_blocking_bypass_reaches_ipv6_copy() -> None:

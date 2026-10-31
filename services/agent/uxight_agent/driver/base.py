@@ -60,16 +60,16 @@ class Driver(ABC):
     mode = "dom"
 
     def __init__(
-        self, allowed_hosts: frozenset[str] = frozenset(), block_outside_subrequests: bool = False
+        self, allowed_hosts: frozenset[str] = frozenset(), block_outside_subrequests: bool = True
     ) -> None:
         # 허용 도메인('호스트:포트', guard.domain). 드라이버는 이 밖으로 이동하지 않는다.
         # start(url) 의 주소는 늘 허용이다.
         self._allowed_hosts = allowed_hosts
-        # 허용 밖 하위 요청 차단 (bench 전용, GACA-180).
+        # 허용 밖 하위 요청 차단 (GACA-180 · 227). 기본값 켬 — 운영 Watcher 와 bench 가 쓰고,
+        # 끄는 것은 시험뿐이다.
         # 켜면 브라우저가 허용 밖으로 연결하지 않는다.
         # route 에서 하위 요청 · iframe 이동을 끊고, route 를 거치지 않는 연결(worker · 떠날 때의
         # beacon · 추측 prefetch · WebRTC · QUIC)은 브라우저 설정으로 막는다 (DomDriver).
-        # 운영 Watcher 는 켜지 않는다.
         self._block_outside_subrequests = block_outside_subrequests
         # 요청 단계에서 끊은 허용 밖 이동 요청 수 (guard.domain 2단계).
         # 성능 benchmark 가 가드 조건마다 센다 (GACA-180). 운영은 읽지 않는다.
