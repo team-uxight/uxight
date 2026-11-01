@@ -46,6 +46,7 @@ uv run python -m uxight_agent.usage_report --log data/llm-usage.jsonl data/bench
   - 브라우저에 보낸 click · back 은 센다. select 를 누른 것도 센다 — 이 드라이버에서는 select 를 눌러도 값이 바뀌지 않는다.
   - scroll 은 본문 글이 있으면 센다. 페이지 가운데에서는 본문 글이 바뀌어 같은 화면이 아니고, 페이지 끝에서 되풀이하면 같은 화면이다.
   - 본문 글이 비면(benchmark 의 본문 글 끔 변형 등) scroll 은 세지 않는다. 요소 줄에는 화면 아래 요소도 있어, scroll 이 화면을 바꿨는지 알 수 없다.
+  - 본문이 안쪽 스크롤 상자에 든 페이지(SPA 등)는 드라이버의 scroll(창 스크롤)로 움직이지 않는다. 그래서 scroll 두 번이면 stuck 이 될 수 있다 — 사이트의 UX 문제가 아니라 드라이버의 한계다.
   - type 과 입력칸(input 의 텍스트 · 체크 계열, textarea) click 은 세지 않는다. 입력값 · 체크 상태는 요소 줄에도 본문 글에도 없어서, 세면 폼을 채우는 Persona 가 끝난다.
   - 가드 차단은 세지 않는다. 가드 끔(benchmark)에서 가드가 막았을 행동도 세지 않아, 가드 켬 · 끔에서 세는 규칙이 같다.
   - 행동을 얻지 못한 step 은 `fail` 규칙이 맡는다.
