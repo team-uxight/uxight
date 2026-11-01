@@ -12,7 +12,8 @@
 - 운영 Watcher 와 bench 의 모든 변형은 드라이버의 허용 밖 하위 요청 차단(`block_outside_subrequests=True`)을 켠다(GACA-227) — route 에서 허용 밖 하위 요청 · iframe 이동을 끊고, 허용 밖 WebSocket 은 가짜로 받고, route 를 거치지 않는 연결(worker · 떠날 때의 beacon · 추측 prefetch · WebRTC · QUIC)은 브라우저 설정(막힌 프록시 · UDP · QUIC 끄기 · service worker 막기)으로 막는다. 드라이버의 기본값도 켬이고, 끄는 것은 시험뿐이다.
 - 그래서 대상 사이트가 허용 밖에서 받는 자원(CDN 스크립트 · 글꼴 · 지도 · 영상 iframe)도 끊긴다. 필요한 호스트는 허용 도메인에 넣는다 — 넣으면 그 호스트로 이동도 허용된다. 허용 도메인은 BE 가 포트 없이 저장하므로(`Project.hostOf`) 같은 호스트의 다른 포트(화면 :3000 + API :8080 같은 대상)는 지금 허용할 수 없다.
 - 끊긴 step(LLM 응답 뒤 시간 상한 · 취소 · 행동 오류)의 토큰 · 비용은 사용량 기록(`llm-usage.jsonl`)에만 남고 DB 에서는 빠진다. 토큰은 이번 변경 전부터 같은 방식으로 빠졌다.
-- 한도(step · 토큰 · 하루 예산 · 시간)로 끝난 Persona 는 마지막 행동 뒤 화면을 `step-<n+1>.png` 로 남길 수 있다. 파일 번호는 마지막 step 번호 + 1 이다. 이 화면의 로그 줄은 없다.
+- Persona 종료 이유(`run_personas.status`)는 step 상한 `max_steps` 와 따로 `token_limit`(토큰 상한 · 하루 예산) · `stuck`(같은 화면 3번)을 쓴다(GACA-218). `token_limit` 은 LLM 을 부르기 전의 토큰 확인(Watcher 의 `_token_limit_reached`, bench 의 토큰 확인)이 정하고, `stuck` 은 `watcher/step_rules.py` 의 `persona_outcome` 이 정한다. 값마다 뜻은 README 에 있다.
+- 한도(step · 토큰 · 하루 예산 · 시간)나 같은 화면(`stuck`)으로 끝난 Persona 는 마지막 행동 뒤 화면을 `step-<n+1>.png` 로 남길 수 있다. 파일 번호는 마지막 step 번호 + 1 이다. 이 화면의 로그 줄은 없다.
 - 마지막 화면이 없는 경우: `done` · `fail` · 취소로 끝남, 마지막 step 의 행동을 브라우저에 보내지 않음(파싱 실패 · 가드 차단 등), 찍기 실패. 이때 스크린샷 조회는 404 다.
 - 시간 상한으로 끊긴 step 의 행동이 이미 실행됐으면 그 결과가 마지막 화면에 보일 수 있다.
 - 관측은 모델에 넣기 **전에** 정제한다 (숨김 요소 제거 · 지시문 마킹 · 페이지 텍스트는 데이터). 프롬프트 인젝션 방어는 가드가 아니라 여기다 (§9 L0.5).

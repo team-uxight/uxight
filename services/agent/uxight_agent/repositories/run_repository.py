@@ -146,14 +146,16 @@ class RunRepository:
         )
 
     def refresh_progress(self, run_id: int) -> None:
-        # progress = 정상 종료된(done/max_steps) 페르소나 수. fail/timeout/cancelled는 세지 않는다.
+        # progress = 정상 종료된(done/max_steps/token_limit/stuck) 페르소나 수.
+        # fail/timeout/cancelled는 세지 않는다. token_limit 은 전에 max_steps 로 적던 끝이다.
         # +1 대신 매번 다시 세어 덮어쓰므로 중복 호출이나 동시 완료에도 값이 정확하다.
         with engine.begin() as conn:
             conn.execute(
                 text(
                     "UPDATE runs SET progress = ("
                     "  SELECT COUNT(*) FROM run_personas "
-                    "  WHERE run_id = :run_id AND status IN ('done', 'max_steps')"
+                    "  WHERE run_id = :run_id "
+                    "  AND status IN ('done', 'max_steps', 'token_limit', 'stuck')"
                     ") WHERE run_id = :run_id"
                 ),
                 {"run_id": run_id},

@@ -27,7 +27,9 @@
 - Spring은 파일 경로를 run_id, persona_id, step 숫자로 직접 만든다. 로그 안의 `observation.screenshot`이나 `run_personas.log_path`를 경로로 쓰지 않는다.
 - Action 파싱은 최대 2회 재시도하며, 3회 연속 실패하면 Persona 실행을 실패(`fail`)로 처리한다.
 - max_steps 도달은 step을 추가하지 않고 `run_personas.status = 'max_steps'`로 기록한다.
-- step 상한, 토큰 상한, 하루 토큰 예산, 시간 상한으로 끝난 Persona는 마지막 행동 뒤 화면을 `step-<n+1>.png`로 남길 수 있다. 파일 번호는 마지막 step 번호 + 1이다. 이 스크린샷의 step 로그 줄은 없다.
+- 토큰 상한(회차 당)이나 하루 토큰 예산으로 끝나면 `token_limit`, 같은 화면의 관측이 3번 이어져 끝나면 `stuck`으로 기록한다. 둘 다 step을 추가하지 않는다.
+- 같은 화면은 요소 줄(`observation.elements_hash`)과 지금 화면 안의 본문 글이 둘 다 같은 것이다. 본문 글은 로그에 없어서 stuck은 로그만으로 다시 셀 수 없다.
+- 마지막 화면을 남기는 끝은 max_steps, token_limit, stuck, timeout(step 상한, 토큰 상한 · 하루 토큰 예산, 같은 화면 3번, 시간 상한)이다. 이렇게 끝난 Persona는 마지막 행동 뒤 화면을 `step-<n+1>.png`로 남길 수 있다. 파일 번호는 마지막 step 번호 + 1이다. 이 스크린샷의 step 로그 줄은 없다.
 - 마지막 화면은 done, fail, cancelled로 끝난 Persona에는 없다. 마지막 step의 행동을 브라우저에 보내지 않았거나(가드 차단, Action 파싱 실패 등) 찍기에 실패해도 마지막 화면은 없다. 이때 스크린샷 조회는 404(LOG-ERR-002)다.
 - 시간 상한으로 끊긴 step의 행동이 이미 실행됐다면 그 결과가 마지막 화면에 보일 수 있다.
 

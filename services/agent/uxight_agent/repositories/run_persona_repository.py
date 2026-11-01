@@ -5,8 +5,11 @@ from sqlalchemy import text
 from ..db import engine
 
 # running 이 아닌 종료 상태.
-# done = Agent 가 스스로 done 을 냄(성공, 메인 판정 기준), max_steps = 스텝 소진.
-PersonaOutcome = Literal["done", "max_steps", "fail", "timeout", "cancelled"]
+# done = Agent 가 스스로 done 을 냄(성공, 메인 판정 기준), max_steps = 스텝 소진,
+# token_limit = 토큰 상한 · 하루 예산, stuck = 같은 화면이 이어짐 (GACA-218 · V9 마이그레이션).
+PersonaOutcome = Literal[
+    "done", "max_steps", "token_limit", "stuck", "fail", "timeout", "cancelled"
+]
 
 # step 비용을 누적 비용 칸(cost_usd)에 더하는 SET 절. :cost_usd 가 NULL 이면 칸을 그대로 둔다.
 _ADD_COST = (

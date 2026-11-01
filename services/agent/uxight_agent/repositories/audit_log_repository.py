@@ -6,7 +6,7 @@ from ..db import engine
 
 # Spring 감사 로그의 action 이름 규칙(<대상>.<행위>)을 따른다.
 BLOCKED_ACTION = "agent.action_blocked"
-LIMIT_REACHED = "agent.limit_reached"  # 토큰 상한 · 하루 예산으로 Persona 를 끝냄
+LIMIT_REACHED = "agent.limit_reached"  # 토큰 상한 · 하루 예산으로 Persona 를 끝냄 (token_limit)
 
 
 class AuditLogRepository:
