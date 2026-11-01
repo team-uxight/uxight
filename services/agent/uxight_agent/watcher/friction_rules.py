@@ -90,10 +90,7 @@ def detect_task_failure(
         error_code = (last.get("result") or {}).get("error_code")
 
         if error_code == "PARSE_FAILED":
-            reason = (
-                "LLM 응답 파싱 오류로 과제 실행이 실패함 "
-                "(웹사이트 UX 문제로 단정할 수 없음)"
-            )
+            reason = "LLM 응답 파싱 오류로 과제 실행이 실패함 (웹사이트 UX 문제로 단정할 수 없음)"
         else:
             reason = f"과제 실행이 {status} 상태로 종료됨"
 
@@ -104,9 +101,7 @@ def detect_task_failure(
             reason=reason,
         )
 
-    if reached is False and (
-        status == "done" or (status is None and action_kind == "done")
-    ):
+    if reached is False and (status == "done" or (status is None and action_kind == "done")):
         return FrictionResult(
             type="task_failure",
             severity="medium",
@@ -122,11 +117,7 @@ def detect_task_failure(
 
 def detect_navigation_confusion(steps: list[dict]) -> FrictionResult | None:
     """반복적인 뒤로 가기 또는 이전 페이지 재방문을 탐지한다."""
-    back_steps = [
-        s["step"]
-        for s in steps
-        if (s.get("action") or {}).get("kind") == "back"
-    ]
+    back_steps = [s["step"] for s in steps if (s.get("action") or {}).get("kind") == "back"]
 
     visited = []
     revisit_steps = []
@@ -152,8 +143,7 @@ def detect_navigation_confusion(steps: list[dict]) -> FrictionResult | None:
             severity="medium",
             steps=tuple(evidence),
             reason=(
-                f"뒤로 가기 {len(back_steps)}회, "
-                f"이전 페이지 재방문 {len(revisit_steps)}회 발생"
+                f"뒤로 가기 {len(back_steps)}회, 이전 페이지 재방문 {len(revisit_steps)}회 발생"
             ),
         )
 

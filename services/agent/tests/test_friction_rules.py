@@ -34,19 +34,12 @@ def test_sample_persona_frictions(persona_id):
     if not (FIXTURE_ROOT / "run.json").exists():
         pytest.skip("GACA-46 샘플 로그가 아직 제공되지 않음")
 
-    run = json.loads(
-        (FIXTURE_ROOT / "run.json").read_text(encoding="utf-8")
-    )
-    persona = next(
-        p for p in run["personas"]
-        if p["persona_id"] == persona_id
-    )
+    run = json.loads((FIXTURE_ROOT / "run.json").read_text(encoding="utf-8"))
+    persona = next(p for p in run["personas"] if p["persona_id"] == persona_id)
 
     path = FIXTURE_ROOT / str(persona_id) / "steps.jsonl"
     steps = [
-        json.loads(line)
-        for line in path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
+        json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
     ]
 
     results = detect_frictions(steps, status=persona["status"])
