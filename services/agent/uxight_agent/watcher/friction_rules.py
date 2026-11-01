@@ -83,7 +83,7 @@ def detect_task_failure(
 
     last = steps[-1]
     last_step = last["step"]
-    reached = (last.get("task") or {}).get("url_reached")
+    reached = any((step.get("task") or {}).get("url_reached") is True for step in steps)
     action_kind = (last.get("action") or {}).get("kind")
 
     if status in {"fail", "max_steps"}:

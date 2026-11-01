@@ -253,3 +253,99 @@ def test_excessive_steps_detects_late_goal_reached():
     assert result.type == "excessive_steps"
     assert result.severity == "low"
     assert result.steps == (12,)
+
+
+def test_goal_reached_before_done_is_not_task_failure():
+    """목표 URL에 도달한 뒤 다른 페이지로 이동해도 과제 실패로 판정하지 않는다."""
+    from uxight_agent.watcher.friction_rules import detect_task_failure
+
+    steps = [
+        {
+            "step": 1,
+            "action": {"kind": "click"},
+            "task": {"url_reached": False},
+        },
+        {
+            "step": 2,
+            "action": {"kind": "click"},
+            "task": {"url_reached": True},
+        },
+        {
+            "step": 3,
+            "action": {"kind": "done"},
+            "task": {"url_reached": False},
+        },
+    ]
+
+    assert detect_task_failure(steps, status="done") is None
+
+
+@pytest.mark.parametrize(
+    "error_code",
+    [
+        "ELEMENT_NOT_FOUND",
+        "ELEMENT_NOT_INTERACTABLE",
+        "BROWSER_ACTION_FAILED",
+    ],
+)
+def test_browser_action_error_has_evidence_step(error_code):
+    """브라우저 조작 오류를 탐지하고 오류 발생 Step을 근거로 기록한다."""
+    from uxight_agent.watcher.friction_rules import detect_interaction_failure
+
+    steps = [
+        {
+            "step": 1,
+            "url": "https://example.com/page",
+            "action": {"kind": "click", "target": 10},
+            "result": {"ok": True, "error_code": None},
+        },
+        {
+            "step": 2,
+            "url": "https://example.com/page",
+            "action": {"kind": "click", "target": 20},
+            "result": {"ok": False, "error_code": error_code},
+        },
+    ]
+
+    result = detect_interaction_failure(steps)
+
+    assert result is not None
+    assert result.type == "interaction_failure"
+    assert result.severity == "medium"
+    assert result.steps == (2,)
+    assert error_code in result.reason
+
+
+@pytest.mark.parametrize("status", ["fail", "max_steps"])
+def test_failed_task_has_evidence_step(status):
+    """실패 종료 상태를 탐지하고 마지막 Step을 근거로 기록한다."""
+    from uxight_agent.watcher.friction_rules import detect_task_failure
+
+    steps = [
+        {
+            "step": 1,
+            "action": {"kind": "click"},
+            "task": {"url_reached": False},
+            "result": {"ok": True, "error_code": None},
+        },
+        {
+            "step": 2,
+            "action": {"kind": "click"},
+            "task": {"url_reached": False},
+            "result": {"ok": True, "error_code": None},
+        },
+        {
+            "step": 3,
+            "action": {"kind": "click"},
+            "task": {"url_reached": False},
+            "result": {"ok": False, "error_code": None},
+        },
+    ]
+
+    result = detect_task_failure(steps, status=status)
+
+    assert result is not None
+    assert result.type == "task_failure"
+    assert result.severity == "high"
+    assert result.steps == (3,)
+    assert status in result.reason
