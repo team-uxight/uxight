@@ -157,6 +157,26 @@ def test_gpt_6_luna_cost_of_dev_run_9(log, model: str) -> None:
     assert report.splitlines()[3].endswith("약 $0.0070")
 
 
+@pytest.mark.parametrize(
+    ("model", "usd"),
+    [
+        # 입력 1,000 × 단가 + 출력 1,000 × 단가 (100만 토큰당)
+        ("claude-haiku-5-5", 0.0006),  # 0.10 · 0.50
+        ("claude-sonnet-5-5", 0.012),  # 2 · 10
+        ("claude-opus-5-5", 0.024),  # 4 · 20
+    ],
+)
+def test_claude_models_are_priced(log, model: str, usd: float) -> None:
+    # dev 서버 agent 는 11/01 부터 claude-haiku-5-5 를 쓴다. 서버는 기본 단가표만 쓰므로
+    # 단가가 없으면 회차 비용 칸이 비어 남는다.
+    record_usage(_resp(1_000, 1_000, 0), role="persona_step", model=model, latency_ms=1, run_id=1)
+
+    summary = usage_report.summarize(usage_report.load(log), "run", usage_report.price_table())
+
+    assert summary["groups"]["1"]["usd"] == pytest.approx(usd)
+    assert summary["unpriced"] == 0
+
+
 def test_cached_input_is_billed_at_cache_price(log) -> None:
     resp = _resp(1_000_000, 1_000_000, 0)
     resp.usage.prompt_tokens_details = SimpleNamespace(cached_tokens=400_000)
