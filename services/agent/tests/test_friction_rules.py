@@ -7,7 +7,6 @@ import pytest
 
 from uxight_agent.watcher.friction_rules import detect_frictions
 
-
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "runs" / "9001"
 
 EXPECTED = {
