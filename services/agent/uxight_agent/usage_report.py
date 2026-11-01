@@ -42,10 +42,11 @@ DEFAULT_PRICES: PriceTable = {
     "openai/gpt-5.6-luna": (0.20, 1.20, 0.20),  # 캐시 단가를 몰라 입력 단가와 같게 둔다
     "openai/gpt-6-luna": GPT_6_LUNA_PRICES,
     "gpt-6-luna": GPT_6_LUNA_PRICES,  # 접두어 없는 이름으로 부르는 경로
-    # Anthropic(OpenAI 호환 주소)으로 부르는 Claude. OpenRouter pricing, 10/31 조회.
+    # Anthropic 계열은 Anthropic 공식 API 가격이다 (PM 결정 11/01, 11/01 확인).
     # dev 서버 agent 가 11/01 부터 claude-haiku-5-5 를 쓴다 (MLAPI 크레딧 소진).
+    # Haiku 5.5 는 프롬프트 10만 토큰 이하 가격이다(넘으면 0.50 · 2.50). 캐시 읽기는 입력의 0.1배.
     "claude-haiku-5-5": (0.10, 0.50, 0.01),
-    "claude-sonnet-5-5": (2.00, 10.00, 0.10),
+    "claude-sonnet-5-5": (2.00, 10.00, 0.20),
     "claude-opus-5-5": (4.00, 20.00, 0.20),
 }
 GROUP_KEYS = {"role", "day", "run", "model", "persona"}
