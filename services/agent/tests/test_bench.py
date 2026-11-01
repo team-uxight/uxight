@@ -332,7 +332,9 @@ class ScriptedDecider(Decider):
 
 
 def decision(kind: str | None) -> Decision:
-    action = Action(kind=kind, value="down" if kind == "scroll" else None) if kind else None
+    element_id = 1 if kind == "click" else None
+    value = "down" if kind == "scroll" else None
+    action = Action(kind=kind, element_id=element_id, value=value) if kind else None
     code = None if action else "PARSE_FAILED"
     return Decision(action, error_code=code, prompt_tokens=11, completion_tokens=7, model="m")
 
@@ -373,8 +375,10 @@ def limits(**values) -> bench.BenchConfig:
         ([decision("scroll"), decision("done")], {}, {}, ("done", 2, None)),
         ([decision("scroll")] * 3, {}, {}, ("max_steps", 3, None)),
         ([decision(None)] * 3, {}, {}, ("fail", 3, None)),  # 행동 없는 step 3번 (운영 규칙)
+        # 같은 화면에서 click 3번 — step 상한 5 전에, 세 번째 관측의 step 뒤에 끝난다 (운영 규칙)
+        ([decision("click")] * 3, {}, {"max_steps": 5}, ("stuck", 3, None)),
         # 토큰 상한 20: step 마다 18 토큰 → 36 이 된 뒤 다음 step 전에 멈춘다
-        ([decision("scroll")] * 3, {}, {"max_tokens": 20}, ("max_steps", 2, None)),
+        ([decision("scroll")] * 3, {}, {"max_tokens": 20}, ("token_limit", 2, None)),
         ([SLOW], {}, {"max_seconds": 1}, ("timeout", 0, None)),
         ([INNER_TIMEOUT], {}, {}, ("fail", 0, "TimeoutError")),
         (
@@ -391,6 +395,7 @@ def limits(**values) -> bench.BenchConfig:
         "done",
         "max-steps",
         "no-action",
+        "same-screen",
         "token-cap",
         "time-limit",
         "inner-timeout",
@@ -412,6 +417,48 @@ def test_persona_run_ends_like_the_watcher(
     assert len(steps) == record["steps"]
     # 단가표가 비었으니 step 이 하나라도 있으면 비용은 모른다(None)
     assert record["cost_usd"] == (None if steps else 0.0)
+
+
+@pytest.mark.parametrize("guard", ["on", "off"])
+def test_guard_block_is_not_counted_as_same_screen_in_either_guard_mode(
+    monkeypatch: pytest.MonkeyPatch, guard: str
+) -> None:
+    # 같은 화면에서 '회원 탈퇴' 를 세 번 누른다. 가드 켬은 막고, 가드 끔은 실행한다(화면은 그대로).
+    # 두 조건 모두 가드 차단(끔은 가드가 막았을 행동)이라 세지 않아 step 상한까지 간다 (GACA-218).
+    async def observe(self) -> Observation:
+        element = {"tag": "button", "type": "button", "text": "회원 탈퇴"}
+        return Observation(
+            url="https://example.com/",
+            title="t",
+            dom='[1] <button> "회원 탈퇴"',
+            element_map={1: element},
+        )
+
+    monkeypatch.setitem(bench.DRIVERS, "dom", type("Driver", (FakeDriver,), {"observe": observe}))
+    job = dataclasses.replace(JOB, guard=guard)
+    run = bench.run_persona(job, ScriptedDecider(*[decision("click")] * 3), {}, limits())
+
+    record, _ = asyncio.run(asyncio.wait_for(run, 10))
+
+    assert (record["outcome"], record["steps"], record["guard_destructive"]) == ("max_steps", 3, 3)
+
+
+@pytest.mark.parametrize(("body_text", "outcome"), [(True, "stuck"), (False, "max_steps")])
+def test_scroll_at_page_end_is_stuck_only_with_body_text(
+    monkeypatch: pytest.MonkeyPatch, body_text: bool, outcome: str
+) -> None:
+    # 페이지 끝에서 scroll 만 되풀이한다 — 요소 줄도 본문 글도 그대로다. 본문 글이 있으면 같은
+    # 화면으로 세어 stuck 이다. 본문 글 끔 변형은 scroll 이 화면을 바꿨는지 알 수 없어 세지 않는다.
+    async def observe(self) -> Observation:
+        return Observation(url="https://example.com/", title="t", dom="", text="본문 마지막 줄")
+
+    monkeypatch.setitem(bench.DRIVERS, "dom", type("Driver", (FakeDriver,), {"observe": observe}))
+    job = dataclasses.replace(JOB, body_text=body_text)
+    run = bench.run_persona(job, ScriptedDecider(*[decision("scroll")] * 3), {}, limits())
+
+    record, _ = asyncio.run(asyncio.wait_for(run, 10))
+
+    assert (record["outcome"], record["steps"]) == (outcome, 3)
 
 
 def test_matching_rule_start_values() -> None:
