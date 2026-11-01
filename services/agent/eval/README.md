@@ -24,7 +24,7 @@ uv run python -m uxight_agent.bakeoff --repeat 3 \
   --model astra=<GPT-6 Astra 모델 ID>@OPENROUTER
 ```
 
-`--model 이름=모델ID@접두어` 에서 접두어가 X 면 `X_BASE_URL` · `X_API_KEY` 를 쓴다(없으면 `LLM`). 단가가 기본표에 없는 모델은 `LLM_PRICES='{"모델ID": [입력, 출력]}'`(USD / 100만 토큰)로 준다.
+`--model 이름=모델ID@접두어` 에서 접두어가 X 면 `X_BASE_URL` · `X_API_KEY` 를 쓴다(없으면 `LLM`). 단가가 기본표에 없는 모델은 `LLM_PRICES='{"모델ID": [입력, 출력, 캐시된 입력]}'`(USD / 100만 토큰)로 준다. 캐시된 입력 단가는 생략할 수 있고, 생략하면 입력 단가로 센다.
 
 결과는 `eval/results/<시각>/` (커밋하지 않는다): `summary.md` 표 · `calls.jsonl` 문제별 답 · `usage.jsonl` 토큰.
 

@@ -38,6 +38,26 @@ def test_dangerous_and_safe_buttons_are_told_apart(fixture_server: str) -> None:
     assert verdicts["등록"] == "submit of a POST form"
 
 
+def test_pointer_cell_is_checked_like_button(fixture_server: str) -> None:
+    observation = _observe(f"{fixture_server}/pointer_cells.html")
+    verdicts = {
+        item["text"]: destructive_reason(Action(kind="click", element_id=i), observation)
+        for i, item in observation.element_map.items()
+        if item.get("pointer")
+    }
+
+    # 손가락 커서로 클릭을 받는 칸(GACA-225)은 스크립트가 클릭을 받으므로 버튼으로 본다.
+    # 버튼에만 거는 '구매' 같은 낱말도 막는다.
+    # 칸 안쪽 요소의 이름도 본다 — 칸 가운데를 누르면 안쪽 ✕(title '삭제')가 눌린다.
+    assert verdicts == {
+        "25학번 (별표31)": None,
+        "26학번 (별표32)": None,
+        "구매하기": "keyword '구매'",
+        "바깥 칸 안쪽 글": None,
+        "✕": "keyword '삭제'",
+    }
+
+
 @pytest.mark.parametrize("label", ["회원 탈퇴", "삭 제", "ｐａｙ now", "탈​퇴"])
 def test_spacing_and_lookalikes_do_not_hide_keyword(label: str) -> None:
     observation = Observation(

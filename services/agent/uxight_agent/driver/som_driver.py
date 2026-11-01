@@ -3,6 +3,7 @@ import dataclasses
 
 from playwright.async_api import Error as PlaywrightError
 
+from ..guard.domain import is_allowed
 from .base import Observation
 from .dom_driver import ID_ATTRIBUTE, MASK_SELECTOR, SCREENSHOT_TIMEOUT_MS, DomDriver
 
@@ -139,6 +140,7 @@ class SomDriver(DomDriver):
 
     async def observe(self) -> Observation:
         page = self._require_page()
+        self._left_url = None
         for _ in range(CAPTURE_ATTEMPTS):
             try:
                 await page.evaluate(
@@ -164,7 +166,9 @@ class SomDriver(DomDriver):
                         "expectBoxes": bool(observation.element_map),
                     },
                 )
-                if trusted:
+                # 찍는 사이 주 창이 허용 밖으로 갔으면 허용 밖 페이지의 그림일 수 있다 (GACA-224).
+                # 다시 하면 _observe_page 가 되돌린다.
+                if trusted and is_allowed(page.url, self._allowed_hosts):
                     return dataclasses.replace(observation, screenshot=screenshot)
             except PlaywrightError:  # TimeoutError 도 여기 해당한다
                 # 관측 중 문서가 바뀌었거나(실행 컨텍스트가 사라짐) 찍기가 상한을 넘었다.

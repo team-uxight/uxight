@@ -3,16 +3,25 @@
     uv run python -m uxight_agent.usage_report                    # 전체, 역할별
     uv run python -m uxight_agent.usage_report --days 1 --by run  # 최근 하루, 실행별
     uv run python -m uxight_agent.usage_report --days 1 --slack --alert-usd 5   # 서버 cron 용
+    # 운영 + benchmark 를 묶어 서버 전체
+    uv run python -m uxight_agent.usage_report --log data/llm-usage.jsonl data/bench/*/usage.jsonl
 
-- 단가는 USD / 100만 토큰 (입력, 출력). 기본표에 없는 모델은 env 로 준다:
-  LLM_PRICES='{"openai/gpt-5.6-luna": [0.20, 1.20]}'. 단가가 없는 모델은 토큰만 세고 비용은 "?".
-- 추론 토큰은 출력 토큰 안에 이미 들어 있다 (따로 더하지 않는다).
+- 단가는 USD / 100만 토큰 (입력, 출력, 캐시된 입력). 기본표에 없는 모델은 env 로 준다:
+  LLM_PRICES='{"example/model": [1.00, 2.00, 0.10]}'.
+- 캐시 단가를 빼고 [입력, 출력] 만 주면 캐시된 입력도 입력 단가로 센다.
+- LLM_PRICES 는 모델마다 0 이상인 숫자 2~3개여야 한다. 아니면 ValueError.
+- 단가가 없는 모델은 토큰만 세고 비용은 "?".
+- 캐시된 입력 토큰은 입력 토큰 안에, 추론 토큰은 출력 토큰 안에 이미 들어 있다 (따로 더하지 않는다).
+  캐시된 만큼은 캐시 단가로, 나머지 입력은 입력 단가로 센다.
+- 단가표와 계산은 여기 한 곳이다. Persona step 마다 runs · run_personas 의 cost_usd 에 더하는 값
+  (watcher/run_orchestrator)과 bakeoff 도 이 함수를 쓴다.
 - --slack 은 SLACK_WEBHOOK_URL 로 요약 한 덩어리를 보낸다.
   --alert-usd 를 넘으면 맨 앞에 경고를 단다.
 """
 
 import argparse
 import json
+import math
 import os
 import sys
 import urllib.request
@@ -23,8 +32,23 @@ from typing import Any
 
 from .llm import usage_log_path
 
+# 모델 이름 → (입력, 출력, 캐시된 입력) USD / 100만 토큰.
+PriceTable = dict[str, tuple[float, float, float]]
+
 # 공개 정가 기준 추정치. 실제 청구는 제공자 쪽 사용량이 기준이다.
-DEFAULT_PRICES: dict[str, tuple[float, float]] = {"openai/gpt-5.6-luna": (0.20, 1.20)}
+# 모델 가격은 어느 경로(엘리스 MLAPI · OpenRouter)로 불러도 OpenRouter pricing 기준이다 (PM 결정).
+GPT_6_LUNA_PRICES = (0.10, 0.50, 0.01)  # OpenRouter pricing, 10/30 조회
+DEFAULT_PRICES: PriceTable = {
+    "openai/gpt-5.6-luna": (0.20, 1.20, 0.20),  # 캐시 단가를 몰라 입력 단가와 같게 둔다
+    "openai/gpt-6-luna": GPT_6_LUNA_PRICES,
+    "gpt-6-luna": GPT_6_LUNA_PRICES,  # 접두어 없는 이름으로 부르는 경로
+    # Anthropic 계열은 Anthropic 공식 API 가격이다 (PM 결정 11/01, 11/01 확인).
+    # dev 서버 agent 가 11/01 부터 claude-haiku-5-5 를 쓴다 (MLAPI 크레딧 소진).
+    # Haiku 5.5 는 프롬프트 10만 토큰 이하 가격이다(넘으면 0.50 · 2.50). 캐시 읽기는 입력의 0.1배.
+    "claude-haiku-5-5": (0.10, 0.50, 0.01),
+    "claude-sonnet-5-5": (2.00, 10.00, 0.20),
+    "claude-opus-5-5": (4.00, 20.00, 0.20),
+}
 GROUP_KEYS = {"role", "day", "run", "model", "persona"}
 
 
@@ -43,18 +67,33 @@ def load(path: Path, days: int | None = None) -> list[dict[str, Any]]:
     return rows
 
 
-def price_table() -> dict[str, tuple[float, float]]:
+def _is_price(value: Any) -> bool:
+    # JSON 숫자만 (참거짓 · 글자 아님), 0 이상 유한. NaN · Infinity 도 JSON 으로 들어올 수 있다.
+    return isinstance(value, int | float) and not isinstance(value, bool) and 0 <= value < math.inf
+
+
+def price_table() -> PriceTable:
+    """기본표에 env LLM_PRICES 를 얹은 단가표. env 모양이 틀리면 ValueError."""
     table = dict(DEFAULT_PRICES)
-    for model, pair in json.loads(os.environ.get("LLM_PRICES", "{}")).items():
-        table[model] = (float(pair[0]), float(pair[1]))
+    env = json.loads(os.environ.get("LLM_PRICES") or "{}")  # 비어 있으면 안 준 것으로 본다
+    if not isinstance(env, dict):
+        raise ValueError("LLM_PRICES must be a JSON object {model: [input, output, cached]}")
+    for model, prices in env.items():
+        if not (isinstance(prices, list) and len(prices) in (2, 3) and all(map(_is_price, prices))):
+            raise ValueError(f"LLM_PRICES[{model!r}] must be 2-3 non-negative finite numbers")
+        p_in, p_out = float(prices[0]), float(prices[1])
+        table[model] = (p_in, p_out, float(prices[2]) if len(prices) == 3 else p_in)
     return table
 
 
-def cost_usd(row: dict[str, Any], table: dict[str, tuple[float, float]]) -> float | None:
+def cost_usd(row: dict[str, Any], table: PriceTable) -> float | None:
     if row["model"] not in table:
         return None
-    p_in, p_out = table[row["model"]]
-    return (row["input_tokens"] * p_in + row["output_tokens"] * p_out) / 1_000_000
+    p_in, p_out, p_cached = table[row["model"]]
+    # 입력 토큰 안에 캐시된 토큰이 들어 있다. 추론 토큰은 출력 토큰 안에 있어 따로 더하지 않는다.
+    cached = min(row.get("cached_tokens") or 0, row["input_tokens"])
+    uncached = row["input_tokens"] - cached
+    return (uncached * p_in + cached * p_cached + row["output_tokens"] * p_out) / 1_000_000
 
 
 def _key(row: dict[str, Any], by: str) -> str:
@@ -67,7 +106,7 @@ def _key(row: dict[str, Any], by: str) -> str:
     return str(row[by])
 
 
-def summarize(rows: list[dict[str, Any]], by: str, table: dict[str, tuple[float, float]]) -> dict:
+def summarize(rows: list[dict[str, Any]], by: str, table: PriceTable) -> dict:
     groups: dict[str, dict[str, Any]] = defaultdict(
         lambda: {"calls": 0, "errors": 0, "input": 0, "output": 0, "reasoning": 0, "usd": 0.0}
     )
@@ -79,7 +118,8 @@ def summarize(rows: list[dict[str, Any]], by: str, table: dict[str, tuple[float,
         g["input"] += row["input_tokens"]
         g["output"] += row["output_tokens"]
         g["reasoning"] += row["reasoning_tokens"]
-        usd = cost_usd(row, table)
+        # 부를 때 남긴 비용이 있으면 그대로 쓴다 — 단가표가 바뀌어도 지난 비용은 안 바뀐다.
+        usd = row["cost_usd"] if row.get("cost_usd") is not None else cost_usd(row, table)
         if usd is None:
             unpriced += 1
         else:
@@ -98,10 +138,10 @@ def render(summary: dict, by: str, title: str) -> str:
     for name, g in ordered:
         lines.append(
             f"{name[:14]:<14} {g['calls']:>6} {g['errors']:>4} {g['input']:>10,} "
-            f"{g['output']:>10,} {g['reasoning']:>9,} {g['usd']:>8.3f}"
+            f"{g['output']:>10,} {g['reasoning']:>9,} {g['usd']:>8.4f}"
         )
     t = summary["total"]
-    lines.append(f"합계: 호출 {t['calls']} · 실패 {t['errors']} · 약 ${t['usd']:.3f}")
+    lines.append(f"합계: 호출 {t['calls']} · 실패 {t['errors']} · 약 ${t['usd']:.4f}")
     if summary["unpriced"]:
         lines.append(f"단가 없는 모델 {summary['unpriced']}건은 비용에 안 들어갔다 (LLM_PRICES)")
     return "\n".join(lines)
@@ -123,7 +163,11 @@ def post_slack(text: str, url: str) -> None:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument(
-        "--log", type=Path, default=None, help="기본: LLM_USAGE_LOG 또는 data/llm-usage.jsonl"
+        "--log",
+        type=Path,
+        nargs="+",
+        default=None,
+        help="여러 개면 묶어서 센다. 기본: LLM_USAGE_LOG 또는 data/llm-usage.jsonl",
     )
     ap.add_argument("--days", type=int, default=None, help="최근 N일만")
     ap.add_argument("--by", choices=sorted(GROUP_KEYS), default="role")
@@ -131,7 +175,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--alert-usd", type=float, default=None, help="이 금액을 넘으면 경고")
     args = ap.parse_args(argv)
 
-    rows = load(args.log or usage_log_path(), args.days)
+    rows = [row for path in args.log or [usage_log_path()] for row in load(path, args.days)]
     summary = summarize(rows, args.by, price_table())
     span = f"최근 {args.days}일" if args.days else "전체"
     report = render(summary, args.by, f"LLM 사용량 ({span}, {args.by}별)")

@@ -4,7 +4,7 @@
   제공자를 바꿀 땐 env 만 바꾼다.
 - 사용량 로그: LLM_USAGE_LOG (기본 data/llm-usage.jsonl). 한 줄 = 호출 한 번. 비용 리포트는
   `uv run python -m uxight_agent.usage_report`.
-- 로그에는 토큰 수 · 걸린 시간 · 역할 · 실행 id 만 남긴다.
+- 로그에는 토큰 수 · 비용(부를 때의 단가) · 걸린 시간 · 역할 · 실행 id 만 남긴다.
   키 · 프롬프트 · 응답 본문은 남기지 않는다.
 """
 
@@ -49,6 +49,10 @@ def record_usage(
         "latency_ms": latency_ms,
         "error": error,
     }
+    # 부를 때의 단가(OpenRouter 기준)로 비용을 같이 남긴다. 단가표에 없는 모델이면 None.
+    from .usage_report import cost_usd, price_table  # usage_report 가 이 모듈을 불러서 여기서
+
+    row["cost_usd"] = cost_usd(row, price_table())
     path = usage_log_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as f:
