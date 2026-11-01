@@ -1,14 +1,25 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
+type Evidence = {
+	timestamp: string;
+	score: number;
+	thought: string;
+	action: string;
+	context: string;
+};
+
+type Occurrence = { persona: string; step: string; issue?: string; evidence?: Evidence };
+
 type Friction = {
 	id: string;
 	title: string;
 	severity: '높음' | '중간';
 	personas: number;
-	occurrences: { persona: string; step: string; issue?: string }[];
+	occurrences: Occurrence[];
 };
 
+// 시안용 예시 데이터. 근거 스크린샷과 로그 API 가 생기면 교체한다.
 const frictions: Friction[] = [
 	{
 		id: 'navigation-confusion',
@@ -16,10 +27,19 @@ const frictions: Friction[] = [
 		severity: '높음',
 		personas: 4,
 		occurrences: [
-			{ persona: 'Novice-1', step: 'step 3', issue: '장학금 메뉴를 찾지 못하고 학사 안내를 반복 탐색했습니다.' },
-			{ persona: 'Novice-2', step: 'step 4', issue: '유사한 메뉴 이름을 선택해 이전 화면으로 돌아왔습니다.' },
+			{
+				persona: 'Novice-1', step: 'step 3', issue: '장학금 메뉴를 찾지 못하고 학사 안내를 반복 탐색했습니다.',
+				evidence: { timestamp: '2026/09/24 21:03:55', score: 4, thought: '장학금 메뉴가 학사안내 아래 있어서 찾기 어려웠다.', action: '장학금 메뉴를 찾기 위해 아래로 스크롤을 반복했다.', context: 'Novice-1 유저가 직관적인 위치에 장학 항목이 없어 탐색이 지연되었다.' },
+			},
+			{
+				persona: 'Novice-2', step: 'step 4', issue: '유사한 메뉴 이름을 선택해 이전 화면으로 돌아왔습니다.',
+				evidence: { timestamp: '2026/09/24 21:05:12', score: 3, thought: '비슷한 이름의 메뉴가 여러 개라 어느 쪽인지 확신이 없었다.', action: '장학 공지를 눌렀다가 뒤로 가기를 눌렀다.', context: '유사한 메뉴 이름 때문에 잘못된 화면으로 진입했다.' },
+			},
 			{ persona: 'Expert-1', step: '이상 없음' },
-			{ persona: 'Novice-3', step: 'step 4', issue: '장학 공지와 장학 신청 메뉴를 구분하지 못했습니다.' },
+			{
+				persona: 'Novice-3', step: 'step 4', issue: '장학 공지와 장학 신청 메뉴를 구분하지 못했습니다.',
+				evidence: { timestamp: '2026/09/24 21:07:40', score: 4, thought: '장학 공지와 장학 신청이 같은 것이라고 생각했다.', action: '장학 공지 게시판을 열어 신청 버튼을 찾았다.', context: '두 메뉴의 역할이 구분되지 않아 신청 경로를 놓쳤다.' },
+			},
 		],
 	},
 	{
@@ -28,8 +48,14 @@ const frictions: Friction[] = [
 		severity: '중간',
 		personas: 2,
 		occurrences: [
-			{ persona: 'Novice-1', step: 'step 6', issue: '신청 현황 링크를 신청 시작 버튼으로 오해했습니다.' },
-			{ persona: 'Expert-1', step: 'step 2', issue: '축약된 메뉴 레이블의 의미를 추측해야 했습니다.' },
+			{
+				persona: 'Novice-1', step: 'step 6', issue: '신청 현황 링크를 신청 시작 버튼으로 오해했습니다.',
+				evidence: { timestamp: '2026/09/24 21:09:03', score: 3, thought: '신청 현황이 신청을 시작하는 버튼인 줄 알았다.', action: '신청 현황 링크를 클릭했다.', context: '레이블이 기능을 정확히 설명하지 못해 오해가 생겼다.' },
+			},
+			{
+				persona: 'Expert-1', step: 'step 2', issue: '축약된 메뉴 레이블의 의미를 추측해야 했습니다.',
+				evidence: { timestamp: '2026/09/24 21:02:31', score: 2, thought: '축약된 레이블이라 의미를 추측해야 했다.', action: '메뉴에 마우스를 올려 설명을 확인했다.', context: '축약 레이블 때문에 의도 파악에 시간이 걸렸다.' },
+			},
 		],
 	},
 ];
@@ -39,7 +65,7 @@ export default function RDiagnosis() {
 	const [expanded, setExpanded] = useState('navigation-confusion');
 	const [severity, setSeverity] = useState('전체');
 	const [type, setType] = useState('전체');
-	const [notice, setNotice] = useState('');
+	const [evidenceTarget, setEvidenceTarget] = useState<{ friction: Friction; occurrence: Occurrence } | null>(null);
 
 	const visibleFrictions = frictions.filter((friction) =>
 		(severity === '전체' || friction.severity === severity) &&
@@ -99,12 +125,14 @@ export default function RDiagnosis() {
 								<div className="rd-friction-details">
 									{friction.occurrences.map((occurrence) => (
 										<div className="rd-occurrence-row" key={occurrence.persona}>
-											<strong>{occurrence.persona}</strong>
-											<span>{occurrence.step}</span>
-											{occurrence.issue ? (
-												<button type="button" className="rd-evidence-button" onClick={() => setNotice(`${occurrence.persona}의 ${occurrence.step} 근거 화면은 데모 데이터입니다.`)}>근거 보기</button>
-											) : <span className="rd-no-issue">이상 없음</span>}
-											{occurrence.issue && <p>{occurrence.issue}</p>}
+											<div className="rd-occurrence-info">
+												<strong>{occurrence.persona}</strong>
+												{occurrence.issue && <p>{occurrence.issue}</p>}
+											</div>
+											<span>{occurrence.issue ? occurrence.step : '이상 없음'}</span>
+											{occurrence.issue && (
+												<button type="button" className="rd-evidence-button" onClick={() => setEvidenceTarget({ friction, occurrence })}>근거 보기</button>
+											)}
 										</div>
 									))}
 									<div className="rd-friction-footer">
@@ -118,7 +146,37 @@ export default function RDiagnosis() {
 				})}
 				{visibleFrictions.length === 0 && <div className="rd-empty-state"><p>선택한 조건에 맞는 진단 결과가 없습니다.</p></div>}
 			</div>
-			{notice && <div className="rd-inline-notice" role="status">{notice}<button type="button" onClick={() => setNotice('')} aria-label="닫기">×</button></div>}
+			{evidenceTarget?.occurrence.evidence && (
+				<div className="rd-evidence-backdrop" role="presentation" onClick={() => setEvidenceTarget(null)}>
+					<div
+						className="rd-evidence-panel"
+						role="dialog"
+						aria-modal="true"
+						aria-labelledby="evidence-title"
+						onClick={(event) => event.stopPropagation()}
+					>
+						<header className="rd-evidence-head">
+							<span>근거 (Evidence)</span>
+							<button type="button" onClick={() => setEvidenceTarget(null)} aria-label="닫기">×</button>
+						</header>
+						<h2 id="evidence-title">{evidenceTarget.friction.title}</h2>
+						<div className="rd-evidence-meta">
+							<strong>{evidenceTarget.occurrence.persona} · {evidenceTarget.occurrence.step} | {evidenceTarget.occurrence.evidence.timestamp}</strong>
+							<span className="rd-evidence-score">Friction {evidenceTarget.occurrence.evidence.score}/5 ({evidenceTarget.friction.severity})</span>
+						</div>
+						<div className="rd-evidence-body">
+							<div className="rd-evidence-shot" role="img" aria-label="근거 스크린샷 (연동 예정)">
+								<span>스크린샷을 불러올 수 없습니다</span>
+							</div>
+							<dl className="rd-evidence-notes">
+								<div><dt>Thought</dt><dd>{evidenceTarget.occurrence.evidence.thought}</dd></div>
+								<div><dt>Action</dt><dd>{evidenceTarget.occurrence.evidence.action}</dd></div>
+								<div><dt>Friction Context</dt><dd>{evidenceTarget.occurrence.evidence.context}</dd></div>
+							</dl>
+						</div>
+					</div>
+				</div>
+			)}
 		</section>
 	);
 }
