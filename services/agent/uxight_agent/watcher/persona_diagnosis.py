@@ -14,11 +14,7 @@ def diagnose_persona(
     metrics = calculate_metrics(steps)
     frictions = detect_frictions(steps, status=status)
 
-    step_lookup = {
-        step["step"]: step
-        for step in steps
-        if isinstance(step.get("step"), int)
-    }
+    step_lookup = {step["step"]: step for step in steps if isinstance(step.get("step"), int)}
 
     diagnoses = []
     for friction in frictions:
@@ -32,9 +28,7 @@ def diagnose_persona(
                 {
                     "step": step_number,
                     "url": step.get("url"),
-                    "screenshot": (
-                        (step.get("observation") or {}).get("screenshot")
-                    ),
+                    "screenshot": ((step.get("observation") or {}).get("screenshot")),
                 }
             )
 

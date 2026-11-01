@@ -38,9 +38,7 @@ def test_persona_diagnosis_integration(persona_id):
         pytest.skip("샘플 실행 로그가 제공되지 않음")
 
     run = json.loads(run_path.read_text(encoding="utf-8"))
-    persona = next(
-        p for p in run["personas"] if p["persona_id"] == persona_id
-    )
+    persona = next(p for p in run["personas"] if p["persona_id"] == persona_id)
 
     steps_path = FIXTURE_ROOT / str(persona_id) / "steps.jsonl"
     steps = [
@@ -55,10 +53,7 @@ def test_persona_diagnosis_integration(persona_id):
     assert result["persona_id"] == persona_id
     assert result["metrics"]["step_count"] == len(steps)
 
-    actual = [
-        (friction["type"], friction["severity"])
-        for friction in result["frictions"]
-    ]
+    actual = [(friction["type"], friction["severity"]) for friction in result["frictions"]]
     assert actual == EXPECTED[persona_id]
 
     for friction in result["frictions"]:
