@@ -155,28 +155,34 @@ def detect_excessive_steps(
     status: str | None = None,
     threshold: int = 10,
 ) -> FrictionResult | None:
-    """과제 성공까지 사용한 단계가 기준을 초과했는지 판정한다."""
-    if not steps:
+    """목표 URL에 처음 도달하기까지 사용한 단계 수를 기준으로 판정한다."""
+    if not steps or status in {"fail", "max_steps", "timeout", "cancelled"}:
         return None
 
-    last = steps[-1]
-    reached = (last.get("task") or {}).get("url_reached")
+    first_reached_index = next(
+        (
+            index
+            for index, step in enumerate(steps)
+            if (step.get("task") or {}).get("url_reached") is True
+        ),
+        None,
+    )
 
-    # 목표 미도달 또는 명시적 실패는 과도한 단계가 아닌 과제 실패로 처리한다.
-    if reached is not True or status in {"fail", "max_steps"}:
+    if first_reached_index is None:
         return None
 
-    step_count = len(steps)
+    step_count = first_reached_index + 1
     if step_count <= threshold:
         return None
 
     severity: Severity = "medium" if step_count >= 16 else "low"
+    reached_step = steps[first_reached_index]["step"]
 
     return FrictionResult(
         type="excessive_steps",
         severity=severity,
-        steps=(last["step"],),
-        reason=f"목표 도달까지 {step_count}단계 사용 (기준: {threshold}단계)",
+        steps=(reached_step,),
+        reason=f"목표 최초 도달까지 {step_count}단계 사용 (기준: {threshold}단계)",
     )
 
 

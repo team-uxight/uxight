@@ -230,3 +230,26 @@ def test_failed_task_is_not_excessive_steps():
     ]
 
     assert detect_excessive_steps(steps, status="max_steps") is None
+
+
+def test_excessive_steps_uses_first_goal_reached():
+    """목표 URL에 처음 도달한 시점을 기준으로 단계 수를 계산한다."""
+    from uxight_agent.watcher.friction_rules import detect_excessive_steps
+
+    steps = [{"step": index, "task": {"url_reached": index == 8}} for index in range(1, 16)]
+
+    assert detect_excessive_steps(steps, status="done") is None
+
+
+def test_excessive_steps_detects_late_goal_reached():
+    """목표 URL에 늦게 도달하면 이후 이동 여부와 관계없이 탐지한다."""
+    from uxight_agent.watcher.friction_rules import detect_excessive_steps
+
+    steps = [{"step": index, "task": {"url_reached": index == 12}} for index in range(1, 16)]
+
+    result = detect_excessive_steps(steps, status="done")
+
+    assert result is not None
+    assert result.type == "excessive_steps"
+    assert result.severity == "low"
+    assert result.steps == (12,)
