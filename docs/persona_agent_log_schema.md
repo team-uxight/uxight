@@ -328,14 +328,15 @@ LLM 출력이 Action 스키마에 맞지 않고, 재시도 후에도 유효한 A
 
 ### 6.1 Task 판정과 run_personas
 
-- 메인 기준: `run_personas.status = 'done'`. Agent가 done 행동으로 성공 기준 충족을 선언하고 종료한 경우다.
-- 보조 기준: `run_personas.url_reached`. Persona 실행 중 한 번이라도 `task.url_reached`가 true였으면 true다. 마지막 URL로 정하면, 성공 페이지에 도달한 뒤 떠난 Persona가 실패로 기록되어 아래 표의 사람 검토 대상을 놓친다.
+- 성공 기준: `run_personas.url_reached`. Persona 실행 중 한 번이라도 `task.url_reached`가 true였으면 true다. 판정 전에는 NULL이다. 성공률은 이 칸으로 센다(10/11 결정 T27, 09/20의 D21을 뒤집음).
+  - 마지막 URL로 정하면, 성공 페이지에 도달한 뒤 떠난 Persona가 실패로 기록된다. 그래서 한 번이라도 닿았는지로 본다.
+- done은 Agent가 '끝냈다'고 선언한 것이다. `run_personas.status = 'done'`은 끝난 이유일 뿐 성공을 뜻하지 않는다. 포기하고 낸 done도 있다.
 
 | done | url_reached | 해석 |
 | --- | --- | --- |
 | true | true | 성공 |
-| true | false | Agent 착각이거나 URL 규칙이 못 잡는 성공. 사람 검토 대상 |
-| false | true | 목표에 도달했지만 Persona가 인지하지 못함. 사람 검토 대상 |
+| true | false | 실패. 포기했거나 URL 규칙이 못 잡는 성공일 수 있어 사람 검토 대상 |
+| false | true | 성공. 목표에 닿았지만 Persona가 끝을 선언하지 않았다 |
 | false | false | 실패 |
 
 - run_personas에는 컬럼을 추가하지 않는다. Python은 `steps`, `tokens`, `cost_usd`를 step마다 갱신하며, `steps`는 steps.jsonl의 줄 수와 같다.
