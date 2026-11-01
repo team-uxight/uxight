@@ -30,21 +30,27 @@ uv run python -m uxight_agent.usage_report --log data/llm-usage.jsonl data/bench
 | --- | --- |
 | `done` | Agent 가 done 을 냈다 (성공, 메인 판정 기준) |
 | `max_steps` | step 상한까지 돌았다 |
-| `token_limit` | 토큰 상한으로 끝났다. 회차 토큰 상한과 하루 토큰 예산 둘 다 이 값이다 (아래) |
+| `token_limit` | 토큰 상한으로 끝났다. 토큰 상한(회차 당)과 하루 토큰 예산 둘 다 이 값이다 (아래) |
 | `stuck` | 같은 화면이 3번 이어져 끝냈다 (아래) |
 | `timeout` | 시간 상한에 걸렸다 |
 | `fail` | 실행 오류로 끝났거나, 행동을 얻지 못한 step 이 3번 이어졌다 |
 | `cancelled` | 회차가 취소됐다 |
 
 - `token_limit` 의 두 상한은 감사 로그 `agent.limit_reached` 의 `reason` 으로 가른다.
-  - `max_tokens`: 회차 토큰 상한(정책 `max_tokens`)이다. 회차 안 Persona 가 나눠 쓴다.
+  - `max_tokens`: 토큰 상한(회차 당, 정책 `max_tokens`)이다. 회차 안 Persona 가 나눠 쓴다.
   - `daily_token_budget`: 하루 토큰 예산(`policies.daily_token_budget`)이다. 오늘 시작한 회차의 토큰 합으로 센다.
-- `stuck` 은 같은 화면(step 로그의 `elements_hash`)의 관측이 3번 이어지면, 세 번째 관측의 step 까지 마치고 끝낸다.
-  - 관측 사이의 행동이 브라우저에 보낸 click · back 일 때만 센다. 다른 행동 뒤에는 처음부터 다시 센다.
-  - scroll · type · 입력칸 click 은 세지 않는다. 요소 줄에는 화면 아래 요소도 있고, 입력값 · 체크 상태는 없다. 세면 읽으려고 스크롤하거나 폼을 채우는 Persona 가 끝난다.
-  - 도메인 · 파괴적 행동 차단으로 막힌 행동도 세지 않는다. 세면 가드 켬 조건만 더 자주 끝나 가드 켬 · 끔 A/B test 가 기운다.
+- `stuck` 은 같은 화면의 관측이 3번 이어지면, 세 번째 관측의 step 까지 마치고 끝낸다.
+  - 같은 화면은 요소 줄(step 로그의 `elements_hash`)과 지금 화면 안의 본문 글이 둘 다 같은 것이다. 펼침처럼 누른 뒤 본문 글만 바뀌어도 다른 화면이다.
+  - 본문 글은 step 로그에 없다. 그래서 stuck 은 step 로그만으로 다시 셀 수 없다.
+  - 관측 사이의 행동마다 세는지 정하고, 세지 않는 행동 뒤에는 처음부터 다시 센다.
+  - 브라우저에 보낸 click · back 은 센다. select 를 누른 것도 센다 — 이 드라이버에서는 select 를 눌러도 값이 바뀌지 않는다.
+  - scroll 은 본문 글이 있으면 센다. 페이지 가운데에서는 본문 글이 바뀌어 같은 화면이 아니고, 페이지 끝에서 되풀이하면 같은 화면이다.
+  - 본문 글이 비면(benchmark 의 본문 글 끔 변형 등) scroll 은 세지 않는다. 요소 줄에는 화면 아래 요소도 있어, scroll 이 화면을 바꿨는지 알 수 없다.
+  - type 과 입력칸(input 의 텍스트 · 체크 계열, textarea) click 은 세지 않는다. 입력값 · 체크 상태는 요소 줄에도 본문 글에도 없어서, 세면 폼을 채우는 Persona 가 끝난다.
+  - 가드 차단은 세지 않는다. 가드 끔(benchmark)에서 가드가 막았을 행동도 세지 않아, 가드 켬 · 끔에서 세는 규칙이 같다.
   - 행동을 얻지 못한 step 은 `fail` 규칙이 맡는다.
 - `max_steps` · `token_limit` · `stuck` · `timeout` 은 마지막 행동 뒤 화면을 `step-<n+1>.png` 로 남길 수 있다.
+  - stuck 은 세 번째 행동을 보지 않으므로, 마지막 화면이 빠져나간 뒤의 화면일 수 있다(max_steps 와 같은 규칙).
 - 진행률(`runs.progress`)은 `done` · `max_steps` · `token_limit` · `stuck` 을 센다.
 - benchmark 의 `personas.jsonl` 에 있는 `outcome` 도 같은 값을 쓴다.
 

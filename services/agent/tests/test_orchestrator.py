@@ -1279,7 +1279,8 @@ def test_cancel_stops_last_screen_quickly(
 
 
 # 같은 화면 시험(GACA-218)의 요소. 가드가 막는 둘(1 · 2)에 더해 3 안쪽 링크 · 4 체크박스 ·
-# 5 글 입력칸 · 6 제출 버튼 · 7 다른 쪽으로 가는 링크.
+# 5 글 입력칸 · 6 제출 버튼 · 7 다른 쪽으로 가는 링크 · 8 select · 10 누르지 못하는 버튼 ·
+# 11 펼치는 질문. 9 는 요소 목록에 없는 번호다.
 SAME_SCREEN_ELEMENTS = {
     **GUARDED_ELEMENTS,
     3: {"tag": "a", "url": "https://example.com/next", "text": "다음"},
@@ -1287,13 +1288,22 @@ SAME_SCREEN_ELEMENTS = {
     5: {"tag": "input", "type": "text", "name": "q"},
     6: {"tag": "input", "type": "submit", "text": "검색"},
     7: {"tag": "a", "url": "https://example.com/page", "text": "다른 쪽"},
+    8: {"tag": "select", "name": "year", "options": [{"value": "2026", "text": "2026"}]},
+    10: {"tag": "button", "type": "button", "text": "열기"},
+    11: {"tag": "button", "type": "button", "text": "국가장학금의 종류는?"},
 }
+# 같은 화면 시험의 페이지 끝 — scroll 로 이 화면까지 내려가면 더 내려가지 않는다.
+PAGE_END = 3
 
 
 def same_screen_driver_class() -> type[Driver]:
-    """요소 7 을 누를 때만 요소 줄(elements_hash)이 바뀌는 가짜 브라우저.
+    """같은 화면 시험의 가짜 브라우저. 행동에 따라 요소 줄 · 본문 글이 아래처럼 바뀐다.
 
-    다른 행동 뒤에는 그림(after-<행동 수>)만 바뀌고 요소 줄은 그대로다 — 같은 화면이다.
+    - 요소 7 click: 요소 줄이 바뀐다 (다른 쪽).
+    - 요소 11 click: 본문 글만 바뀐다 (펼친 답).
+    - scroll down: 본문 글이 바뀐다 (화면 위치). PAGE_END 에 닿으면 그대로다.
+    - 요소 9 · 10 click: 실패한다 (ELEMENT_NOT_FOUND · 브라우저 실패).
+    - 그 밖의 행동 뒤에는 그림(after-<행동 수>)만 바뀐다 — 같은 화면이다.
     """
 
     class SameScreenDriver(Driver):
@@ -1305,6 +1315,8 @@ def same_screen_driver_class() -> type[Driver]:
             super().__init__(allowed_hosts, block_outside_subrequests)
             self.acts = 0
             self.page = 1
+            self.position = 1
+            self.answers = 0
 
         async def start(self, url: str) -> None:
             pass
@@ -1314,6 +1326,7 @@ def same_screen_driver_class() -> type[Driver]:
                 url="https://example.com/",
                 title="t",
                 dom=f'[7] <a href="/page"> "{self.page}쪽"',
+                text=f"본문 {self.position}번째 화면, 펼친 답 {self.answers}개",
                 element_map=SAME_SCREEN_ELEMENTS,
                 screenshot=f"after-{self.acts}".encode(),
             )
@@ -1322,6 +1335,16 @@ def same_screen_driver_class() -> type[Driver]:
             self.acts += 1
             if action == Action(kind="click", element_id=7):
                 self.page += 1
+            elif action == Action(kind="click", element_id=11):
+                self.answers += 1
+            elif action == Action(kind="scroll", value="down"):
+                self.position = min(self.position + 1, PAGE_END)
+            elif action == Action(kind="click", element_id=9):
+                return ActionResult(
+                    ok=False, error="element_map에 없는 요소 ID: 9", error_code="ELEMENT_NOT_FOUND"
+                )
+            elif action == Action(kind="click", element_id=10):
+                return ActionResult(ok=False, error="TimeoutError: locator.click: Timeout 5000ms")
             return ActionResult(ok=True)
 
         async def close(self) -> None:
@@ -1361,24 +1384,32 @@ def test_same_screen_three_times_ends_persona_as_stuck(
     [
         ([click(3), click(3)], "stuck", 3),
         ([Decision(Action(kind="back"))] * 2, "stuck", 3),
-        ([click(6), click(6)], "stuck", 3),  # 제출 버튼(버튼 꼴 input)은 입력칸이 아니다
-        ([Decision(Action(kind="scroll", value="down"))] * 2, "done", 4),
+        ([click(6), click(6)], "stuck", 3),  # 제출 버튼(버튼 계열 input)은 입력칸이 아니다
+        ([click(8), click(8)], "stuck", 3),  # select — 눌러도 값이 바뀌지 않는다
+        ([click(9), click(9)], "stuck", 3),  # ELEMENT_NOT_FOUND 로 끝난 click 도 센다
+        ([click(10), click(10)], "stuck", 3),  # 브라우저 실패(BROWSER_ACTION_FAILED)도 센다
+        ([Decision(Action(kind="scroll", value="down"))] * 2, "done", 4),  # 본문 글이 바뀐다
         ([Decision(Action(kind="type", element_id=5, value="장학금"))] * 2, "done", 4),
         ([click(4), click(4)], "done", 4),
-        ([click(1), click(2)], "done", 4),  # 가드가 막았다 (허용 밖 링크 · 회원 탈퇴)
+        ([click(1), click(2)], "done", 4),  # 가드 차단 (허용 밖 링크 · 회원 탈퇴)
         ([parse_failure(), parse_failure()], "done", 4),
-        ([click(7), click(7)], "done", 4),  # 화면이 바뀐다
+        ([click(7), click(7)], "done", 4),  # 요소 줄이 바뀐다
+        ([click(11), click(11)], "done", 4),  # 펼침 — 본문 글만 바뀐다
     ],
     ids=[
         "link-twice",
         "back-twice",
         "submit-twice",
+        "select-twice",
+        "not-found-twice",
+        "browser-failed-twice",
         "scroll-twice",
         "type-twice",
         "checkbox-twice",
         "guard-blocked-twice",
         "no-action-twice",
         "screen-changes",
+        "answer-opens",
     ],
 )
 def test_same_screen_counts_only_after_sent_click_or_back(
@@ -1388,10 +1419,11 @@ def test_same_screen_counts_only_after_sent_click_or_back(
     outcome: str,
     steps: int,
 ) -> None:
-    # 앞의 두 step 뒤에 안쪽 링크(3)를 누르고 done 을 낸다. 세 관측이 같은 화면이어도 앞의 두
-    # 행동이 브라우저에 보낸 click · back 일 때만 세 번째 step 뒤에 stuck 으로 끝난다.
-    # scroll · type · 입력칸 click · 막힌 행동 · 행동 없는 step 뒤에는 처음부터 다시 센다.
-    # 그래서 스크롤 두 번 뒤 다른 행동이면 stuck 이 아니다.
+    # 앞의 두 step 뒤에 안쪽 링크(3)를 누르고 done 을 낸다. 세 관측이 같은 화면(요소 줄과 본문
+    # 글이 같음)이고 앞의 두 행동을 셀 때만 세 번째 step 뒤에 stuck 으로 끝난다.
+    # type · 입력칸 click · 가드 차단 · 행동 없는 step 뒤에는 처음부터 다시 센다.
+    # 페이지 가운데의 스크롤 · 펼침은 본문 글이 바뀌어 같은 화면이 아니다. 그래서 스크롤 두 번 뒤
+    # 다른 행동이면 stuck 이 아니다.
     monkeypatch.setattr(orchestrator_module, "DomDriver", same_screen_driver_class())
     use_decider(monkeypatch, ScriptedDecider(*first_two, click(3), Decision(Action(kind="done"))))
 
@@ -1399,6 +1431,64 @@ def test_same_screen_counts_only_after_sent_click_or_back(
 
     assert fakes.personas.statuses == {1: outcome}
     assert fakes.personas.steps[1] == steps
+
+
+def test_stuck_on_the_last_step_is_stuck_not_max_steps(
+    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 세 번째 관측의 step 이 step 상한의 마지막 step 이다. 끝난 이유는 stuck 이다.
+    monkeypatch.setattr(orchestrator_module, "DomDriver", same_screen_driver_class())
+    use_decider(monkeypatch, ScriptedDecider(*[click(3)] * 3))
+
+    asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)], max_steps=3)))
+
+    assert fakes.personas.statuses == {1: "stuck"}
+    assert fakes.personas.steps[1] == 3
+
+
+@pytest.mark.parametrize("third", [click(1), parse_failure()], ids=["guard-blocked", "no-action"])
+def test_stuck_after_unsent_third_action_saves_no_last_screen(
+    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, third: Decision
+) -> None:
+    # 세 번째 관측의 step 에서는 행동을 브라우저에 보내지 않았다(가드 차단 · 행동 없음). 앞의 두
+    # click 으로 stuck 이고, 화면이 세 번째 관측 그대로라 마지막 화면(step-4.png)은 없다.
+    monkeypatch.setattr(orchestrator_module, "DomDriver", same_screen_driver_class())
+    use_decider(monkeypatch, ScriptedDecider(click(3), click(3), third))
+
+    asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)], max_steps=10)))
+
+    assert fakes.personas.statuses == {1: "stuck"}
+    assert saved_files(fakes) == ["step-1.png", "step-2.png", "step-3.png", "steps.jsonl"]
+
+
+def test_same_screen_count_restarts_then_ends_later(
+    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # type 뒤에는 처음부터 다시 센다. click · type · click · click · click 이면 셋째 · 넷째 click 이
+    # 이어진 다섯 번째 step 뒤에 stuck 이다.
+    monkeypatch.setattr(orchestrator_module, "DomDriver", same_screen_driver_class())
+    typed = Decision(Action(kind="type", element_id=5, value="장학금"))
+    use_decider(monkeypatch, ScriptedDecider(click(3), typed, click(3), click(3), click(3)))
+
+    asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)], max_steps=10)))
+
+    assert fakes.personas.statuses == {1: "stuck"}
+    assert fakes.personas.steps[1] == 5
+
+
+def test_scroll_repeated_at_page_end_is_stuck(
+    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # scroll 만 낸다. 두 번 내린 뒤 페이지 끝이라 본문 글이 그대로다. 끝에서의 세 관측(3 · 4 ·
+    # 5번째)이 같은 화면이라 다섯 번째 step 뒤에 stuck 이다. 페이지 가운데에서는 본문 글이 바뀌어
+    # 같은 화면이 아니었다.
+    monkeypatch.setattr(orchestrator_module, "DomDriver", same_screen_driver_class())
+    use_decider(monkeypatch, ScriptedDecider())  # 정해 둔 답이 없으면 scroll 을 낸다
+
+    asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)], max_steps=10)))
+
+    assert fakes.personas.statuses == {1: "stuck"}
+    assert fakes.personas.steps[1] == 5
 
 
 def test_watcher_keeps_guards_on_whatever_policy_or_env(

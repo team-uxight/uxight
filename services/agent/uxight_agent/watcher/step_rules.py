@@ -17,13 +17,14 @@ from ..usage_report import PriceTable, cost_usd
 # 실패로 끝낸다 (행동 로그 명세 2절 · architecture §5). 키가 만료돼도 max_steps 까지 헛돌지 않게.
 MAX_CONSECUTIVE_NO_ACTION = 3
 
-# 같은 화면(elements_hash)의 관측이 이만큼 이어지면 Persona 를 stuck 으로 끝낸다 (GACA-218).
+# 같은 화면의 관측이 이만큼 이어지면 Persona 를 stuck 으로 끝낸다 (GACA-218).
 # 같은 화면을 보며 step 상한까지 토큰을 쓰지 않게.
 MAX_SAME_SCREEN = 3
 
-# click 해도 요소 줄이 바뀌지 않는 입력칸 — 입력 · 체크 · 선택 상태는 요소 줄에 없다.
-# 폼을 보내는 버튼 꼴 input 은 뺀다.
-INPUT_TAGS = ("input", "textarea", "select")
+# 입력칸 — input 의 텍스트 · 체크 계열과 textarea. click 해도 바뀌는 입력값 · 체크 상태는 요소
+# 줄에도 본문 글에도 없다. 버튼 계열 input 은 폼을 보내므로 입력칸이 아니다.
+# select 도 입력칸이 아니다 — 이 드라이버에서는 select 를 눌러도 값이 바뀌지 않는다.
+INPUT_TAGS = ("input", "textarea")
 BUTTON_INPUT_TYPES = ("submit", "button", "reset", "image")
 
 # 실행하지 않은 step 의 오류 코드 → 차단 사유 (행동 로그 명세 3.5 · 3.8).
@@ -44,9 +45,10 @@ def persona_outcome(history: list[StepResult]) -> Literal["done", "fail", "stuck
 
     - "done": done 을 냈다 — Agent 가 스스로 과업 완료를 선언했다 = 성공 (메인 판정 기준, D21).
     - "fail": 행동을 얻지 못한 step 이 MAX_CONSECUTIVE_NO_ACTION 번 이어졌다.
-    - "stuck": 같은 화면(elements_hash)의 관측이 MAX_SAME_SCREEN 번 이어졌다 (GACA-218).
+    - "stuck": 같은 화면의 관측이 MAX_SAME_SCREEN 번 이어졌다 (GACA-218). 같은 화면은 요소
+      줄(elements_hash)과 지금 화면 안의 본문 글(Observation.text)이 둘 다 같은 것이다.
       그 마지막 관측의 step 까지 마치고 끝낸다. 관측 사이의 행동을 세는 규칙은
-      _counts_same_screen 에 있다.
+      _counts_same_screen 에 있다. 본문 글은 step 로그에 없어 로그만으로는 다시 셀 수 없다.
     """
     last = history[-1].action
     if last is not None and last.kind == "done":
@@ -57,7 +59,7 @@ def persona_outcome(history: list[StepResult]) -> Literal["done", "fail", "stuck
     recent = history[-MAX_SAME_SCREEN:]
     if (
         len(recent) == MAX_SAME_SCREEN
-        and len({elements_hash(s.observation) for s in recent}) == 1
+        and len({(elements_hash(s.observation), s.observation.text) for s in recent}) == 1
         and all(_counts_same_screen(s) for s in recent[:-1])
     ):
         return "stuck"
@@ -65,21 +67,26 @@ def persona_outcome(history: list[StepResult]) -> Literal["done", "fail", "stuck
 
 
 def _counts_same_screen(step: StepResult) -> bool:
-    """이 step 의 행동 뒤 관측을 같은 화면으로 세는가. 브라우저에 보낸 click · back 이면 센다.
+    """이 step 의 행동 뒤 관측을 같은 화면으로 세는가. 브라우저에 보낸 click · back 은 센다.
 
-    아래 행동 뒤에는 세지 않고 처음부터 다시 센다. 세면 Persona 가 잘못 끝난다.
-    - scroll: 요소 줄에는 화면 아래 요소도 있어 스크롤해도 같다. 읽으려고 두 번 스크롤하면 끝난다.
-    - type · 입력칸 click: 입력값 · 체크 · 선택 상태는 요소 줄에 없다. 아이디 · 비밀번호를 차례로
-      넣거나 체크박스 둘을 누르면 끝난다.
+    세지 않는 행동 뒤에는 처음부터 다시 센다. 세면 Persona 가 잘못 끝난다.
+    - scroll: 본문 글이 있으면 센다. 페이지 가운데에서는 본문 글이 바뀌어 같은 화면이 아니고,
+      페이지 끝에서 되풀이하면 같은 화면이다. 본문 글이 비면(bench 본문 글 끔 변형 등) 화면이
+      움직였는지 알 수 없어 세지 않는다 — 요소 줄에는 화면 아래 요소도 있어 스크롤해도 같다.
+    - type · 입력칸 click: 입력값 · 체크 상태는 요소 줄에도 본문 글에도 없다. 아이디 · 비밀번호를
+      차례로 넣거나 체크박스 둘을 누르면 끝난다.
     - 행동을 얻지 못한 step: fail 규칙(MAX_CONSECUTIVE_NO_ACTION)이 맡는다.
-    - 막힌 행동(step 로그 blocked.is — 도메인 · 파괴적 행동 차단): 막아서 화면이 그대로다. 세면
-      가드 켬 조건만 더 자주 끝나 가드 켬 · 끔 A/B test(GACA-180)가 기운다.
+    - 가드 차단(도메인 · 파괴적 행동): 막아서 화면이 그대로다. 가드 끔(bench)에서 가드가 막았을
+      행동(guard_block)도 세지 않는다. 가드 켬 · 끔에서 세는 규칙이 같아야 A/B test(GACA-180)가
+      기울지 않는다.
     """
     action = step.action
-    if action is None or step.result.error_code in BLOCK_REASONS:
+    if action is None or step.guard_block is not None or step.result.error_code in BLOCK_REASONS:
         return False
     if action.kind == "back":
         return True
+    if action.kind == "scroll":
+        return bool(step.observation.text)
     if action.kind != "click":
         return False
     element = step.observation.element_map.get(action.element_id) or {}
@@ -88,7 +95,7 @@ def _counts_same_screen(step: StepResult) -> bool:
 
 
 def elements_hash(observation: Observation) -> str:
-    """같은 화면이면 같은 값 — 화면 반복 탐지용. 관측 글(요소 줄) 전체로 만든다."""
+    """요소 줄이 같으면 같은 값 — 화면 반복 탐지용. 관측 글(요소 줄) 전체로 만든다."""
     return hashlib.sha256(observation.dom.encode()).hexdigest()[:16]
 
 

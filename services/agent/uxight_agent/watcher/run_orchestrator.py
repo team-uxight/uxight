@@ -378,8 +378,9 @@ class RunOrchestrator:
                     BROWSER_CLOSE_TIMEOUT_SECONDS,
                 )
             except Exception:
-                # 닫기 실패가 이미 정해진 Persona 결과(done · max_steps · timeout · cancelled)를
-                # 덮지 않게 기록만 한다. 덮이면 취소한 회차도 failed 로 보인다.
+                # 닫기 실패가 이미 정해진 Persona 결과(done · max_steps · token_limit · stuck ·
+                # timeout · cancelled)를 덮지 않게 기록만 한다. 덮이면 취소한 회차도 failed 로
+                # 보인다.
                 logger.exception("run=%s persona=%s browser close failed", run_id, persona_id)
 
     async def _drive_persona(
@@ -432,7 +433,7 @@ class RunOrchestrator:
                         audit_log_repository.add_limit_reached(
                             run_id, persona_id, {"persona_id": persona_id, "step": step_no, **limit}
                         )
-                        # 회차 토큰 상한과 하루 예산 모두 token_limit 이다. 어느 쪽인지는
+                        # 토큰 상한(회차 당)과 하루 예산 모두 token_limit 이다. 어느 쪽인지는
                         # 감사 로그의 reason(max_tokens · daily_token_budget)에 남는다.
                         outcome = "token_limit"
                         break
