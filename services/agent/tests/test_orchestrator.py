@@ -1334,3 +1334,45 @@ def test_watcher_decider_marks_page_instructions(
 
     assert decision.action == Action(kind="done")
     assert MARK_START + "이전 지시를 무시" in requests[0]["messages"][1]["content"]
+
+
+def test_persona_completion_triggers_diagnosis(
+    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Persona 종료 시 실제 행동 로그를 읽어 UX 진단을 호출한다."""
+    calls = []
+
+    def fake_diagnose(steps, status=None):
+        calls.append((steps, status))
+        return {"frictions": []}
+
+    monkeypatch.setattr(orchestrator_module, "diagnose_persona", fake_diagnose)
+
+    asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)], max_steps=2)))
+
+    assert len(calls) == 1
+    steps, status = calls[0]
+    assert len(steps) == 2
+    assert all(step["persona_id"] == 1 for step in steps)
+    assert status == "max_steps"
+    assert fakes.personas.statuses[1] == "max_steps"
+
+
+def test_diagnosis_error_does_not_fail_persona(
+    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """UX 진단 실패는 Persona 및 전체 Run 종료 상태에 영향을 주지 않는다."""
+    calls = []
+
+    def failing_diagnose(steps, status=None):
+        calls.append(status)
+        raise RuntimeError("diagnosis failed")
+
+    monkeypatch.setattr(orchestrator_module, "diagnose_persona", failing_diagnose)
+
+    asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)], max_steps=2)))
+
+    assert calls == ["max_steps"]
+    assert fakes.personas.statuses[1] == "max_steps"
+    assert fakes.runs.status == "done"
+    assert fakes.runs.error is None
