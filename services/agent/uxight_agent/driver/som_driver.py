@@ -3,20 +3,12 @@ import dataclasses
 
 from playwright.async_api import Error as PlaywrightError
 
+from ..guard.domain import is_allowed
 from .base import Observation
-from .dom_driver import ID_ATTRIBUTE, DomDriver
+from .dom_driver import ID_ATTRIBUTE, MASK_SELECTOR, SCREENSHOT_TIMEOUT_MS, DomDriver
 
 MARK_ATTRIBUTE = "data-ux-som"
 
-# 값을 가릴 입력칸. 버튼 · 체크 계열 input 은 보이는 값이 사용자 입력이 아니라서 뺀다.
-MASK_SELECTOR = (
-    "textarea, input:not([type=submit]):not([type=button]):not([type=reset])"
-    ":not([type=image]):not([type=checkbox]):not([type=radio])"
-)
-
-# 스크린샷 한 장의 상한. 찍는 중 문서가 바뀌면 Playwright 기본값(30초)까지 멈춰
-# Persona 시간을 먹는다.
-SCREENSHOT_TIMEOUT_MS = 5_000
 # 찍기 전에 화면이 멎기를 기다리는 최대 시간. 넘으면 그대로 찍고 찍은 뒤 확인에 맡긴다.
 STILL_WAIT_MS = 1_500
 # 찍은 그림을 믿을 수 없을 때(막이 빗나감 · 문서가 바뀜) 처음부터 다시 하는 횟수.
@@ -144,14 +136,17 @@ class SomDriver(DomDriver):
     (screenshot=None, 글 관측만).
     """
 
+    mode = "som"
+
     async def observe(self) -> Observation:
         page = self._require_page()
+        self._left_url = None
         for _ in range(CAPTURE_ATTEMPTS):
             try:
                 await page.evaluate(
                     _WAIT_STILL_JS, {"maxMs": STILL_WAIT_MS, "selector": MOVING_TARGET_SELECTOR}
                 )
-                observation = await super().observe()
+                observation = await self._observe_page()
                 await page.evaluate(
                     _DRAW_MARKS_JS,
                     {
@@ -171,7 +166,9 @@ class SomDriver(DomDriver):
                         "expectBoxes": bool(observation.element_map),
                     },
                 )
-                if trusted:
+                # 찍는 사이 주 창이 허용 밖으로 갔으면 허용 밖 페이지의 그림일 수 있다 (GACA-224).
+                # 다시 하면 _observe_page 가 되돌린다.
+                if trusted and is_allowed(page.url, self._allowed_hosts):
                     return dataclasses.replace(observation, screenshot=screenshot)
             except PlaywrightError:  # TimeoutError 도 여기 해당한다
                 # 관측 중 문서가 바뀌었거나(실행 컨텍스트가 사라짐) 찍기가 상한을 넘었다.
@@ -181,4 +178,4 @@ class SomDriver(DomDriver):
                     await page.evaluate(_CLEAR_MARKS_JS, MARK_ATTRIBUTE)
         # 가림을 확인한 그림을 얻지 못했다.
         # 값이 찍혔을 수 있는 그림은 내보내지 않고 글 관측만 돌려준다.
-        return await super().observe()
+        return await self._observe_page()

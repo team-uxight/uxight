@@ -50,3 +50,27 @@ def test_mark_running_writes_heartbeat(monkeypatch: pytest.MonkeyPatch, tmp_path
         ).all()
     # accepted 가 아닌 회차는 그대로 둔다.
     assert [tuple(row) for row in rows] == [(1, "running", NOW, NOW), (2, "queued", None, None)]
+
+
+def test_progress_counts_token_limit_and_stuck(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # 진행률은 정상 종료한 Persona 수다. 종료 이유 token_limit(전에 max_steps 로 적던 끝) ·
+    # stuck 도 센다 (GACA-218). running · fail · timeout · cancelled 는 세지 않는다.
+    counted = ["done", "max_steps", "token_limit", "stuck"]
+    others = ["running", "fail", "timeout", "cancelled"]
+    engine = sqlite_engine(tmp_path)
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE runs (run_id INTEGER PRIMARY KEY, progress INTEGER)"))
+        conn.execute(text("CREATE TABLE run_personas (run_id INTEGER, status TEXT)"))
+        conn.execute(text("INSERT INTO runs (run_id) VALUES (1)"))
+        conn.execute(
+            text("INSERT INTO run_personas VALUES (1, :status)"),
+            [{"status": status} for status in counted + others],
+        )
+    monkeypatch.setattr(repository_module, "engine", engine)
+
+    RunRepository().refresh_progress(1)
+
+    with engine.begin() as conn:
+        assert conn.execute(text("SELECT progress FROM runs")).scalar() == len(counted)

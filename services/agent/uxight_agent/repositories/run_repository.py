@@ -146,14 +146,16 @@ class RunRepository:
         )
 
     def refresh_progress(self, run_id: int) -> None:
-        # progress = 정상 종료된(done/max_steps) 페르소나 수. fail/timeout/cancelled는 세지 않는다.
+        # progress = 정상 종료된(done/max_steps/token_limit/stuck) 페르소나 수.
+        # fail/timeout/cancelled는 세지 않는다. token_limit 은 전에 max_steps 로 적던 끝이다.
         # +1 대신 매번 다시 세어 덮어쓰므로 중복 호출이나 동시 완료에도 값이 정확하다.
         with engine.begin() as conn:
             conn.execute(
                 text(
                     "UPDATE runs SET progress = ("
                     "  SELECT COUNT(*) FROM run_personas "
-                    "  WHERE run_id = :run_id AND status IN ('done', 'max_steps')"
+                    "  WHERE run_id = :run_id "
+                    "  AND status IN ('done', 'max_steps', 'token_limit', 'stuck')"
                     ") WHERE run_id = :run_id"
                 ),
                 {"run_id": run_id},
@@ -166,6 +168,25 @@ class RunRepository:
                 text("UPDATE runs SET heartbeat_at = NOW() WHERE run_id = :run_id"),
                 {"run_id": run_id},
             )
+
+    def daily_tokens_left(self) -> int | None:
+        """하루 토큰 예산에서 오늘 쓴 토큰(오늘 시작한 회차의 runs.tokens 합)을 뺀 값.
+
+        예산은 스냅샷이 아니라 policies 의 지금 값이다 — 관리자가 낮추면 진행 중인 회차에도
+        바로 적용된다 (V4__policies.sql). 예산이 없으면(NULL) None.
+        """
+        with engine.connect() as conn:
+            row = conn.execute(
+                text(
+                    "SELECT (SELECT daily_token_budget FROM policies "
+                    "        ORDER BY policy_id LIMIT 1) AS budget, "
+                    "       (SELECT COALESCE(SUM(tokens), 0) FROM runs "
+                    "        WHERE started_at >= CURDATE()) AS used"
+                )
+            ).one()
+        if row.budget is None:
+            return None
+        return int(row.budget) - int(row.used)
 
     def is_cancel_requested(self, run_id: int) -> bool:
         with engine.begin() as conn:
