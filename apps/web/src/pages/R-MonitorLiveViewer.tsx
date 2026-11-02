@@ -4,6 +4,7 @@ import {
 	fetchPersonaSteps,
 	fetchRunPersonas,
 	fetchStepScreenshot,
+	isRetryable,
 	isRunLive,
 	type RunPersona,
 	type RunPersonaList,
@@ -24,8 +25,11 @@ const personaStatusLabels: Record<string, string> = {
 	cancelled: '취소',
 };
 
-function personaStatusLabel(status: string | null): string {
-	return status === null ? '대기' : personaStatusLabels[status] ?? status;
+function personaStatusLabel(persona: RunPersona): string {
+	if (persona.status === null) return '대기';
+	// agent 는 회차를 접수할 때 모든 Persona 를 running · 0 step 으로 만든다 — 브라우저 자리를 기다리는 중일 수 있다.
+	if (persona.status === 'running' && !persona.steps) return '준비 중';
+	return personaStatusLabels[persona.status] ?? persona.status;
 }
 
 function describeAction(step: StepLog): string {
@@ -65,7 +69,7 @@ export default function MonitorLiveViewer({ runId, agentUnreachable }: Props) {
 	const [stepError, setStepError] = useState<string | null>(null);
 	const [pinned, setPinned] = useState<{ personaId: number; step: number } | null>(null);
 	const [image, setImage] = useState<{ personaId: number; step: number; url: string } | null>(null);
-	const [imageError, setImageError] = useState<string | null>(null);
+	const [imageError, setImageError] = useState<{ personaId: number; step: number; message: string } | null>(null);
 	const watchedRef = useRef<number | null>(null);
 	const pickedRef = useRef(false);
 	const previousPersonas = useRef<RunPersona[] | null>(null);
@@ -95,7 +99,7 @@ export default function MonitorLiveViewer({ runId, agentUnreachable }: Props) {
 			} catch (error) {
 				if (stopped) return;
 				setListError(errorMessage(error, 'Persona 진행을 불러오지 못했습니다.'));
-				timer = window.setTimeout(() => void tick(id), pollMs);
+				if (isRetryable(error)) timer = window.setTimeout(() => void tick(id), pollMs);
 			}
 		}
 		void tick(runId);
@@ -125,7 +129,8 @@ export default function MonitorLiveViewer({ runId, agentUnreachable }: Props) {
 			} catch (error) {
 				if (stopped) return;
 				setStepError(errorMessage(error, 'step 로그를 불러오지 못했습니다.'));
-				if (watchedRunning) timer = window.setTimeout(() => void tick(id, personaId), pollMs);
+				// 끝난 Persona 의 마지막 읽기가 실패해도 다시 읽는다 — 마지막 step 이 빠지지 않게
+				if (isRetryable(error)) timer = window.setTimeout(() => void tick(id, personaId), pollMs);
 			}
 		}
 		void tick(runId, watchedId);
@@ -148,21 +153,29 @@ export default function MonitorLiveViewer({ runId, agentUnreachable }: Props) {
 	useEffect(() => {
 		if (runId === null || watchedId === null || imageStep === null) return;
 		const controller = new AbortController();
-		fetchStepScreenshot(runId, watchedId, imageStep, controller.signal)
-			.then((blob) => {
-				if (controller.signal.aborted) return;
-				const url = URL.createObjectURL(blob);
-				const previousUrl = imageUrlRef.current;
-				imageUrlRef.current = url;
-				setImage({ personaId: watchedId, step: imageStep, url });
-				setImageError(null);
-				if (previousUrl) URL.revokeObjectURL(previousUrl);
-			})
-			.catch((error: unknown) => {
-				if (controller.signal.aborted) return;
-				setImageError(errorMessage(error, '화면을 불러오지 못했습니다.'));
-			});
-		return () => controller.abort();
+		let timer: number | undefined;
+		function load(id: number, personaId: number, step: number) {
+			fetchStepScreenshot(id, personaId, step, controller.signal)
+				.then((blob) => {
+					if (controller.signal.aborted) return;
+					const url = URL.createObjectURL(blob);
+					const previousUrl = imageUrlRef.current;
+					imageUrlRef.current = url;
+					setImage({ personaId, step, url });
+					setImageError(null);
+					if (previousUrl) URL.revokeObjectURL(previousUrl);
+				})
+				.catch((error: unknown) => {
+					if (controller.signal.aborted) return;
+					setImageError({ personaId, step, message: errorMessage(error, '화면을 불러오지 못했습니다.') });
+					if (isRetryable(error)) timer = window.setTimeout(() => load(id, personaId, step), pollMs);
+				});
+		}
+		load(runId, watchedId, imageStep);
+		return () => {
+			controller.abort();
+			window.clearTimeout(timer);
+		};
 	}, [runId, watchedId, imageStep]);
 
 	useEffect(() => () => {
@@ -175,9 +188,13 @@ export default function MonitorLiveViewer({ runId, agentUnreachable }: Props) {
 		setWatchedId(personaId);
 	}
 
-	const visibleImage = image !== null && image.personaId === watchedId ? image : null;
+	// 지금 step 에 화면이 있을 때만 그림을 보인다. 새 그림을 받는 동안에는 같은 Persona 의 앞 그림을 잠깐 둔다.
+	const visibleImage = imageStep !== null && image !== null && image.personaId === watchedId ? image : null;
+	const currentImageError = imageError !== null && imageError.personaId === watchedId && imageError.step === imageStep
+		? imageError.message
+		: null;
 	const live = list === null || isRunLive(list);
-	const error = listError ?? stepError ?? imageError;
+	const error = listError ?? stepError ?? currentImageError;
 
 	let screenMessage: { title: string; detail: string };
 	if (agentUnreachable) {
@@ -194,6 +211,10 @@ export default function MonitorLiveViewer({ runId, agentUnreachable }: Props) {
 			title: watched ? `${watched.name} 님이 아직 시작하지 않았습니다` : '표시할 Persona 가 없습니다',
 			detail: 'AI 모듈이 Persona 를 시작하면 step 마다 화면이 바뀝니다.',
 		};
+	} else if (shown !== null && !shown.hasScreenshot) {
+		screenMessage = { title: `step ${shown.step} 은 화면을 남기지 않았습니다`, detail: '이 step 을 기록할 때 화면을 찍지 못했습니다.' };
+	} else if (shown !== null) {
+		screenMessage = { title: currentImageError ? '화면을 불러오지 못했습니다' : '화면을 불러오는 중입니다', detail: '' };
 	} else if (watched.status === 'running') {
 		screenMessage = { title: '첫 화면을 기다리는 중입니다', detail: 'step 하나가 끝나면 그때 본 화면이 표시됩니다.' };
 	} else {
@@ -221,7 +242,7 @@ export default function MonitorLiveViewer({ runId, agentUnreachable }: Props) {
 						>
 							<strong>{persona.name}</strong>
 							<span className={`rml-persona-status rml-persona-status--${persona.status ?? 'waiting'}`}>
-								{personaStatusLabel(persona.status)}
+								{personaStatusLabel(persona)}
 							</span>
 							<small>{persona.steps ?? 0} step</small>
 						</button>

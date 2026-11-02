@@ -45,6 +45,21 @@ export type StepLog = {
 	hasScreenshot: boolean;
 };
 
+/** 응답 상태 코드를 함께 담은 오류. */
+export class ApiError extends Error {
+	readonly status: number;
+
+	constructor(message: string, status: number) {
+		super(message);
+		this.status = status;
+	}
+}
+
+/** 401 · 403 · 404 는 다시 불러도 같은 답이라 갱신을 멈춘다. 그 밖(네트워크 · 5xx)은 다시 부른다. */
+export function isRetryable(error: unknown): boolean {
+	return !(error instanceof ApiError && [401, 403, 404].includes(error.status));
+}
+
 const liveRunStatuses = ['queued', 'accepted', 'running'];
 
 /** 회차가 아직 돌고 있으면 true. 회차가 끝나도 아직 running 인 Persona 가 있으면 계속 본다. */
@@ -81,7 +96,7 @@ export function chooseWatchedPersona(
 export async function fetchRunPersonas(runId: number, signal?: AbortSignal): Promise<RunPersonaList> {
 	const response = await authenticatedFetch(`${API_BASE_URL}/api/runs/${runId}/personas`, { signal });
 	if (!response.ok) {
-		throw new Error(await apiErrorMessage(response, 'Persona 진행을 불러오지 못했습니다.'));
+		throw new ApiError(await apiErrorMessage(response, 'Persona 진행을 불러오지 못했습니다.'), response.status);
 	}
 	const body: unknown = await response.json();
 	if (
@@ -99,8 +114,10 @@ export async function fetchRunPersonas(runId: number, signal?: AbortSignal): Pro
 
 export async function fetchPersonaSteps(runId: number, personaId: number, signal?: AbortSignal): Promise<StepLog[]> {
 	const response = await authenticatedFetch(`${API_BASE_URL}/api/runs/${runId}/personas/${personaId}/steps`, { signal });
+	// 자리를 얻기 전에 취소됐거나 접수 직후 실패해 로그 파일 없이 끝난 Persona 는 서버가 404 를 준다 — 기록이 없는 것으로 읽는다.
+	if (response.status === 404) return [];
 	if (!response.ok) {
-		throw new Error(await apiErrorMessage(response, 'step 로그를 불러오지 못했습니다.'));
+		throw new ApiError(await apiErrorMessage(response, 'step 로그를 불러오지 못했습니다.'), response.status);
 	}
 	const body: unknown = await response.json();
 	if (typeof body !== 'object' || body === null || !('steps' in body) || !Array.isArray(body.steps)) {
@@ -125,7 +142,7 @@ export async function fetchStepScreenshot(
 		{ signal },
 	);
 	if (!response.ok) {
-		throw new Error(await apiErrorMessage(response, '화면을 불러오지 못했습니다.'));
+		throw new ApiError(await apiErrorMessage(response, '화면을 불러오지 못했습니다.'), response.status);
 	}
 	return response.blob();
 }
