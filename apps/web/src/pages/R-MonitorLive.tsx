@@ -7,6 +7,7 @@ import {
 	type Experiment,
 	type ExperimentRound,
 } from './experiments';
+import MonitorLiveViewer from './R-MonitorLiveViewer';
 import './R-MonitorLive.css';
 
 const stateLabels: Record<Experiment['state'], string> = {
@@ -199,49 +200,11 @@ export default function RMonitorLive() {
 							</div>
 						</div>
 					</div>
-					<div className="rml-main">
-						<div className="rml-viewer" aria-label="AI 실험 화면">
-							<div className="rml-viewer-toolbar">
-								<div className="rml-browser-dots" aria-hidden="true"><i /><i /><i /></div>
-								<span>AI 브라우저 화면</span>
-								<span className={`rml-viewer-state${experiment.agentUnreachable ? ' is-warning' : experiment.state === 'in_progress' ? ' is-live' : ''}`}>
-									{experiment.agentUnreachable
-										? 'AI 연결 재시도 중'
-										: experiment.state === 'in_progress'
-											? '실험 진행 중'
-											: '연결 대기'}
-								</span>
-							</div>
-							<div className="rml-screen" role="status">
-								<div className="rml-screen-message">
-									<svg viewBox="0 0 48 48" aria-hidden="true">
-										<rect x="5" y="8" width="38" height="27" rx="4" />
-										<path d="M17 41h14M24 35v6M19 21l4 4 7-8" />
-									</svg>
-									<strong>
-										{experiment.agentUnreachable
-											? 'AI 모듈에 연결하지 못해 재시도 중입니다'
-											: 'AI가 실험 중인 화면이 여기에 표시됩니다'}
-									</strong>
-									<span>
-										{experiment.agentUnreachable
-											? '실행 서비스에 연결할 수 없어 30초마다 재전송을 시도하고 있습니다. 요청이 접수되면 상태가 갱신됩니다.'
-											: '현재 API에서 브라우저 화면 스트림을 제공하지 않아 연결을 기다리고 있습니다.'}
-									</span>
-								</div>
-							</div>
-							<div className="rml-viewer-caption">
-								<span>{experiment.projectTitle}</span>
-								<span>
-									{experiment.agentUnreachable
-										? 'AI 모듈 연결을 재시도하고 있습니다. (30초마다 재전송)'
-										: experiment.state === 'in_progress'
-											? '실험 상태를 3초마다 확인합니다.'
-											: stateLabels[experiment.state]}
-								</span>
-							</div>
-						</div>
-					</div>
+					<MonitorLiveViewer
+						key={selectedRunId ?? 'none'}
+						runId={selectedRunId}
+						agentUnreachable={experiment.agentUnreachable}
+					/>
 					<div className="rml-round-detail">
 						{selectedRound ? (
 							<>
