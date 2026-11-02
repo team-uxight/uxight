@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from .routers.runs import router as runs_router
+from .routers.success_rules import router as success_rules_router
 from .watcher.run_orchestrator import run_orchestrator
 
 # uvicorn은 자체 로거만 설정하므로, 앱 로거(스텝 기록 등)의 INFO 로그가 보이도록 설정한다.
@@ -32,6 +33,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="UXight Agent", version="0.0.1", lifespan=lifespan)
 app.include_router(runs_router)
+app.include_router(success_rules_router)
 
 
 @app.get("/health")
