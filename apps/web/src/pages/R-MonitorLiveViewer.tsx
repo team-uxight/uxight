@@ -188,10 +188,13 @@ export default function MonitorLiveViewer({ runId, agentUnreachable }: Props) {
 		setWatchedId(personaId);
 	}
 
-	// 지금 step 에 화면이 있을 때만 그림을 보인다. 새 그림을 받는 동안에는 같은 Persona 의 앞 그림을 잠깐 둔다.
-	const visibleImage = imageStep !== null && image !== null && image.personaId === watchedId ? image : null;
 	const currentImageError = imageError !== null && imageError.personaId === watchedId && imageError.step === imageStep
 		? imageError.message
+		: null;
+	// 지금 step 에 화면이 있을 때만 그림을 보인다. 새 그림을 받는 동안에는 같은 Persona 의 앞 그림을 잠깐 두고,
+	// 받기가 실패하면 앞 그림을 내린다(그 step 의 화면처럼 보이지 않게).
+	const visibleImage = imageStep !== null && image !== null && image.personaId === watchedId && currentImageError === null
+		? image
 		: null;
 	const live = list === null || isRunLive(list);
 	const error = listError ?? stepError ?? currentImageError;
