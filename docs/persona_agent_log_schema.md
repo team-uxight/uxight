@@ -328,16 +328,17 @@ LLM 출력이 Action 스키마에 맞지 않고, 재시도 후에도 유효한 A
 
 ### 6.1 Task 판정과 run_personas
 
-- 성공 기준: `run_personas.url_reached`. Persona 실행 중 한 번이라도 `task.url_reached`가 true였으면 true다. 판정 전에는 NULL이다. 성공률은 이 칸으로 센다(10/11 결정 T27, 09/20의 D21을 뒤집음).
+- 도달: `run_personas.url_reached`. Persona 실행 중 한 번이라도 `task.url_reached`가 true였으면 true다. 판정 전에는 NULL이다(10/11 결정 T27, 09/20의 D21을 뒤집음).
   - 마지막 URL로 정하면, 성공 페이지에 도달한 뒤 떠난 Persona가 실패로 기록된다. 그래서 한 번이라도 닿았는지로 본다.
 - done은 Agent가 '끝냈다'고 선언한 것이다. `run_personas.status = 'done'`은 끝난 이유일 뿐 성공을 뜻하지 않는다. 포기하고 낸 done도 있다.
+- Persona 결과는 도달과 끝난 이유로 넷이다(11/03 결정 T42). 성공률은 성공 ÷ 판정한 Persona다.
 
-| done | url_reached | 해석 |
+| url_reached | status | 결과 |
 | --- | --- | --- |
-| true | true | 성공 |
-| true | false | 실패. 포기했거나 URL 규칙이 못 잡는 성공일 수 있어 사람 검토 대상 |
-| false | true | 성공. 목표에 닿았지만 Persona가 끝을 선언하지 않았다 |
-| false | false | 실패 |
+| true | done | 성공 |
+| true | max_steps · stuck · timeout · token_limit | 어렵게 성공. 성공률에 넣지 않고 따로 센다 |
+| false | done 포함 아무것이나 | 실패 |
+| NULL 이거나, status가 fail · cancelled | — | 판정 안 함 |
 
 - run_personas에는 컬럼을 추가하지 않는다. Python은 `steps`, `tokens`, `cost_usd`를 step마다 갱신하며, `steps`는 steps.jsonl의 줄 수와 같다.
 - 차단 수, 파싱 실패 수, 소요 시간은 컬럼으로 두지 않는다. Friction Detector는 steps.jsonl을 직접 읽고, 소요 시간은 `started_at`과 `finished_at`으로 계산한다.

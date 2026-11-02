@@ -270,7 +270,7 @@ for step in range(policy.max_steps):
     if act.kind == "done" or watcher.should_stop(run): break
 ```
 
-**Task 성공 판정 — 10/11 결정 (T27, 09/20 의 D21 을 뒤집음).** 성공은 목표 도달 규칙으로 판정한다. Persona 실행 중 한 번이라도 step 로그의 `task.url_reached` 가 true 이면 목표에 도달한 것이고, 이 값을 `run_personas.url_reached` 에 남긴다(판정 전 NULL). 성공률은 이 칸으로 센다. `Action.success` · done 은 Agent 가 '끝냈다'고 선언한 것일 뿐이다 — 포기하고 낸 done 은 성공이 아니다. URL 이 안 바뀌는 화면 전환과 페이지 안 액션은 규칙이 못 잡으므로, 격리된 판정 에이전트가 나중에 보강한다(T24). done 과 도달이 어긋나면 Friction 신호 + 사람 검토 대상이다. 종료 이유는 `run_personas.status` 에 남는다(행동 로그 명세 2절). **실행 전 확인 스텝:** Agent 가 대상 URL 과 Task 를 먼저 보고 모호하면 리서처에게 되묻고, 확인된 Task 를 `success_rule` 로 가공한다 (§4 0단계, 화면 R2). API 요청/응답 기준 판정은 후보 — 토큰 · 성능 실측 후 (GACA-67).
+**Task 성공 판정 — 10/11 결정(T27) · 11/03 결정(T42), 09/20 의 D21 을 뒤집음.** 목표 도달은 규칙으로 판정한다. Persona 실행 중 한 번이라도 step 로그의 `task.url_reached` 가 true 이면 도달이고, 이 값을 `run_personas.url_reached` 에 남긴다(판정 전 NULL). done 은 Agent 가 '끝냈다'고 선언한 것일 뿐이다 — 포기하고 낸 done 은 성공이 아니다. Persona 결과는 도달과 끝난 이유(`run_personas.status`)로 넷이다: 성공(닿음 + done) · 어렵게 성공(닿음 + max_steps · stuck · timeout · token_limit) · 실패(한 번도 못 닿음) · 판정 안 함(fail · cancelled · 도달이 모두 NULL). 성공률은 성공 ÷ 판정한 Persona 이고, 어렵게 성공 비율은 따로 보인다. URL 이 안 바뀌는 화면 전환과 페이지 안 액션은 규칙이 못 잡으므로, 격리된 판정 에이전트가 나중에 보강한다(T24). **실행 전 확인 스텝:** Agent 가 대상 URL 과 Task 를 먼저 보고 모호하면 리서처에게 되묻고, 확인된 Task 를 `success_rule` 로 가공한다 (§4 0단계, 화면 R2). API 요청/응답 기준 판정은 후보 — 토큰 · 성능 실측 후 (GACA-67).
 
 관측 모드는 run 옵션이다 — S3 A/B (T4) 에서 `som` 과 `dom` 을 같은 인터페이스로 비교한다.
 
@@ -308,7 +308,7 @@ run 당 디렉터리, Persona 당 `steps.jsonl` 한 줄 = step 하나. DB 에는
 | `test_accounts` | Spring | id · project_id · label · secret_enc(암호화) · assigned_run_id(null) — 계정 풀, S3. 화면 쪽 이름(screens-sketch A2)과 같은 이름을 쓴다 |
 | `policies` | Spring | id · scope(global/project) · max_steps · max_seconds · max_tokens · concurrency · run_concurrency · rate_limit_per_domain · daily_token_budget · model_map(json) |
 | `runs` | **Spring(설정) / Python(상태)** | id · project_id · task_id · mode · loop_max · parent_run_id · improvement_id · policy_snapshot(json) · persona_snapshot(json) · **dispatch_state**(Spring) · **status · progress · accepted_at · started_at · finished_at · error · heartbeat_at · next_loop_requested · tokens · cost_usd**(Python) · cancel_requested(Spring) |
-| `run_personas` | Python | run_id · persona_id · status(끝난 이유 — `done` · `max_steps` · `fail` · `timeout` · `cancelled` · `token_limit` · `stuck`) · **url_reached**(성공 판정 칸 — 한 번이라도 닿으면 true, 판정 전 NULL, T27) · steps · backtracks · **tokens · cost_usd**(step 마다 갱신 — 실시간 화면의 누적 비용이 여기서 나온다) · log_path |
+| `run_personas` | Python | run_id · persona_id · status(끝난 이유 — `done` · `max_steps` · `fail` · `timeout` · `cancelled` · `token_limit` · `stuck`) · **url_reached**(도달 칸 — 한 번이라도 닿으면 true, 판정 전 NULL. 결과 넷은 이 칸과 status 로 정한다, T42) · steps · backtracks · **tokens · cost_usd**(step 마다 갱신 — 실시간 화면의 누적 비용이 여기서 나온다) · log_path |
 | `run_metrics` | Python | run_id · success_rate · avg_steps · avg_backtracks · avg_seconds · tokens · cost_usd (run 종료 시 확정 집계) |
 | `patch_versions` | Python | id · run_id · improvement_id · patch_kind(4종) · patch(json) · applied(bool) · fail_reason — Before/After · 실험 이력의 "패치 버전" |
 | `findings` | Python | id · run_id · taxonomy(4종+3) · severity · evidence(json — persona_id · step 범위 · url) · summary |
@@ -476,7 +476,7 @@ compose 를 올린 상태에서 아래 7단계가 **한 번에** 되면 Java 유
 | ~~`runs` 컬럼 분할~~ | **확정 09/20** — 컬럼 단위 소유, `status` 는 Python 전용 · Spring 은 `dispatch_state` | 한재완 · 박소영 | ✔ |
 | ~~인증~~ | **확정 09/20** — JWT access 1h(더 길어도 됨) + refresh + role claim + Google OAuth | 한재완 | ✔ |
 | SSE 전환 시점 | 폴링 주기는 3초로 확정(screens-sketch 와 같은 값). 남은 것은 SSE 를 언제 넣나 — S3 | 이수훈 · 한재완 | S2 |
-| ~~Task 성공 판정 주체~~ | **확정 10/11 (T27, 09/20 의 D21 을 뒤집음)** — 목표 도달 규칙(url_reached)이 성공, done 은 선언 · 실행 전 확인 스텝. URL 이 안 바뀌는 화면은 판정 에이전트가 보강 | 박소영 · PM | ✔ |
+| ~~Task 성공 판정 주체~~ | **확정 10/11 · 11/03 (T27 · T42, 09/20 의 D21 을 뒤집음)** — 도달은 url_reached 규칙, done 은 선언. 결과 넷(성공 · 어렵게 성공 · 실패 · 판정 안 함), 성공률은 성공만 · 실행 전 확인 스텝. URL 이 안 바뀌는 화면은 판정 에이전트가 보강 | 박소영 · PM | ✔ |
 | **SoM 모드 인젝션 방어** | 화면에 보이는 주입 문구는 정제로 못 지운다. 가드의 도메인·파괴적 차단이 유일한 방어선임을 받아들이고 갈지, SoM 에서만 추가 방어를 넣을지 (M6) | 박소영 | 09/20 |
 | 자격증명 복호화 위치 | Spring 내부 엔드포인트 1회 제공 | 한재완 | S3 전 |
 | 로그 · 스크린샷 보존 | run 종료 후 30일, 실험 태그 붙은 run 은 영구 | 박소영 | S3 |
@@ -500,4 +500,4 @@ compose 를 올린 상태에서 아래 7단계가 **한 번에** 되면 Java 유
 | v0.3b | 2026-09-19 | PM 리뷰 완료 · 승인. 상태 줄 갱신 |
 | v0.3c | 2026-09-19 | D15'' 반영 — `users` 에 auth_provider · google_sub, `POST /api/auth/register` · Google OAuth 경로, api env 2개 |
 | v0.4 | 2026-09-20 | AI·BE 대면 반영 — §5 성공 판정을 Agent 메인 · 규칙 보조로(D21, 확인 스텝) · `rerun_links` 삭제 · `personas.profile` 형식(D22) · `improvements.option_no` · `run_personas.agent_done/rule_success` · 드라이런 09/25 · §12 BE 5건 확정 |
-| v0.5 | 2026-11-01 | §5 · §7 성공 판정을 10/11 결정(T27)으로 — 목표 도달 규칙(url_reached)이 성공이고 done 은 선언, `run_personas` 의 끝난 이유 값을 지금 DB 에 맞춤. 10/24 의 개선안 형식(T33) · 관측 입력값 가림(T31) · 실사용자 결과 표 삭제(D24)도 이 판에 함께 올린다 |
+| v0.5 | 2026-11-01 | §5 · §7 성공 판정을 10/11 결정(T27)과 11/03 결정(T42, 결과 넷 · 성공률은 성공만)으로 — 도달은 url_reached 규칙이고 done 은 선언, `run_personas` 의 끝난 이유 값을 지금 DB 에 맞춤. 10/24 의 개선안 형식(T33) · 관측 입력값 가림(T31) · 실사용자 결과 표 삭제(D24)도 이 판에 함께 올린다 |
