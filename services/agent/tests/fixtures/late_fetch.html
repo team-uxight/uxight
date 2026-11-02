@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>늦게 오는 글</title>
+</head>
+<body>
+  <h1>장학 안내</h1>
+  <p>신청 일정은 아래에 나온다.</p>
+  <p><a href="late_fade.html">등록 안내</a></p>
+  <div id="slot"></div>
+  <!-- 글 · 링크를 fetch 로 받아 넣는다. 응답은 주소의 ?wait= 밀리초만큼 늦게 온다(conftest 서버의 ?delay=) -->
+  <script>
+    const wait = new URLSearchParams(location.search).get('wait') ?? '800';
+    fetch(`late_fetch.json?delay=${wait}`).then((r) => r.json()).then((d) => {
+      document.getElementById('slot').innerHTML = `<p>${d.text}</p><a href="${d.href}">${d.link}</a>`;
+    });
+  </script>
+</body>
+</html>

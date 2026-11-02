@@ -9,39 +9,10 @@ from .dom_driver import ID_ATTRIBUTE, MASK_SELECTOR, SCREENSHOT_TIMEOUT_MS, DomD
 
 MARK_ATTRIBUTE = "data-ux-som"
 
-# 찍기 전에 화면이 멎기를 기다리는 최대 시간. 넘으면 그대로 찍고 찍은 뒤 확인에 맡긴다.
-STILL_WAIT_MS = 1_500
 # 찍은 그림을 믿을 수 없을 때(막이 빗나감 · 문서가 바뀜) 처음부터 다시 하는 횟수.
+# 찍기 전에는 DomDriver 와 같이 화면이 멎기를 기다린다 (_wait_still, 최대 STILL_WAIT_MS).
+# 넘으면 그대로 찍고 찍은 뒤 확인에 맡긴다.
 CAPTURE_ATTEMPTS = 3
-# 기다릴 움직임의 대상. 번호를 붙이는 요소(DomDriver 가 모으는 종류)와 입력칸이다.
-# 이것들을 품지 않은 장식 애니메이션은 기다리지 않는다. 학교 사본 홈의 슬라이드 진행 막대
-# (7초짜리 트랜지션이 늘 돈다)까지 기다리면 관측마다 상한을 다 쓴다.
-MOVING_TARGET_SELECTOR = "a[href], button, input, select, textarea, [role=button], [role=link]"
-
-# 대상 페이지 안에서 실행되는 스크립트.
-# 끝이 있는 애니메이션 · 트랜지션과 창의 부드러운 스크롤이 멎을 때까지 기다린다 (최대 maxMs).
-# - 애니메이션을 끝내 버리지(finish) 않는다. 느린 애니메이션도 사람이 겪는 그대로 Agent 가 겪는다.
-# - 무한 반복 애니메이션(로딩 표시 · 자동 슬라이드)은 멎지 않으므로 보지 않는다.
-# - 프레임 대기에 setTimeout 을 같이 건다. requestAnimationFrame 이 멈춰도 maxMs 에 끝난다.
-_WAIT_STILL_JS = """
-async ({ maxMs, selector }) => {
-  const frame = () => new Promise((resolve) => {
-    requestAnimationFrame(resolve);
-    setTimeout(resolve, 100);
-  });
-  const matters = (target) => target != null
-    && (target.matches(selector) || target.querySelector(selector) !== null);
-  const start = performance.now();
-  let lastY = null;
-  while (performance.now() - start < maxMs) {
-    const moving = document.getAnimations().some((a) => a.playState === 'running'
-      && Number.isFinite(a.effect?.getComputedTiming().endTime) && matters(a.effect.target));
-    if (!moving && scrollY === lastY) return;
-    lastY = scrollY;
-    await frame();
-  }
-}
-"""
 
 # 대상 페이지 안에서 실행되는 스크립트.
 # 입력칸 위에는 불투명 막을, DomDriver가 붙인 번호(data-ux-id)마다 박스 · 번호를 그린다.
@@ -143,9 +114,7 @@ class SomDriver(DomDriver):
         self._left_url = None
         for _ in range(CAPTURE_ATTEMPTS):
             try:
-                await page.evaluate(
-                    _WAIT_STILL_JS, {"maxMs": STILL_WAIT_MS, "selector": MOVING_TARGET_SELECTOR}
-                )
+                await self._wait_still()
                 observation = await self._observe_page()
                 await page.evaluate(
                     _DRAW_MARKS_JS,

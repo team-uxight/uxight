@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>나타나는 글</title>
+  <!-- 결함 사본의 미끼(DST-ANIM)와 같은 방식: 처음엔 투명했다가 0.2초 뒤 0.3초 동안 나타난다.
+       글만 든 블록이라 번호를 붙일 요소가 없다 -->
+  <style>
+    @keyframes appear { from { opacity: 0; } to { opacity: 1; } }
+    .late { animation: appear 0.3s 0.2s both; }
+  </style>
+</head>
+<body>
+  <h1>등록 안내</h1>
+  <div class="late">
+    <p>2학기 등록금 납부 기간: 11월 10일부터 11월 21일까지</p>
+    <p>분할 납부는 학과 사무실에 신청한다.</p>
+  </div>
+</body>
+</html>

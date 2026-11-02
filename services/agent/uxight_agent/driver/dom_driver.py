@@ -5,7 +5,15 @@ import json
 import re
 import unicodedata
 
-from playwright.async_api import Browser, CDPSession, Page, Playwright, async_playwright
+from playwright.async_api import (
+    Browser,
+    CDPSession,
+    Frame,
+    Page,
+    Playwright,
+    Request,
+    async_playwright,
+)
 from playwright.async_api import Error as PlaywrightError
 
 from ..guard.destructive import destructive_path
@@ -54,6 +62,94 @@ MASK_COLOR = "#9e9e9e"
 # Persona 시간을 먹는다.
 SCREENSHOT_TIMEOUT_MS = 5_000
 
+# 관측 전에 화면이 멎기를 기다리는 최대 시간 (GACA-157, DOM · SoM 같은 기준). 넘으면 그대로
+# 관측한다. 늦게 온 글은 다음 관측에 들어온다 — 사람도 기다리지 않고 움직이면 못 본다.
+STILL_WAIT_MS = 1_500
+# 기다리는 사이 페이지 요청이 끝났는지 보는 간격.
+REQUEST_POLL_MS = 50
+# 끝나기를 기다릴 요청. 페이지 스크립트가 글을 받아 오는 요청이다.
+# 이미지 · 글꼴 같은 다른 요청은 기다리지 않는다.
+WAITED_REQUEST_TYPES = frozenset({"fetch", "xhr"})
+# 기다릴 움직임의 대상. 번호를 붙이는 요소(_COLLECT_ELEMENTS_JS 가 모으는 종류)와 입력칸이다.
+# 이것들이나 글을 품은 요소의 움직임도 기다린다 (_WAIT_STILL_JS).
+# 아무것도 품지 않은 장식 애니메이션은 기다리지 않는다. 학교 사본 홈의 슬라이드 진행 막대
+# (7초짜리 트랜지션이 늘 돈다)까지 기다리면 관측마다 상한을 다 쓴다.
+MOVING_TARGET_SELECTOR = "a[href], button, input, select, textarea, [role=button], [role=link]"
+
+# 대상 페이지 안에서 실행되는 스크립트.
+# 끝이 있는 애니메이션 · 트랜지션과 창의 부드러운 스크롤이 멎을 때까지 기다린다 (최대 maxMs).
+# - 애니메이션을 끝내 버리지(finish) 않는다. 느린 애니메이션도 사람이 겪는 그대로 Agent 가 겪는다.
+# - 무한 반복 애니메이션(로딩 표시 · 자동 슬라이드)은 멎지 않으므로 보지 않는다.
+# - 글 블록이 나타나는 애니메이션도 기다린다. 결함 사본의 미끼(DST-ANIM)처럼 처음엔 투명한 글은
+#   기다리지 않으면 관측에서 빠진다 (GACA-157).
+# - 프레임 대기에 setTimeout 을 같이 건다. requestAnimationFrame 이 멈춰도 maxMs 에 끝난다.
+_WAIT_STILL_JS = """
+async ({ maxMs, selector }) => {
+  const frame = () => new Promise((resolve) => {
+    requestAnimationFrame(resolve);
+    setTimeout(resolve, 100);
+  });
+  const matters = (target) => target != null && (target.matches(selector)
+    || target.querySelector(selector) !== null || target.textContent.trim() !== '');
+  const start = performance.now();
+  let lastY = null;
+  while (performance.now() - start < maxMs) {
+    const moving = document.getAnimations().some((a) => a.playState === 'running'
+      && Number.isFinite(a.effect?.getComputedTiming().endTime) && matters(a.effect.target));
+    if (!moving && scrollY === lastY) return;
+    lastY = scrollY;
+    await frame();
+  }
+}
+"""
+
+# 대상 페이지 안에서 실행되는 함수. 지금 열린 모달 층을 돌려준다. 없으면 null (GACA-157).
+# 사람은 모달이 열리면 그 안만 보고 누른다. 관측도 그 안만 하고, scroll 도 그 안을 움직인다.
+# - 브라우저 모달 dialog(showModal)가 열려 있으면 그것 (여럿이면 문서에서 마지막 것).
+# - 아니면 화면 가운데와 네 귀퉁이 근처(가장자리에서 10%) 다섯 점의 맨 위 요소를 모두 품고
+#   화면을 다 덮는 고정 위치(position: fixed) 요소. 반투명 막을 깐 레이어 팝업이다.
+#   role · aria 표시가 없는 레이어도 잡는다.
+#   화면 일부만 가리는 팝업은 뒤를 누를 수 있어 모달이 아니다.
+#   안에 글도 누를 것도 없는 막(메뉴 바깥 클릭을 받는 투명 막 등)도 모달이 아니다.
+_MODAL_LAYER_JS = """
+() => {
+  const dialogs = Array.from(document.querySelectorAll('dialog'))
+    .filter((dialog) => dialog.matches(':modal'));
+  if (dialogs.length) return dialogs.at(-1);
+  // 화면 크기 (스크롤바 뺌). 쿼크 모드에서는 html 이 문서 크기라 창 크기를 쓴다.
+  const root = document.documentElement;
+  const [width, height] = document.compatMode === 'CSS1Compat'
+    ? [root.clientWidth, root.clientHeight] : [innerWidth, innerHeight];
+  const hits = [[0.5, 0.5], [0.1, 0.1], [0.9, 0.1], [0.1, 0.9], [0.9, 0.9]]
+    .map(([x, y]) => document.elementFromPoint(width * x, height * y));
+  if (hits.includes(null)) return null;
+  for (let el = hits[0]; el && el !== document.body; el = el.parentElement) {
+    if (getComputedStyle(el).position !== 'fixed') continue;
+    if (!hits.every((hit) => el.contains(hit))) continue;
+    const r = el.getBoundingClientRect();
+    if (r.left > 0 || r.top > 0 || r.right < width || r.bottom < height) continue;
+    const content = el.textContent.trim() !== ''
+      || el.querySelector('a[href], button, input, select, textarea, [role=button], [role=link]');
+    return content ? el : null;
+  }
+  return null;
+}
+""".strip()
+
+# 대상 페이지 안에서 실행되는 스크립트. 한 화면만큼 스크롤한다.
+# 모달이 열려 있으면 그 층이나 그 안의 스크롤 상자를 움직인다 (GACA-157). 창을 움직여도 고정
+# 위치 층은 그대로라 긴 모달의 아래쪽을 끝내 못 본다 — 사람은 모달 위에서 휠을 굴린다.
+# 상자는 바로 움직인다(instant). 창 스크롤처럼 부드러운 스크롤을 기다리지 않아도 된다.
+_SCROLL_JS = """
+(direction) => {
+  const layer = (__MODAL_LAYER__)();
+  const box = layer && [layer, ...layer.querySelectorAll('*')].find((el) =>
+    /auto|scroll/.test(getComputedStyle(el).overflowY) && el.scrollHeight > el.clientHeight);
+  if (box) box.scrollBy({ top: direction * box.clientHeight, behavior: 'instant' });
+  else scrollBy(0, direction * innerHeight);
+}
+""".replace("__MODAL_LAYER__", _MODAL_LAYER_JS)
+
 # 관측에서 뺄 "사람 눈에 안 보이는" 글의 기준값 (관측 정제 L0.5, agent-safety §2.2 #4).
 # 요소가 아니라 글(글 조각 · 버튼 value · placeholder)에만 적용한다 — 투명 select를 씌운 드롭다운
 # · font-size 0 닫기 버튼 같은 정상 컨트롤은 글이 빠진 요소 줄로 남는다 (PM 결정 10/13).
@@ -73,9 +169,14 @@ MAX_TEXT_LENGTH = 3_000
 # 대상 페이지 안에서 실행되는 스크립트.
 # 보이는 상호작용 요소마다 data-ux-id를 붙이고, 요소 정보 목록(items)과 본문 글(text)을 돌려준다.
 # 사람 눈에 안 보이는 요소와 글은 뺀다 — 숨긴 곳에 심은 주입 문구가 모델 입력에 들어가지 않게.
+# 모달이 열려 있으면 그 안만 본다 (GACA-157, _MODAL_LAYER_JS).
 _COLLECT_ELEMENTS_JS = """
 ({ idAttr, minOpacity, minFontSizePx, maxValueLength, maxTextLength }) => {
   document.querySelectorAll(`[${idAttr}]`).forEach(el => el.removeAttribute(idAttr));
+
+  // 모달 층 (GACA-157). 있으면 요소 · 클릭이 걸린 칸 · 본문 글을 그 안에서만 모은다.
+  // 뒤 요소는 막에 가려 누를 수 없고, 뒤 글은 막 너머로 흐리게만 보인다.
+  const layer = (__MODAL_LAYER__)();
 
   // 사람 눈에 보이는 정도.
   // 'hidden': 요소째 안 보인다 — 크기 0 · 화면 밖 · 그려지지 않음(display:none 조상 · 닫힌 details
@@ -146,6 +247,7 @@ _COLLECT_ELEMENTS_JS = """
   const items = [];
   let nextId = 1;
   for (const el of document.querySelectorAll(selector)) {
+    if (layer && !layer.contains(el)) continue;
     const tag = el.tagName.toLowerCase();
     const visibility = visibilityOf(el);
     // 체크박스 · 라디오를 숨기거나 투명하게 하고 꾸민 라벨로 보여주는 흔한 UI — 사람은 보이는
@@ -305,7 +407,7 @@ _COLLECT_ELEMENTS_JS = """
     }
     return text;
   };
-  for (const el of document.body?.querySelectorAll('*') ?? []) {
+  for (const el of (layer ?? document.body)?.querySelectorAll('*') ?? []) {
     if (getComputedStyle(el).cursor !== 'pointer'
       || getComputedStyle(el.parentElement).cursor === 'pointer'
       || el.closest(`${selector}, [${idAttr}]`) || el.querySelector(`[${idAttr}]`)
@@ -361,9 +463,10 @@ _COLLECT_ELEMENTS_JS = """
     return out;
   };
   const bodyText = () => {
-    if (!document.body) return '';
+    const root = layer ?? document.body;
+    if (!root) return '';
     const walker = document.createTreeWalker(
-      document.body,
+      root,
       NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT,
       (node) => (node.nodeType === Node.ELEMENT_NODE
         && (node.hasAttribute(idAttr) || node.localName === 'textarea')
@@ -410,7 +513,7 @@ _COLLECT_ELEMENTS_JS = """
   // 관측의 글과 주소가 같은 문서의 것이다. 도메인 가드가 이 주소로 판정한다.
   return { items, text: bodyText(), url: location.href, title: document.title };
 }
-"""
+""".replace("__MODAL_LAYER__", _MODAL_LAYER_JS)
 
 
 class DomDriver(Driver):
@@ -457,6 +560,8 @@ class DomDriver(Driver):
         self._last_allowed_url: str | None = None
         self._late_returns = 0
         self._left_url: str | None = None
+        # 주 창이 보내 아직 끝나지 않은 fetch · XHR. 관측 전에 끝나기를 기다린다 (GACA-157).
+        self._pending_requests: set[Request] = set()
 
     async def start(self, url: str) -> None:
         # 허용 호스트는 브라우저를 띄우기 전에 정한다 — 허용 밖 하위 요청 차단의 프록시 예외가 쓴다.
@@ -471,6 +576,10 @@ class DomDriver(Driver):
         # 그 fetch 처리기가 답한 요청은 route 에 오지 않는다.
         options = {"service_workers": "block"} if self._block_outside_subrequests else {}
         self._page = await self._browser.new_page(**options)
+        self._page.on("request", self._note_request)
+        self._page.on("requestfinished", self._end_request)
+        self._page.on("requestfailed", self._end_request)
+        self._page.on("framenavigated", self._forget_requests)
         if self._block_outside_subrequests:
             self._page.on("requestfailed", self._note_failed_navigation)
         session = await self._page.context.new_cdp_session(self._page)
@@ -587,8 +696,45 @@ class DomDriver(Driver):
             # 던졌다. 끊거나 잇지 못한 요청은 멈춘 채 진행되지 않는다.
             pass
 
+    def _note_request(self, request: Request) -> None:
+        if request.resource_type in WAITED_REQUEST_TYPES:
+            self._pending_requests.add(request)
+
+    def _end_request(self, request: Request) -> None:
+        self._pending_requests.discard(request)
+
+    def _forget_requests(self, frame: Frame) -> None:
+        # 주 창 문서가 바뀌면 앞 문서의 요청은 기다리지 않는다. route 에서 이어지기 전에 이동으로
+        # 취소된 요청은 끝 소식(requestfinished · requestfailed)이 오지 않는다 (학교 사본 홈 11/03).
+        if frame is self._page.main_frame:
+            self._pending_requests.clear()
+
+    async def _wait_still(self) -> None:
+        """관측 전에 화면이 멎기를 기다린다 (GACA-157). 최대 STILL_WAIT_MS.
+
+        - 주 창이 보낸 fetch · XHR 이 끝나기를 기다린다. 받아 온 글을 나중에 넣는 페이지가 많다.
+        - 끝이 있는 애니메이션과 창의 부드러운 스크롤이 멎기를 기다린다 (_WAIT_STILL_JS).
+        - 받아 온 글이 들어오며 새 애니메이션이 시작될 수 있어, 둘이 함께 조용할 때까지 되풀이한다.
+        """
+        page = self._require_page()
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + STILL_WAIT_MS / 1000
+        while (left := deadline - loop.time()) > 0:
+            if not self._pending_requests:
+                try:
+                    await page.evaluate(
+                        _WAIT_STILL_JS, {"maxMs": left * 1000, "selector": MOVING_TARGET_SELECTOR}
+                    )
+                except PlaywrightError:
+                    pass  # 기다리는 사이 문서가 바뀌었다 — 남은 시간 동안 새 문서를 기다린다
+                else:
+                    if not self._pending_requests:
+                        return
+            await asyncio.sleep(min(REQUEST_POLL_MS / 1000, max(deadline - loop.time(), 0)))
+
     async def observe(self) -> Observation:
         self._left_url = None
+        await self._wait_still()
         observation = await self._observe_page()
         # step 로그용 화면 그림 (모델에는 글 관측만 간다). 입력칸은 단색 막으로 가린 채 찍는다.
         # 찍지 못하면 그림 없이 진행한다 — 그 step 로그의 screenshot 은 null 이다.
@@ -899,7 +1045,7 @@ class DomDriver(Driver):
 
         if action.kind == "scroll":
             direction = -1 if action.value == "up" else 1
-            await page.evaluate("(d) => window.scrollBy(0, d * window.innerHeight)", direction)
+            await page.evaluate(_SCROLL_JS, direction)
             return ActionResult(ok=True)
 
         if action.element_id not in self._element_map:
