@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>멈춘 시계</title>
+</head>
+<body>
+  <!-- 페이지가 performance.now 와 getAnimations 를 바꿔, 페이지 안 기다림 스크립트의 상한이 끝나지 않게 한다 -->
+  <p>본문 안내 글</p>
+  <a href="home.html">홈</a>
+  <script>
+    performance.now = () => 0;
+    document.getAnimations = () => [{
+      playState: 'running',
+      effect: { target: document.body, getComputedTiming: () => ({ endTime: 1 }) },
+    }];
+  </script>
+</body>
+</html>
