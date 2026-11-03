@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>앱 화면</title>
+</head>
+<body style="margin:0">
+  <!-- 흔한 관리자 화면: 화면 전체를 덮는 고정 위치 틀 안에 왼쪽 메뉴와 본문이 따로 스크롤한다.
+       이 틀도 모달 판정에 걸리지만 관측은 틀 전체라 같다. scroll 은 화면 가운데의 본문을 움직여야 한다 -->
+  <div style="position:fixed;inset:0;display:flex">
+    <nav id="menu" style="width:200px;overflow-y:auto"></nav>
+    <main id="content" style="flex:1;overflow-y:auto"></main>
+  </div>
+  <script>
+    for (let n = 1; n <= 60; n++) menu.insertAdjacentHTML('beforeend', `<p><a href="m${n}.html">메뉴 ${n}</a></p>`);
+    for (let n = 1; n <= 80; n++) content.insertAdjacentHTML('beforeend', `<p>본문 ${n}번째 문단</p>`);
+  </script>
+</body>
+</html>

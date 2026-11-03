@@ -72,6 +72,39 @@ def test_requests_of_left_page_not_waited(fixture_server) -> None:
     assert asyncio.run(run()) < STILL_WAIT_MS / 1000
 
 
+def test_same_document_url_change_keeps_waiting(fixture_server) -> None:
+    # 받아 오는 사이 주소의 검색어만 바꾸는(replaceState) 검색 화면. 문서는 그대로라 계속 기다린다.
+    observation, _ = observe_timed(f"{fixture_server}/late_fetch.html?wait=800&replace=150")
+
+    assert LATE_TEXT in observation.text
+
+
+def test_unfinished_request_waited_once(fixture_server) -> None:
+    # 오래 열어 두는 요청(long poll)은 한 번만 기다린다. 관측마다 상한을 다 쓰지 않는다.
+    async def run() -> tuple[float, float]:
+        async with DomDriver() as driver:
+            await driver.start(f"{fixture_server}/late_fetch.html?wait=30000")
+            times = []
+            for _ in range(2):
+                started = time.monotonic()
+                await driver.observe()
+                times.append(time.monotonic() - started)
+            return times[0], times[1]
+
+    first, second = asyncio.run(run())
+
+    assert first >= STILL_WAIT_MS / 1000
+    assert second < STILL_WAIT_MS / 1000
+
+
+def test_wait_capped_when_page_freezes_its_clock() -> None:
+    # 페이지가 performance.now · getAnimations 를 바꿔도 상한이 지켜진다 (Python 쪽 상한).
+    observation, elapsed = observe_timed((FIXTURES / "frozen_clock.html").as_uri())
+
+    assert "본문 안내 글" in observation.text
+    assert elapsed < STILL_WAIT_MS / 1000 + 1
+
+
 def test_fading_in_text_enters_first_observation() -> None:
     # 번호를 붙일 요소가 없는 글 블록의 애니메이션도 기다린다.
     observation, _ = observe_timed((FIXTURES / "late_fade.html").as_uri())

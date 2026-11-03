@@ -105,46 +105,73 @@ async ({ maxMs, selector }) => {
 
 # 대상 페이지 안에서 실행되는 함수. 지금 열린 모달 층을 돌려준다. 없으면 null (GACA-157).
 # 사람은 모달이 열리면 그 안만 보고 누른다. 관측도 그 안만 하고, scroll 도 그 안을 움직인다.
-# - 브라우저 모달 dialog(showModal)가 열려 있으면 그것 (여럿이면 문서에서 마지막 것).
+# - 브라우저 모달 dialog(showModal)가 열려 있으면 맨 위의 것. 맨 위는 마지막으로 연 것이라
+#   문서 순서로는 모른다 — 화면 가운데 요소가 든 dialog 를 고르고, 없으면 문서에서 마지막 것.
 # - 아니면 화면 가운데와 네 귀퉁이 근처(가장자리에서 10%) 다섯 점의 맨 위 요소를 모두 품고
 #   화면을 다 덮는 고정 위치(position: fixed) 요소. 반투명 막을 깐 레이어 팝업이다.
 #   role · aria 표시가 없는 레이어도 잡는다.
 #   화면 일부만 가리는 팝업은 뒤를 누를 수 있어 모달이 아니다.
-#   안에 글도 누를 것도 없는 막(메뉴 바깥 클릭을 받는 투명 막 등)도 모달이 아니다.
+#   안에 보이는 글도 누를 것도 없는 막(메뉴 바깥 클릭을 받는 투명 막, 스크린 리더용 숨김 글만
+#   든 dim 등)도 모달이 아니다 — 그 안만 보면 관측이 빈다. 그때는 더 바깥 층을 찾는다.
+#   보이는 것: 투명하지 않고 화면 안에서 4×4px 이상이며, 자기 글이 있거나 누를 수 있는 요소.
 _MODAL_LAYER_JS = """
 () => {
-  const dialogs = Array.from(document.querySelectorAll('dialog'))
-    .filter((dialog) => dialog.matches(':modal'));
-  if (dialogs.length) return dialogs.at(-1);
   // 화면 크기 (스크롤바 뺌). 쿼크 모드에서는 html 이 문서 크기라 창 크기를 쓴다.
   const root = document.documentElement;
   const [width, height] = document.compatMode === 'CSS1Compat'
     ? [root.clientWidth, root.clientHeight] : [innerWidth, innerHeight];
+  const dialogs = Array.from(document.querySelectorAll('dialog'))
+    .filter((dialog) => dialog.matches(':modal'));
+  if (dialogs.length) {
+    const top = document.elementFromPoint(width / 2, height / 2)?.closest('dialog');
+    return dialogs.includes(top) ? top : dialogs.at(-1);
+  }
   const hits = [[0.5, 0.5], [0.1, 0.1], [0.9, 0.1], [0.1, 0.9], [0.9, 0.9]]
     .map(([x, y]) => document.elementFromPoint(width * x, height * y));
   if (hits.includes(null)) return null;
+  const actionable = 'a[href], button, input, select, textarea, [role=button], [role=link]';
+  const shown = (el) => {
+    const r = el.getBoundingClientRect();
+    return r.width >= 4 && r.height >= 4 && r.right > 0 && r.bottom > 0
+      && r.left < width && r.top < height
+      && el.checkVisibility({ opacityProperty: true, visibilityProperty: true })
+      && (el.matches(actionable) || Array.from(el.childNodes)
+        .some((node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim()));
+  };
   for (let el = hits[0]; el && el !== document.body; el = el.parentElement) {
     if (getComputedStyle(el).position !== 'fixed') continue;
     if (!hits.every((hit) => el.contains(hit))) continue;
     const r = el.getBoundingClientRect();
     if (r.left > 0 || r.top > 0 || r.right < width || r.bottom < height) continue;
-    const content = el.textContent.trim() !== ''
-      || el.querySelector('a[href], button, input, select, textarea, [role=button], [role=link]');
-    return content ? el : null;
+    if (Array.from(el.querySelectorAll('*')).some(shown)) return el;
   }
   return null;
 }
 """.strip()
 
 # 대상 페이지 안에서 실행되는 스크립트. 한 화면만큼 스크롤한다.
-# 모달이 열려 있으면 그 층이나 그 안의 스크롤 상자를 움직인다 (GACA-157). 창을 움직여도 고정
-# 위치 층은 그대로라 긴 모달의 아래쪽을 끝내 못 본다 — 사람은 모달 위에서 휠을 굴린다.
+# 모달이 열려 있으면 그 층 안의 스크롤 상자를 움직인다 (GACA-157). 창을 움직여도 고정 위치 층은
+# 그대로라 긴 모달의 아래쪽을 끝내 못 본다 — 사람은 모달 위에서 휠을 굴린다.
+# 상자는 화면 가운데 요소에서 위로 가장 가까운 스크롤 상자다(가운데에서 휠을 굴린 것과 같다).
+# 없으면 층 안에서 문서 순서로 첫 스크롤 상자다. 메뉴와 본문이 따로 스크롤하는 앱 화면에서도
+# 본문이 움직인다.
 # 상자는 바로 움직인다(instant). 창 스크롤처럼 부드러운 스크롤을 기다리지 않아도 된다.
 _SCROLL_JS = """
 (direction) => {
   const layer = (__MODAL_LAYER__)();
-  const box = layer && [layer, ...layer.querySelectorAll('*')].find((el) =>
-    /auto|scroll/.test(getComputedStyle(el).overflowY) && el.scrollHeight > el.clientHeight);
+  const scrollable = (el) => /auto|scroll/.test(getComputedStyle(el).overflowY)
+    && el.scrollHeight > el.clientHeight;
+  let box = null;
+  if (layer) {
+    for (let el = document.elementFromPoint(innerWidth / 2, innerHeight / 2);
+      el && layer.contains(el); el = el.parentElement) {
+      if (scrollable(el)) {
+        box = el;
+        break;
+      }
+    }
+    box ??= [layer, ...layer.querySelectorAll('*')].find(scrollable);
+  }
   if (box) box.scrollBy({ top: direction * box.clientHeight, behavior: 'instant' });
   else scrollBy(0, direction * innerHeight);
 }
@@ -560,8 +587,10 @@ class DomDriver(Driver):
         self._last_allowed_url: str | None = None
         self._late_returns = 0
         self._left_url: str | None = None
-        # 주 창이 보내 아직 끝나지 않은 fetch · XHR. 관측 전에 끝나기를 기다린다 (GACA-157).
+        # 주 창 문서가 보내 아직 끝나지 않은 fetch · XHR. 관측 전에 끝나기를 기다린다 (GACA-157).
+        # - _new_document: 주 창의 이동 요청이 왔다 — 그 문서가 들어오면 앞 문서의 요청을 잊는다
         self._pending_requests: set[Request] = set()
+        self._new_document = False
 
     async def start(self, url: str) -> None:
         # 허용 호스트는 브라우저를 띄우기 전에 정한다 — 허용 밖 하위 요청 차단의 프록시 예외가 쓴다.
@@ -697,44 +726,65 @@ class DomDriver(Driver):
             pass
 
     def _note_request(self, request: Request) -> None:
+        # 주 창 문서의 요청만 본다. iframe 안 글은 관측에 들지 않는다.
+        try:
+            if request.frame.parent_frame is not None:
+                return
+        except PlaywrightError:
+            return  # 이 페이지가 모르는 창의 요청
         if request.resource_type in WAITED_REQUEST_TYPES:
             self._pending_requests.add(request)
+        elif request.is_navigation_request():
+            self._new_document = True
 
     def _end_request(self, request: Request) -> None:
         self._pending_requests.discard(request)
 
     def _forget_requests(self, frame: Frame) -> None:
-        # 주 창 문서가 바뀌면 앞 문서의 요청은 기다리지 않는다. route 에서 이어지기 전에 이동으로
-        # 취소된 요청은 끝 소식(requestfinished · requestfailed)이 오지 않는다 (학교 사본 홈 11/03).
-        if frame is self._page.main_frame:
+        # 주 창에 새 문서가 들어오면 앞 문서의 요청은 기다리지 않는다. route 에서 이어지기 전에
+        # 이동으로 취소된 요청은 끝 소식(requestfinished · requestfailed)이 오지 않는다(학교 사본 홈
+        # 11/03). 같은 문서 안 주소 변경(pushState · 해시)에는 이동 요청이 없어 비우지 않는다.
+        if frame.parent_frame is None and self._new_document:
+            self._new_document = False
             self._pending_requests.clear()
 
     async def _wait_still(self) -> None:
         """관측 전에 화면이 멎기를 기다린다 (GACA-157). 최대 STILL_WAIT_MS.
 
-        - 주 창이 보낸 fetch · XHR 이 끝나기를 기다린다. 받아 온 글을 나중에 넣는 페이지가 많다.
+        - 주 창 문서가 보낸 fetch · XHR 이 끝나기를 기다린다. 받아 온 글을 나중에 넣는 페이지가
+          많다.
         - 끝이 있는 애니메이션과 창의 부드러운 스크롤이 멎기를 기다린다 (_WAIT_STILL_JS).
         - 받아 온 글이 들어오며 새 애니메이션이 시작될 수 있어, 둘이 함께 조용할 때까지 되풀이한다.
+        - 상한은 Python 쪽에서도 지킨다. 페이지가 시계(performance.now)를 바꿔도 멈추지 않는다.
+        - 주 창이 허용 밖으로 가면 그만 기다린다. 허용 밖 페이지에서 스크립트를 돌리지 않는다.
+        상한까지 끝나지 않은 요청은 버린다 — 한 번만 기다린다. 오래 열어 두는 요청(long poll)
+        하나로 관측마다 상한을 다 쓰지 않게 한다.
         """
         page = self._require_page()
         loop = asyncio.get_running_loop()
         deadline = loop.time() + STILL_WAIT_MS / 1000
-        while (left := deadline - loop.time()) > 0:
+        while (left := deadline - loop.time()) > 0 and is_allowed(page.url, self._allowed_hosts):
             if not self._pending_requests:
                 try:
-                    await page.evaluate(
-                        _WAIT_STILL_JS, {"maxMs": left * 1000, "selector": MOVING_TARGET_SELECTOR}
+                    await asyncio.wait_for(
+                        page.evaluate(
+                            _WAIT_STILL_JS,
+                            {"maxMs": left * 1000, "selector": MOVING_TARGET_SELECTOR},
+                        ),
+                        left + REQUEST_POLL_MS / 1000,
                     )
+                except TimeoutError:
+                    break
                 except PlaywrightError:
                     pass  # 기다리는 사이 문서가 바뀌었다 — 남은 시간 동안 새 문서를 기다린다
                 else:
                     if not self._pending_requests:
                         return
             await asyncio.sleep(min(REQUEST_POLL_MS / 1000, max(deadline - loop.time(), 0)))
+        self._pending_requests.clear()
 
     async def observe(self) -> Observation:
         self._left_url = None
-        await self._wait_still()
         observation = await self._observe_page()
         # step 로그용 화면 그림 (모델에는 글 관측만 간다). 입력칸은 단색 막으로 가린 채 찍는다.
         # 찍지 못하면 그림 없이 진행한다 — 그 step 로그의 screenshot 은 null 이다.
@@ -768,6 +818,9 @@ class DomDriver(Driver):
         while True:
             url = page.url
             if is_allowed(url, self._allowed_hosts):
+                # 모으기 전에 화면이 멎기를 기다린다 (GACA-157). 허용 판정 뒤라 허용 밖 페이지에서는
+                # 기다리지 않고, 되돌린 페이지에서는 다시 기다린다.
+                await self._wait_still()
                 collected = await self._collect_elements(page)
                 url = collected["url"]
                 if is_allowed(url, self._allowed_hosts):

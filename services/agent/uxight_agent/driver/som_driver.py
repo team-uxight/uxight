@@ -10,8 +10,8 @@ from .dom_driver import ID_ATTRIBUTE, MASK_SELECTOR, SCREENSHOT_TIMEOUT_MS, DomD
 MARK_ATTRIBUTE = "data-ux-som"
 
 # 찍은 그림을 믿을 수 없을 때(막이 빗나감 · 문서가 바뀜) 처음부터 다시 하는 횟수.
-# 찍기 전에는 DomDriver 와 같이 화면이 멎기를 기다린다 (_wait_still, 최대 STILL_WAIT_MS).
-# 넘으면 그대로 찍고 찍은 뒤 확인에 맡긴다.
+# 찍기 전에는 DomDriver 와 같이 화면이 멎기를 기다린다 (_observe_page 의 _wait_still, 최대
+# STILL_WAIT_MS). 넘으면 그대로 찍고 찍은 뒤 확인에 맡긴다.
 CAPTURE_ATTEMPTS = 3
 
 # 대상 페이지 안에서 실행되는 스크립트.
@@ -114,7 +114,6 @@ class SomDriver(DomDriver):
         self._left_url = None
         for _ in range(CAPTURE_ATTEMPTS):
             try:
-                await self._wait_still()
                 observation = await self._observe_page()
                 await page.evaluate(
                     _DRAW_MARKS_JS,

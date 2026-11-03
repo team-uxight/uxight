@@ -98,3 +98,27 @@ def test_empty_cover_is_not_modal() -> None:
 
     assert {"홈", "학사일정"} <= set(texts(observation))
     assert "본문 안내 글" in observation.text
+
+
+def test_cover_with_only_hidden_content_is_not_modal() -> None:
+    # dim 안에 스크린 리더용 숨김 글만 있으면 모달이 아니다. 사람에게 보이는 페이지 · 팝업이 남는다.
+    (observation,) = observe_steps((FIXTURES / "cover_hidden.html").as_uri())
+
+    assert {"홈", "학사일정", "확인"} <= set(texts(observation))
+    assert "12월 정기 점검 안내" in observation.text
+
+
+def test_top_dialog_of_nested_dialogs_observed() -> None:
+    # 맨 위 창은 마지막으로 연 확인 창이다. 문서 순서로는 신청서가 뒤에 있다.
+    (observation,) = observe_steps((FIXTURES / "nested_dialogs.html").as_uri())
+
+    assert texts(observation) == ["예, 나가기", "아니오"]
+
+
+def test_scroll_moves_box_under_screen_center() -> None:
+    # 메뉴와 본문이 따로 스크롤하는 앱 화면에서 scroll 은 가운데의 본문을 움직인다.
+    before, after = observe_steps((FIXTURES / "app_shell.html").as_uri(), SCROLL_DOWN)
+
+    assert "본문 1번째 문단" in before.text
+    assert "본문 1번째 문단" not in after.text
+    assert "메뉴 1" in texts(after)  # 메뉴는 그대로
