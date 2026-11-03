@@ -41,6 +41,7 @@ class FakeRunRepository:
 
     def __init__(self) -> None:
         self.status = "running"
+        self.success_rate: float | None = None
         self.error: str | None = None
         self.cancel_requested = False
         self.cancel_checks = 0
@@ -55,6 +56,8 @@ class FakeRunRepository:
             self.status = status
 
     def mark_done(self, run_id: int, success_rate: float) -> None:
+        if self.status == "running":
+            self.success_rate = success_rate
         self._finish("done")
 
     def mark_failed(self, run_id: int, error: str) -> None:
@@ -84,6 +87,7 @@ class FakeRunPersonaRepository:
 
     def __init__(self) -> None:
         self.statuses: dict[int, str] = {}
+        self.url_reached: dict[int, bool | None] = {}
         self.steps: dict[int, int] = {}
         self.tokens: dict[int, int] = {}
         # 비용은 실제 SQL 처럼 None 이면 건드리지 않고, 처음 값이 오면 0 에서 시작해 더한다.
@@ -93,6 +97,12 @@ class FakeRunPersonaRepository:
 
     def get_statuses(self, run_id: int) -> dict[int, str]:
         return dict(self.statuses)
+
+    def get_outcomes(self, run_id: int) -> dict[int, tuple[str, bool | None]]:
+        return {
+            persona_id: (status, self.url_reached.get(persona_id))
+            for persona_id, status in self.statuses.items()
+        }
 
     def increment_steps(
         self, run_id: int, persona_id: int, tokens: int = 0, cost_usd: float | None = None
@@ -104,9 +114,16 @@ class FakeRunPersonaRepository:
             self.costs[persona_id] = (self.costs.get(persona_id) or 0.0) + cost_usd
             self.run_cost = (self.run_cost or 0.0) + cost_usd
 
-    def mark_finished(self, run_id: int, persona_id: int, status: str) -> None:
+    def mark_finished(
+        self,
+        run_id: int,
+        persona_id: int,
+        status: str,
+        url_reached: bool | None = None,
+    ) -> None:
         if self.statuses[persona_id] == "running":
             self.statuses[persona_id] = status
+            self.url_reached[persona_id] = url_reached
 
 
 class FakeAuditLogRepository:
@@ -461,11 +478,60 @@ def test_run_status_from_persona_statuses(
     assert fakes.runs.error == error
 
 
+
+def test_run_does_not_finish_while_persona_running(
+    fakes: SimpleNamespace,
+) -> None:
+    """Persona가 실행 중이면 회차를 완료하거나 지표를 저장하지 않는다."""
+    fakes.personas.statuses.update({
+        1: "done",
+        2: "running",
+    })
+    fakes.personas.url_reached.update({
+        1: True,
+        2: True,
+    })
+
+    RunOrchestrator()._finish_run(RUN_ID)
+
+    assert fakes.runs.status == "running"
+    assert fakes.runs.success_rate is None
+
+
+def test_success_rate_uses_url_reached_and_excludes_unjudged(
+    fakes: SimpleNamespace,
+) -> None:
+    """11/03 결정: 성공만 분자에 포함하고 판정 불가는 분모에서 제외한다."""
+    fakes.personas.statuses.update({
+        1: "done",
+        2: "max_steps",
+        3: "done",
+        4: "timeout",
+        5: "fail",
+        6: "done",
+    })
+    fakes.personas.url_reached.update({
+        1: True,
+        2: True,
+        3: False,
+        4: False,
+        5: True,
+        6: None,
+    })
+
+    RunOrchestrator()._finish_run(RUN_ID)
+
+    assert fakes.runs.status == "done"
+    assert fakes.runs.success_rate == 25.0
+
+
 @pytest.mark.parametrize(
     ("slots_held_by_other_runs", "persona_concurrency", "started"),
     [(0, None, 2), (2, None, 0), (0, 1, 1)],
     ids=["running", "waiting-for-slot", "waiting-for-run-slot"],
 )
+
+
 def test_cancel_stops_all_personas_quickly(
     fakes: SimpleNamespace,
     monkeypatch: pytest.MonkeyPatch,
@@ -552,7 +618,12 @@ def test_exception_during_run_does_not_leave_run_running(fakes: SimpleNamespace)
     mark_finished = fakes.personas.mark_finished
     calls = []
 
-    def flaky_mark_finished(run_id: int, persona_id: int, status: str) -> None:
+    def flaky_mark_finished(
+        run_id: int,
+        persona_id: int,
+        status: str,
+        url_reached: bool | None = None,
+    ) -> None:
         calls.append(persona_id)
         if len(calls) == 1:
             raise RuntimeError("db down")
