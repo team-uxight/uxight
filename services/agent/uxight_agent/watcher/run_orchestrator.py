@@ -286,10 +286,7 @@ class RunOrchestrator:
                 for status, reached in outcomes.values()
                 if status in judged_statuses and reached is not None
             ]
-            success = sum(
-                1 for status, reached in judged
-                if status == "done" and reached is True
-            )
+            success = sum(1 for status, reached in judged if status == "done" and reached is True)
             success_rate = round(success / len(judged) * 100, 2) if judged else 0.0
             run_repository.mark_done(run_id, success_rate=success_rate)
 
@@ -345,9 +342,7 @@ class RunOrchestrator:
         url_reached = step_log_writer.get_url_reached(run_id, persona_id)
 
         # 종료 상태와 URL 도달 여부를 함께 저장한 뒤 진행률을 갱신한다.
-        run_persona_repository.mark_finished(
-            run_id, persona_id, outcome, url_reached=url_reached
-        )
+        run_persona_repository.mark_finished(run_id, persona_id, outcome, url_reached=url_reached)
         self._refresh_progress(run_id)
 
     @contextlib.asynccontextmanager

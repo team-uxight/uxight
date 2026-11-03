@@ -95,31 +95,36 @@ def test_mark_done_aggregates_persona_metrics(
         dbapi_conn.create_function("TIMESTAMPDIFF", 3, timestampdiff)
 
     with engine.begin() as conn:
-        conn.execute(text(
-            "CREATE TABLE runs (run_id INTEGER PRIMARY KEY, "
-            "status TEXT NOT NULL, finished_at TEXT)"
-        ))
-        conn.execute(text(
-            "CREATE TABLE run_personas (run_id INTEGER, steps INTEGER, "
-            "backtracks INTEGER, tokens INTEGER, cost_usd REAL, "
-            "started_at TEXT, finished_at TEXT)"
-        ))
-        conn.execute(text(
-            "CREATE TABLE run_metrics (run_id INTEGER UNIQUE, "
-            "success_rate REAL, avg_steps REAL, avg_backtracks REAL, "
-            "avg_seconds REAL, tokens INTEGER, cost_usd REAL)"
-        ))
-        conn.execute(text(
-            "INSERT INTO runs (run_id, status) VALUES "
-            "(1, 'running'), (2, 'queued')"
-        ))
-        conn.execute(text(
-            "INSERT INTO run_personas VALUES "
-            "(1, 10, NULL, 100, 0.25, "
-            "'2026-10-21 12:00:00', '2026-10-21 12:00:10'), "
-            "(1, 20, NULL, 300, 0.75, "
-            "'2026-10-21 12:00:00', '2026-10-21 12:00:30')"
-        ))
+        conn.execute(
+            text(
+                "CREATE TABLE runs (run_id INTEGER PRIMARY KEY, "
+                "status TEXT NOT NULL, finished_at TEXT)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE TABLE run_personas (run_id INTEGER, steps INTEGER, "
+                "backtracks INTEGER, tokens INTEGER, cost_usd REAL, "
+                "started_at TEXT, finished_at TEXT)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE TABLE run_metrics (run_id INTEGER UNIQUE, "
+                "success_rate REAL, avg_steps REAL, avg_backtracks REAL, "
+                "avg_seconds REAL, tokens INTEGER, cost_usd REAL)"
+            )
+        )
+        conn.execute(text("INSERT INTO runs (run_id, status) VALUES (1, 'running'), (2, 'queued')"))
+        conn.execute(
+            text(
+                "INSERT INTO run_personas VALUES "
+                "(1, 10, NULL, 100, 0.25, "
+                "'2026-10-21 12:00:00', '2026-10-21 12:00:10'), "
+                "(1, 20, NULL, 300, 0.75, "
+                "'2026-10-21 12:00:00', '2026-10-21 12:00:30')"
+            )
+        )
 
     monkeypatch.setattr(repository_module, "engine", engine)
 
@@ -142,13 +147,13 @@ def test_mark_done_aggregates_persona_metrics(
     repository.mark_done(2, success_rate=100.0)
 
     with engine.begin() as conn:
-        rows = conn.execute(text(
-            "SELECT run_id, success_rate, avg_steps, avg_backtracks, "
-            "avg_seconds, tokens, cost_usd FROM run_metrics"
-        )).all()
-        statuses = conn.execute(text(
-            "SELECT run_id, status FROM runs ORDER BY run_id"
-        )).all()
+        rows = conn.execute(
+            text(
+                "SELECT run_id, success_rate, avg_steps, avg_backtracks, "
+                "avg_seconds, tokens, cost_usd FROM run_metrics"
+            )
+        ).all()
+        statuses = conn.execute(text("SELECT run_id, status FROM runs ORDER BY run_id")).all()
 
     assert len(rows) == 1
     row = rows[0]
@@ -163,24 +168,25 @@ def test_mark_done_aggregates_persona_metrics(
 
     # 일부 Persona의 비용이 미측정이면 부분 합계를 전체 비용으로 표시하지 않는다.
     with engine.begin() as conn:
-        conn.execute(text(
-            "INSERT INTO runs (run_id, status) VALUES (3, 'running')"
-        ))
-        conn.execute(text(
-            "INSERT INTO run_personas VALUES "
-            "(3, 5, NULL, 50, 0.10, "
-            "'2026-10-21 12:00:00', '2026-10-21 12:00:05'), "
-            "(3, 7, NULL, 70, NULL, "
-            "'2026-10-21 12:00:00', '2026-10-21 12:00:07')"
-        ))
+        conn.execute(text("INSERT INTO runs (run_id, status) VALUES (3, 'running')"))
+        conn.execute(
+            text(
+                "INSERT INTO run_personas VALUES "
+                "(3, 5, NULL, 50, 0.10, "
+                "'2026-10-21 12:00:00', '2026-10-21 12:00:05'), "
+                "(3, 7, NULL, 70, NULL, "
+                "'2026-10-21 12:00:00', '2026-10-21 12:00:07')"
+            )
+        )
 
     repository.mark_done(3, success_rate=0.0)
 
     with engine.begin() as conn:
-        missing_cost = conn.execute(text(
-            "SELECT avg_steps, avg_seconds, tokens, cost_usd "
-            "FROM run_metrics WHERE run_id = 3"
-        )).one()
+        missing_cost = conn.execute(
+            text(
+                "SELECT avg_steps, avg_seconds, tokens, cost_usd FROM run_metrics WHERE run_id = 3"
+            )
+        ).one()
 
     assert missing_cost[0] == pytest.approx(6.0)
     assert missing_cost[1] == pytest.approx(6.0)

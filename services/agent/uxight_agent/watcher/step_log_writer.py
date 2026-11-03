@@ -45,7 +45,6 @@ class StepLogWriter:
         with open(self._root / self.relative_path(run_id, persona_id), "a", encoding="utf-8") as f:
             f.write(line + "\n")
 
-
     def get_url_reached(self, run_id: int, persona_id: int) -> bool | None:
         """모든 Step의 URL 도달 기록을 집계한다. 유효한 기록이 없으면 None."""
         path = self._root / self.relative_path(run_id, persona_id)

@@ -478,19 +478,22 @@ def test_run_status_from_persona_statuses(
     assert fakes.runs.error == error
 
 
-
 def test_run_does_not_finish_while_persona_running(
     fakes: SimpleNamespace,
 ) -> None:
     """Persona가 실행 중이면 회차를 완료하거나 지표를 저장하지 않는다."""
-    fakes.personas.statuses.update({
-        1: "done",
-        2: "running",
-    })
-    fakes.personas.url_reached.update({
-        1: True,
-        2: True,
-    })
+    fakes.personas.statuses.update(
+        {
+            1: "done",
+            2: "running",
+        }
+    )
+    fakes.personas.url_reached.update(
+        {
+            1: True,
+            2: True,
+        }
+    )
 
     RunOrchestrator()._finish_run(RUN_ID)
 
@@ -502,22 +505,26 @@ def test_success_rate_uses_url_reached_and_excludes_unjudged(
     fakes: SimpleNamespace,
 ) -> None:
     """11/03 결정: 성공만 분자에 포함하고 판정 불가는 분모에서 제외한다."""
-    fakes.personas.statuses.update({
-        1: "done",
-        2: "max_steps",
-        3: "done",
-        4: "timeout",
-        5: "fail",
-        6: "done",
-    })
-    fakes.personas.url_reached.update({
-        1: True,
-        2: True,
-        3: False,
-        4: False,
-        5: True,
-        6: None,
-    })
+    fakes.personas.statuses.update(
+        {
+            1: "done",
+            2: "max_steps",
+            3: "done",
+            4: "timeout",
+            5: "fail",
+            6: "done",
+        }
+    )
+    fakes.personas.url_reached.update(
+        {
+            1: True,
+            2: True,
+            3: False,
+            4: False,
+            5: True,
+            6: None,
+        }
+    )
 
     RunOrchestrator()._finish_run(RUN_ID)
 
@@ -530,8 +537,6 @@ def test_success_rate_uses_url_reached_and_excludes_unjudged(
     [(0, None, 2), (2, None, 0), (0, 1, 1)],
     ids=["running", "waiting-for-slot", "waiting-for-run-slot"],
 )
-
-
 def test_cancel_stops_all_personas_quickly(
     fakes: SimpleNamespace,
     monkeypatch: pytest.MonkeyPatch,
