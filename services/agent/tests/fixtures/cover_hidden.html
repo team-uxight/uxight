@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>숨김 글만 든 dim</title>
+  <style>.blind { position: absolute; clip: rect(0 0 0 0); width: 1px; height: 1px; margin: -1px; overflow: hidden; }</style>
+</head>
+<body>
+  <!-- 흔한 레이어 팝업: 화면을 덮는 dim 은 스크린 리더용 숨김 글 '팝업 닫기'만 품고, 팝업은 dim 의 형제다.
+       팝업은 판정하는 다섯 점에 닿지 않는 자리에 있다. dim 은 모달이 아니다 — 그 안만 보면 관측이 빈다 -->
+  <nav><a href="home.html">홈</a> <a href="calendar.html">학사일정</a></nav>
+  <p>본문 안내 글</p>
+  <div style="position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:100"><a href="#" class="blind">팝업 닫기</a></div>
+  <div style="position:fixed;top:100px;left:150px;width:400px;padding:20px;background:#fff;z-index:101">
+    <p>12월 정기 점검 안내</p>
+    <button type="button">확인</button>
+  </div>
+</body>
+</html>
