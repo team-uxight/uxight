@@ -9,7 +9,7 @@ RESULT=${RESULT:-}; EVENT=${EVENT:-}
 # 어떤 경우인가: CI 실패 · 배포 실패 · 반영 · 그대로(서버가 다른 브랜치를 따름)
 if [ -n "${CI:-}" ] && [ "$CI" != success ]; then case=ci_fail
 elif [ "${DEPLOY:-}" != success ]; then case=deploy_fail
-else case=${RESULT%% *}; fi                  # RESULT = "deployed fe <sha>" | "unchanged fe <sha>"
+else case=${RESULT%% *}; fi                  # RESULT = "deployed fe <sha>" | "unchanged fe <sha>" | "failed fe <sha>"
 srv_branch=""; srv_full=""
 if [ "$RESULT" != "${RESULT#* }" ]; then srv=${RESULT#* }; srv_branch=${srv%% *}; srv_full=${srv##* }; fi
 srv_sha=${srv_full:0:7}
@@ -40,7 +40,7 @@ payload=$(jq -n \
   --arg branch "$BRANCH" --arg sha "$SHA" --arg commit_msg "${COMMIT_MSG:-}" --arg commit_author "${COMMIT_AUTHOR:-}" \
   --arg repo_url "${SERVER_URL:-https://github.com}/$REPO" --arg run_url "${RUN_URL:-}" --arg ci_url "${CI_URL:-}" \
   --arg srv_branch "$srv_branch" --arg srv_sha "$srv_sha" --arg services "${SERVICES:-}" --arg seconds "${SECONDS_TAKEN:-}" \
-  --arg areas "$areas" --arg failed "$failed" --argjson pr "$pr" '
+  --arg areas "$areas" --arg failed "$failed" --arg failed_service "${FAILED_SERVICE:-}" --argjson pr "$pr" '
   def esc: gsub("&"; "&amp;") | gsub("<"; "&lt;") | gsub(">"; "&gt;");
   def link($u; $t): "<" + $u + "|" + ($t | esc | gsub("\\|"; "/")) + ">";
   def btn($t; $u; $s): {type: "button", text: {type: "plain_text", text: $t[0:75], emoji: true}, url: $u}
@@ -57,7 +57,7 @@ payload=$(jq -n \
          | map(select(test("\\S") and (test("^\\s*<!--") | not))) | first // "" end) as $summary |
 
   (if $case == "ci_fail" then ":x: CI 실패 · \($branch)"
-   elif $case == "deploy_fail" then ":warning: dev 서버 배포 실패 · \($branch)"
+   elif $case == "deploy_fail" then ":warning: dev 서버 배포 실패 · \(if $srv_branch != "" then $srv_branch else $branch end)"
    elif $case == "deployed" and $event == "workflow_dispatch" then ":hammer_and_wrench: dev 서버 다시 배포 · \($srv_branch)"
    elif $case == "deployed" then ":white_check_mark: dev 서버 반영 · \($branch)"
    elif $case == "unchanged" then ":large_blue_circle: \($branch) 갱신 · dev 서버는 그대로"
@@ -79,6 +79,8 @@ payload=$(jq -n \
         (if $case == "deployed" then "\($srv_branch)@\($srv_sha) 반영"
          elif $case == "unchanged" then "\($srv_branch)@\($srv_sha) 그대로\n(서버는 \($srv_branch) 를 따름)"
          elif $case == "ci_fail" then "배포 안 함"
+         elif $srv_branch != "" then "\($srv_branch)@\($srv_sha) 빌드 실패"
+           + (if $failed_service != "" then " — \($failed_service | esc) 에서 멈춤" else "" end) + "\n이전 판 그대로"
          else "배포 실패 — 실행 로그 확인" end)
         + (if $services != "" and ($case == "deployed" or $case == "unchanged") then "\n서비스 \($services) 실행 중" else "" end)
         + (if $seconds != "" and $case == "deployed" then " · \(dur)" else "" end))}
