@@ -286,9 +286,19 @@ class RunOrchestrator:
                 logger.exception("run=%s diagnosis failed", run_id)
                 run_repository.mark_failed(run_id, error="진단 실패")
                 return
-            # 성공률 = Agent 가 스스로 done 을 낸 페르소나 비율 (메인 판정 기준, D21).
-            done = sum(1 for status in statuses.values() if status == "done")
-            run_repository.mark_done(run_id, success_rate=round(done / len(statuses) * 100, 2))
+            # 11/03 결정: URL 도달 여부와 종료 상태를 함께 사용한다.
+            # 판정 가능한 종료 상태만 포함하고, URL 기록이 없으면 제외한다.
+            # fail/cancelled/running은 성공률 분모에 포함하지 않는다.
+            outcomes = run_persona_repository.get_outcomes(run_id)
+            judged_statuses = {"done", "max_steps", "stuck", "timeout", "token_limit"}
+            judged = [
+                (status, reached)
+                for status, reached in outcomes.values()
+                if status in judged_statuses and reached is not None
+            ]
+            success = sum(1 for status, reached in judged if status == "done" and reached is True)
+            success_rate = round(success / len(judged) * 100, 2) if judged else 0.0
+            run_repository.mark_done(run_id, success_rate=success_rate)
 
     @staticmethod
     def _save_findings(run_id: int, statuses: dict[int, str]) -> None:
@@ -351,8 +361,12 @@ class RunOrchestrator:
                     logger.exception("run=%s persona=%s 수행 실패", run_id, persona_id)
                     outcome = "fail"
 
-        # 종료 처리는 이 한 곳에서만 한다. 페르소나 상태를 확정한 뒤 런의 progress를 갱신한다.
-        run_persona_repository.mark_finished(run_id, persona_id, outcome)
+        # 모든 Step 로그에서 성공 URL 도달 여부를 집계한다.
+        # 한 번이라도 도달했다면 이후 다른 페이지로 이동해도 True를 유지한다.
+        url_reached = step_log_writer.get_url_reached(run_id, persona_id)
+
+        # 종료 상태와 URL 도달 여부를 함께 저장한 뒤 진행률을 갱신한다.
+        run_persona_repository.mark_finished(run_id, persona_id, outcome, url_reached=url_reached)
         # 진단은 모든 Persona 가 끝난 뒤 회차 단위로 한다 (_finish_run → _save_findings).
         self._refresh_progress(run_id)
 
