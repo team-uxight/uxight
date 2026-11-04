@@ -7,6 +7,8 @@ from typing import TypeVar
 
 from ..db import settings
 from ..diagnose.findings import build_findings
+from ..diagnose.summary import MAX_RETRIES as SUMMARY_MAX_RETRIES
+from ..diagnose.summary import build_facts, summarize
 from ..driver.dom_driver import DomDriver
 from ..guard.domain import allowed_hosts
 from ..llm import LLMClient
@@ -73,6 +75,14 @@ def llm_client() -> LLMClient:
 def make_decider(run_id: int) -> Decider:
     """Persona 하나의 판단기. 테스트는 이 함수를 바꿔 끼워 LLM 없이 돈다."""
     return LLMDecider(llm_client(), run_id=run_id)
+
+
+def make_summary_llm() -> LLMClient | None:
+    """진단 설명용 LLM (GACA-166). 재시도는 1회 — step 루프 클라이언트와 따로 둔다.
+
+    None 이면 설명은 규칙 문장이다. 테스트는 이 함수를 바꿔 끼운다.
+    """
+    return LLMClient(max_retries=SUMMARY_MAX_RETRIES)
 
 
 @dataclass
@@ -232,7 +242,7 @@ class RunOrchestrator:
         if unfinished:
             # 종료 처리(DB 기록)가 실패한 페르소나는 running 으로 남아 있을 수 있다.
             raise RuntimeError(f"persona finish failed: {unfinished}")
-        self._finish_run(run_id)
+        await self._finish_run(run_id, snapshot)
 
     def _fail_run(self, run_id: int, error: str) -> None:
         # running 으로 남은 페르소나를 fail 로 정리한 뒤 회차를 failed 로 마감한다.
@@ -254,7 +264,7 @@ class RunOrchestrator:
         except Exception:
             logger.exception("run=%s progress refresh failed", run_id)
 
-    def _finish_run(self, run_id: int) -> None:
+    async def _finish_run(self, run_id: int, snapshot: RunSnapshot) -> None:
         # 마지막 페르소나의 진행률 갱신이 실패했어도 회차를 마감하기 전에 맞춘다.
         self._refresh_progress(run_id)
         statuses = run_persona_repository.get_statuses(run_id)
@@ -281,7 +291,7 @@ class RunOrchestrator:
             # done 은 진단까지 끝난 뒤에 쓴다 — Spring 은 done 회차의 진단만 보여 준다.
             # 진단을 못 만들면 done 으로 두지 않는다. 진단 0건이 '문제 없음'으로 보이기 때문이다.
             try:
-                self._save_findings(run_id, statuses)
+                await self._save_findings(run_id, statuses, snapshot)
             except Exception:
                 logger.exception("run=%s diagnosis failed", run_id)
                 run_repository.mark_failed(run_id, error="진단 실패")
@@ -291,12 +301,33 @@ class RunOrchestrator:
             run_repository.mark_done(run_id, success_rate=round(done / len(statuses) * 100, 2))
 
     @staticmethod
-    def _save_findings(run_id: int, statuses: dict[int, str]) -> None:
-        """Persona 별 step 로그로 회차의 진단을 만들어 findings 에 넣는다 (GACA-165)."""
+    async def _save_findings(run_id: int, statuses: dict[int, str], snapshot: RunSnapshot) -> None:
+        """Persona 별 step 로그로 회차의 진단을 만들고(GACA-165) 설명을 붙여(GACA-166)
+        findings 에 넣는다."""
         steps_by_persona = {
             persona_id: step_log_writer.read_steps(run_id, persona_id) for persona_id in statuses
         }
         findings = build_findings(steps_by_persona, statuses)
+        if findings:
+            names = {p["persona_id"]: p.get("name") for p in snapshot.personas}
+            diagnosed = sum(1 for steps in steps_by_persona.values() if steps)
+            llm = make_summary_llm()
+            # 유형별 설명은 서로 기다리지 않는다 — 회차당 최대 4번, 최악 약 40초.
+            results = await asyncio.gather(
+                *(
+                    summarize(
+                        llm,
+                        f,
+                        build_facts(
+                            f, steps_by_persona, snapshot.task.get("goal") or "", names, diagnosed
+                        ),
+                        run_id=run_id,
+                    )
+                    for f in findings
+                )
+            )
+            for finding, (summary, _source) in zip(findings, results, strict=True):
+                finding.summary = summary
         finding_repository.insert_all(run_id, findings)
         logger.info(
             "run=%s findings saved: %s",
