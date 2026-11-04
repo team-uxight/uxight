@@ -55,6 +55,27 @@ def test_groups_do_not_depend_on_order() -> None:
         assert {e["persona_id"] for e in row["evidence"]} == {1, 2, 3, 4}
 
 
+def test_groups_do_not_depend_on_order_with_two_shared_urls() -> None:
+    # 1 과 2 는 url 둘이, 2 와 3 도 url 둘이 겹친다. 1 과 3 은 하나만 겹치지만 2 로 이어진다.
+    items = [
+        diagnosis(evidence(1, A), evidence(1, B, 2)),
+        diagnosis(evidence(2, A), evidence(2, B, 2), evidence(2, C, 3)),
+        diagnosis(evidence(3, B), evidence(3, C, 2)),
+    ]
+
+    for order in itertools.permutations(items):
+        assert len(merge(list(order), min_shared_urls=2)) == 1
+
+
+def test_shared_urls_are_counted_as_pages() -> None:
+    # 조각만 다른 url 둘은 한 페이지다. 어느 쪽이 먼저 와도 겹치는 페이지는 하나다.
+    fragments = diagnosis(evidence(1, A + "#a"), evidence(1, A + "#b", 2))
+    plain = diagnosis(evidence(2, A))
+
+    assert len(merge([fragments, plain], min_shared_urls=2)) == 2
+    assert len(merge([plain, fragments], min_shared_urls=2)) == 2
+
+
 def test_min_shared_urls_is_a_setting() -> None:
     one = diagnosis(evidence(1, A), evidence(1, B, 2))
     two = diagnosis(evidence(2, A), evidence(2, C, 2))
@@ -78,6 +99,15 @@ def test_same_evidence_is_kept_once() -> None:
     (row,) = merge([diagnosis(same, same), diagnosis(same)])
 
     assert row["evidence"] == [same]
+
+
+def test_summary_counts_evidence_without_duplicates() -> None:
+    twice = diagnosis(evidence(1, A), evidence(1, A), summary="같은 근거 둘")
+    two = diagnosis(evidence(2, A), evidence(2, B, 2), summary="다른 근거 둘")
+
+    for order in ([twice, two], [two, twice]):
+        (row,) = merge(order)
+        assert row["summary"] == "다른 근거 둘"
 
 
 def test_rows_are_ordered_like_build_findings() -> None:

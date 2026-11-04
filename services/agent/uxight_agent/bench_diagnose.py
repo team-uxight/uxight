@@ -37,7 +37,7 @@ from .usage_report import load
 
 COLUMNS = (
     "진단", "거르기", "변형", "사이트", "회차", "진단 수", "재현율", "오탐", "배정", "다시 배정",
-    "진단 없이 마감", "버린 근거", "입력 토큰", "출력 토큰", "비용($)", "LLM 시간(s)",
+    "잘린 답", "진단 없이 마감", "버린 근거", "입력 토큰", "출력 토큰", "비용($)", "LLM 시간(s)",
     "걸린 시간(s)",
 )  # fmt: skip
 
@@ -152,8 +152,8 @@ def render_table(rows: list[dict]) -> str:
         cost = "—" if r["cost_usd"] is None else f"{r['cost_usd']:.4f}"
         cells = [
             r["mode"], r["filter"], r["variant"], r["site"], r["runs"], r["findings"],
-            r["recall"], r["false_positives"], r["assigned"], r["reassigned"], r["closed"],
-            r["dropped_evidence"],
+            r["recall"], r["false_positives"], r["assigned"], r["reassigned"], r["truncated"],
+            r["closed"], r["dropped_evidence"],
             f"{r['input_tokens']:,}", f"{r['output_tokens']:,}", cost,
             f"{r['llm_seconds']:.1f}", f"{r['seconds']:.1f}",
         ]  # fmt: skip
@@ -175,7 +175,8 @@ def render_summary(
             f"- 묶는 기준: 유형이 같고 근거 url 이 {args.min_shared_urls}개 이상 겹침",
             f"- 근거 수 기준: Persona {args.min_personas}명 이상",
             "- 칸: 재현율 · 오탐의 정의는 uxight_agent/bench_metrics.py. 배정은 다시 배정을 "
-            "포함한다. 진단 없이 마감은 Persona 수다. 토큰 · 비용 · 시간은 그 행 회차들의 합계이고 "
+            "포함한다. 잘린 답은 출력 한도에 걸려 끊긴 답 수다. 진단 없이 마감은 Persona 수다. "
+            "토큰 · 비용 · 시간은 그 행 회차들의 합계이고 "
             "거르기와 상관없이 같다. LLM 시간은 호출마다 걸린 시간의 합, 걸린 시간은 회차마다 "
             "처음부터 끝까지 잰 시간의 합이다.",
             "",
@@ -272,6 +273,7 @@ def _totals(done: list[RunDiagnosis], calls: list[dict]) -> dict:
     return {
         "assigned": sum(d.assigned for d in done),
         "reassigned": sum(d.reassigned for d in done),
+        "truncated": sum(d.truncated for d in done),
         "closed": sum(len(d.closed_personas) for d in done),
         "dropped_evidence": sum(d.dropped_evidence for d in done),
         "input_tokens": sum(c["input_tokens"] for c in calls),

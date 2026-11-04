@@ -261,6 +261,36 @@ def test_one_mode_can_run_alone_with_its_settings(
     assert table_row(md, "multi", "근거 수 3명", "seedA")
 
 
+def test_min_shared_urls_reaches_the_merge(
+    scripted_llm, config: Path, bench_dir: Path, tmp_path: Path
+) -> None:
+    counts = {}
+    for value in ("1", "0"):
+        llm, _ = scripted_llm(answer=agree)
+        out = tmp_path / f"out-{value}"
+        extra = ("--mode", "multi", "--min-shared-urls", value)
+        assert bench_diagnose.main(argv(config, bench_dir, out, *extra), llm=llm) == 0
+        md = (out / "summary.md").read_text(encoding="utf-8")
+        row = table_row(md, "multi", "합집합", "seedA")
+        counts[value] = dict(zip(bench_diagnose.COLUMNS, row, strict=True))["진단 수"]
+
+    # 1 이면 url 이 겹치는 것만 묶어 6건이고, 0 이면 유형만 봐서 4건이다.
+    assert counts == {"1": "6", "0": "4"}
+
+
+def test_truncated_replies_show_in_the_table(
+    scripted_llm, config: Path, bench_dir: Path, tmp_path: Path
+) -> None:
+    llm, _ = scripted_llm(answer=lambda body: ('{"rule_checks": [', "length"))
+    out = tmp_path / "out"
+
+    assert bench_diagnose.main(argv(config, bench_dir, out, "--mode", "single"), llm=llm) == 0
+
+    md = (out / "summary.md").read_text(encoding="utf-8")
+    row = dict(zip(bench_diagnose.COLUMNS, table_row(md, "single", "합집합", "seedA"), strict=True))
+    assert (row["잘린 답"], row["진단 없이 마감"]) == ("2", "4")
+
+
 def test_closed_personas_are_counted_per_persona(
     scripted_llm, config: Path, bench_dir: Path, tmp_path: Path
 ) -> None:

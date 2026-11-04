@@ -182,7 +182,7 @@ uv run python -m uxight_agent.bench_diagnose ../../config/bench-school.json \
 
 **결과** (`--out` 폴더)
 
-- `summary.md`: 진단 방식 × 거르기(합집합 · 근거 수) × 변형 × 사이트마다 한 행. 재현율 · 오탐 · 배정 수 · 진단 없이 마감한 Persona 수 · 토큰 · 비용 · 시간 합계
+- `summary.md`: 진단 방식 × 거르기(합집합 · 근거 수) × 변형 × 사이트마다 한 행. 재현율 · 오탐 · 배정 수 · 잘린 답 수 · 진단 없이 마감한 Persona 수 · 토큰 · 비용 · 시간 합계
 - `usage.jsonl`: LLM 사용량. 역할이 `diagnoser_single` · `diagnoser_multi` 라 `usage_report --log <파일> --by role` 로 나눠 본다
 - `<mode>/<run_id>/messages.jsonl`: 회차 기록(배정 · 보고). 못 쓰는 보고는 `content` 가 비고 `error` 칸에 이유가 있다
 - `<mode>/<run_id>/findings.json`: 합집합. `findings-filtered.json`: 거기에 근거 수 거르기를 건 것. 둘 다 findings 표 행의 JSON 배열이라 `bench_metrics.recall_counts` 에 그대로 넣는다
@@ -195,4 +195,8 @@ uv run python -m uxight_agent.bench_diagnose ../../config/bench-school.json \
 - 판정 안 함 Persona(실행 오류 · 취소 · 도달 기록이 모두 빔)는 진단자에 배정하지 않는다.
 - 스키마에 안 맞는 보고는 한 번 다시 배정한다. 또 틀리면 맡은 Persona 는 진단 없이 마감한다. 호출 실패 · 잘린 답도 같다.
 - 진단자가 새로 더한 진단의 근거는 로그와 대조한다. 없는 Persona · step 은 버리고, url 은 `step_from` 의 로그 값으로 쓴다.
+- 유형이 붙을 수 없는 Persona 의 근거도 버린다. 과제 실패는 한 번도 못 닿은 Persona 에만, 과도한 단계는 닿은 Persona 에만 붙는다.
 - 새로 더한 진단의 심각도는 `friction_rules.rule_severity` 가 근거 Persona 마다 매긴 값 가운데 가장 높은 값이다.
+- 진단자의 출력 한도는 2000토큰이다. MLAPI 프록시가 스트리밍 아닌 답을 2000 까지만 받아서다.
+  - 단일로 Persona 25명을 돌리면 보고가 이 한도를 넘을 수 있다. 잘린 답은 다시 배정되고, 또 잘리면 회차 전체가 진단 없이 마감된다.
+  - 단일이 내용이 아니라 한도 때문에 진 경우는 `summary.md` 의 잘린 답 칸으로 가려낸다.

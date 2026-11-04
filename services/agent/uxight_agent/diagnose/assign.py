@@ -16,7 +16,10 @@
   - 새로 더한 진단의 근거: 배정한 로그에 그 Persona · step 이 있는 것만 남긴다. url 은 보고 값을
     믿지 않고 step_from 의 로그 값을 쓴다 — 재현율은 이 url 로 맞힌다. 근거가 다 버려지면 진단도
     버린다.
-  - 새로 더한 진단의 심각도: 근거 Persona 마다 rule_severity 로 매겨 가장 높은 값을 쓴다.
+  - 유형이 붙을 수 없는 Persona 의 근거도 버린다. 과제 실패는 한 번도 못 닿은 Persona 에만(11/03
+    결정), 과도한 단계는 닿은 Persona 에만 붙는다.
+  - 새로 더한 진단의 심각도: 근거 Persona 마다 rule_severity 로 매겨 가장 높은 값을 쓴다. step 수는
+    규칙과 같은 셈(counted_steps)이다.
 """
 
 import asyncio
@@ -27,12 +30,13 @@ from pathlib import Path
 from typing import Literal
 
 from ..llm import LLMClient
-from ..watcher.friction_rules import is_unjudged, rule_severity
+from ..watcher.friction_rules import counted_steps, ever_reached, is_unjudged, rule_severity
 from .diagnoser import (
     BadReport,
     Evidence,
     Report,
     RuleFinding,
+    TruncatedReport,
     diagnose,
     read_jsonl,
     step_log_path,
@@ -88,6 +92,15 @@ class MessageLog:
         return message_id
 
 
+@dataclass(frozen=True)
+class AssignResult:
+    """배정 하나의 끝. 결과 없이 마감이면 report 가 None 이다."""
+
+    report: Report | None
+    assigned: int  # 배정 횟수
+    truncated: int  # 출력 한도에 걸려 잘린 답 수
+
+
 @dataclass
 class RunDiagnosis:
     """회차 하나의 진단 결과. findings 는 합집합이다. 근거 수 거르기는 keep_by_personas 로 건다."""
@@ -96,6 +109,7 @@ class RunDiagnosis:
     findings: list[dict]
     assigned: int  # 배정 수. 다시 배정도 센다
     reassigned: int
+    truncated: int  # 출력 한도에 걸려 잘린 답 수. 다시 배정의 답도 센다
     closed_personas: list[int | str]  # 진단 없이 마감한 Persona
     dropped_evidence: int  # 로그에 없어 버린 근거 수
     seconds: float
@@ -122,7 +136,7 @@ async def diagnose_run(
     messages = MessageLog(root / str(run_id) / "messages.jsonl", run_id)
     slots = asyncio.Semaphore(MAX_CONCURRENT_DIAGNOSERS)
 
-    async def one(persona_ids: list[int | str]) -> tuple[Report | None, int]:
+    async def one(persona_ids: list[int | str]) -> AssignResult:
         async with slots:
             return await _assign(llm, root, messages, run_id, mode, persona_ids, rules)
 
@@ -131,20 +145,21 @@ async def diagnose_run(
     diagnoses: list[Diagnosis] = []
     closed: list[int | str] = []
     dropped = 0
-    for persona_ids, (report, _) in zip(assignments, replies, strict=True):
-        if report is None:
+    for persona_ids, reply in zip(assignments, replies, strict=True):
+        if reply.report is None:
             closed += persona_ids
             continue
         own_logs = {p: logs[p] for p in persona_ids}
-        results, lost = _diagnoser_results(report, rules, own_logs, statuses)
+        results, lost = _diagnoser_results(reply.report, rules, own_logs, statuses)
         diagnoses += results
         dropped += lost
-    assigned = sum(tries for _, tries in replies)
+    assigned = sum(reply.assigned for reply in replies)
     return RunDiagnosis(
         rule_findings=rules,
         findings=merge(diagnoses, min_shared_urls),
         assigned=assigned,
         reassigned=assigned - len(assignments),
+        truncated=sum(reply.truncated for reply in replies),
         closed_personas=closed,
         dropped_evidence=dropped,
         seconds=time.monotonic() - started,
@@ -179,14 +194,15 @@ async def _assign(
     mode: Mode,
     persona_ids: list[int | str],
     rules: list[RuleFinding],
-) -> tuple[Report | None, int]:
-    """배정 하나를 끝낸다. (보고, 배정 횟수)를 돌려준다. 결과 없이 마감이면 보고가 None 이다."""
+) -> AssignResult:
+    """배정 하나를 끝낸다. 스키마에 안 맞는 보고는 한 번 다시 배정한다."""
     name = f"diagnoser-{persona_ids[0]}" if mode == "multi" else "diagnoser"
     mine = [r for r in rules if r.persona_id in persona_ids]
     step_logs = [step_log_path(run_id, p) for p in persona_ids]
     content = {"step_logs": step_logs, "rule_findings": [r.finding_id for r in mine]}
     persona_id = str(persona_ids[0]) if mode == "multi" else None
     bad_report = None
+    truncated = 0
     for tries in range(1, MAX_ASSIGNMENTS + 1):
         assign_id = messages.write("assign", "master", name, content, reply_to=bad_report)
         try:
@@ -194,14 +210,15 @@ async def _assign(
                 llm, root, run_id, f"diagnoser_{mode}", persona_id, step_logs, mine
             )
         except BadReport as e:
+            truncated += isinstance(e, TruncatedReport)
             bad_report = messages.write(
                 "report", name, "master", None, reply_to=assign_id, error=str(e)
             )
             continue
         body = report.model_dump(exclude_none=True)
         messages.write("report", name, "master", body, reply_to=assign_id)
-        return report, tries
-    return None, MAX_ASSIGNMENTS
+        return AssignResult(report, tries, truncated)
+    return AssignResult(None, MAX_ASSIGNMENTS, truncated)
 
 
 def _diagnoser_results(
@@ -215,11 +232,12 @@ def _diagnoser_results(
     results = []
     for check in report.rule_checks:
         if check.correct:
+            assert check.summary is not None  # 맞음이면 스키마가 요구한다
             rule = by_id[check.finding_id]
             results.append(Diagnosis(rule.taxonomy, rule.severity, check.summary, rule.evidence))
     dropped = 0
     for finding in report.findings:
-        claimed = [_in_log(e, logs) for e in finding.evidence]
+        claimed = [_in_log(e, finding.taxonomy, logs) for e in finding.evidence]
         evidence = [e for e in claimed if e is not None]
         dropped += len(claimed) - len(evidence)
         if evidence:
@@ -228,17 +246,25 @@ def _diagnoser_results(
     return results, dropped
 
 
-def _in_log(claimed: Evidence, logs: dict[int | str, list[dict]]) -> dict | None:
-    """보고의 근거를 로그와 대조한다. 없는 근거면 None 이다."""
+def _in_log(claimed: Evidence, taxonomy: str, logs: dict[int | str, list[dict]]) -> dict | None:
+    """보고의 근거를 로그와 대조한다. 없는 근거나 유형이 붙을 수 없는 Persona 면 None 이다."""
     # 모델이 7 을 "7" 로 보내도 같은 Persona 다.
     persona_id = next((p for p in logs if str(p) == str(claimed.persona_id)), None)
-    if persona_id is None:
+    if persona_id is None or not _fits_taxonomy(taxonomy, logs[persona_id]):
         return None
     urls = {s["step"]: s["url"] for s in logs[persona_id]}
     start, end = claimed.step_from, claimed.step_to
     if start not in urls or end not in urls or start > end:
         return None
     return {"persona_id": persona_id, "step_from": start, "step_to": end, "url": urls[start] or ""}
+
+
+def _fits_taxonomy(taxonomy: str, steps: list[dict]) -> bool:
+    if taxonomy == "task_failure":
+        return not ever_reached(steps)
+    if taxonomy == "excessive_steps":
+        return ever_reached(steps)
+    return True
 
 
 def _severity(
@@ -248,5 +274,9 @@ def _severity(
     statuses: dict[int | str, str],
 ) -> str:
     personas = {e["persona_id"] for e in evidence}
-    values = [rule_severity(taxonomy, len(logs[p]), statuses[p]) for p in personas]
+    # 못 닿은 Persona 의 step 수는 None 이지만 그때는 심각도가 step 수를 쓰지 않는다.
+    values = [
+        rule_severity(taxonomy, counted_steps(logs[p], statuses[p]) or 0, statuses[p])
+        for p in personas
+    ]
     return min(values, key=SEVERITY_RANK.__getitem__)
