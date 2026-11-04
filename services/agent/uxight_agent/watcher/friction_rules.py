@@ -17,6 +17,13 @@ FrictionType = Literal[
 
 Severity = Literal["high", "medium", "low", "none"]
 
+# Persona 결과 넷(11/03 결정) 중 '판정 안 함'. 실행 오류 · 취소는 사이트 문제가 아니다.
+# 끝난 이유를 모르면 결과를 정할 수 없어 같이 뺀다.
+UNJUDGED_STATUSES = frozenset({None, "fail", "cancelled"})
+# 못 닿고 끝났을 때 심각도를 높음으로 보는 상태. 상한까지 헤맸거나 같은 화면에서 막혔다.
+# done 은 사람이 봐야 하는 불일치, token_limit 은 토큰 상한이 끝낸 것이라 둘은 중간이다.
+HIGH_SEVERITY_ENDS = frozenset({"max_steps", "stuck", "timeout"})
+
 
 @dataclass(frozen=True)
 class FrictionResult:
@@ -26,6 +33,10 @@ class FrictionResult:
     severity: Severity
     steps: tuple[int, ...]
     reason: str
+
+
+def _url_reached(step: dict) -> bool | None:
+    return (step.get("task") or {}).get("url_reached")
 
 
 def detect_interaction_failure(steps: list[dict]) -> FrictionResult | None:
@@ -73,46 +84,29 @@ def detect_interaction_failure(steps: list[dict]) -> FrictionResult | None:
     return None
 
 
-def detect_task_failure(
-    steps: list[dict],
-    status: str | None = None,
-) -> FrictionResult | None:
-    """실행 종료 후 과제 실패 여부를 판정한다."""
-    if not steps:
+def detect_task_failure(steps: list[dict], status: str) -> FrictionResult | None:
+    """한 번도 목표에 못 닿은 Persona 를 과제 실패로 판정한다 (11/03 결정의 '실패').
+
+    붙일지는 닿았는지로 정하고, 끝난 이유(status)는 심각도와 사유에만 쓴다.
+    """
+    reached = [_url_reached(step) for step in steps]
+    if True in reached or False not in reached:
         return None
 
-    last = steps[-1]
-    last_step = last["step"]
-    reached = any((step.get("task") or {}).get("url_reached") is True for step in steps)
-    action_kind = (last.get("action") or {}).get("kind")
-
-    if status in {"fail", "max_steps"}:
-        error_code = (last.get("result") or {}).get("error_code")
-
-        if error_code == "PARSE_FAILED":
-            reason = "LLM 응답 파싱 오류로 과제 실행이 실패함 (웹사이트 UX 문제로 단정할 수 없음)"
-        else:
-            reason = f"과제 실행이 {status} 상태로 종료됨"
-
-        return FrictionResult(
-            type="task_failure",
-            severity="high",
-            steps=(last_step,),
-            reason=reason,
+    if status == "done":
+        reason = (
+            "에이전트는 완료를 선언했으나 목표 URL에 도달하지 못함 "
+            "(Agent 판단과 URL 판정 불일치, 사람 검토 필요)"
         )
+    else:
+        reason = f"목표 URL에 한 번도 닿지 못하고 {status} 상태로 종료됨"
 
-    if reached is False and (status == "done" or (status is None and action_kind == "done")):
-        return FrictionResult(
-            type="task_failure",
-            severity="medium",
-            steps=(last_step,),
-            reason=(
-                "에이전트는 완료를 선언했으나 목표 URL에 도달하지 못함 "
-                "(Agent 판단과 URL 보조 판정 불일치, 사람 검토 필요)"
-            ),
-        )
-
-    return None
+    return FrictionResult(
+        type="task_failure",
+        severity="high" if status in HIGH_SEVERITY_ENDS else "medium",
+        steps=(steps[-1]["step"],),
+        reason=reason,
+    )
 
 
 def detect_navigation_confusion(steps: list[dict]) -> FrictionResult | None:
@@ -152,37 +146,35 @@ def detect_navigation_confusion(steps: list[dict]) -> FrictionResult | None:
 
 def detect_excessive_steps(
     steps: list[dict],
-    status: str | None = None,
+    status: str,
     threshold: int = 10,
 ) -> FrictionResult | None:
-    """목표 URL에 처음 도달하기까지 사용한 단계 수를 기준으로 판정한다."""
-    if not steps or status in {"fail", "max_steps", "timeout", "cancelled"}:
+    """목표에 처음 닿기까지의 단계 수로 판정한다.
+
+    어렵게 성공(닿았지만 done 으로 끝내지 못함)이면 처음 닿은 뒤의 step 이 근거다 (11/03 결정).
+    닿고도 더 움직인 step 은 기준과 상관없이 과도한 단계다.
+    """
+    first = next((i for i, step in enumerate(steps) if _url_reached(step) is True), None)
+    if first is None:
         return None
 
-    first_reached_index = next(
-        (
-            index
-            for index, step in enumerate(steps)
-            if (step.get("task") or {}).get("url_reached") is True
-        ),
-        None,
-    )
-
-    if first_reached_index is None:
+    extra = steps[first + 1 :] if status != "done" else []
+    step_count = first + 1 + len(extra)
+    if not extra and step_count <= threshold:
         return None
 
-    step_count = first_reached_index + 1
-    if step_count <= threshold:
-        return None
-
-    severity: Severity = "medium" if step_count >= 16 else "low"
-    reached_step = steps[first_reached_index]["step"]
+    if extra:
+        evidence = tuple(step["step"] for step in extra)
+        reason = f"목표에 처음 닿은 뒤 {len(extra)}단계를 더 쓰고 {status} 상태로 종료됨"
+    else:
+        evidence = (steps[first]["step"],)
+        reason = f"목표 최초 도달까지 {step_count}단계 사용 (기준: {threshold}단계)"
 
     return FrictionResult(
         type="excessive_steps",
-        severity=severity,
-        steps=(reached_step,),
-        reason=f"목표 최초 도달까지 {step_count}단계 사용 (기준: {threshold}단계)",
+        severity="medium" if step_count >= 16 else "low",
+        steps=evidence,
+        reason=reason,
     )
 
 
@@ -191,7 +183,13 @@ def detect_frictions(
     status: str | None = None,
     excessive_steps_threshold: int = 10,
 ) -> list[FrictionResult]:
-    """행동 로그에서 모든 Friction을 탐지하고 심각도순으로 반환한다."""
+    """행동 로그에서 모든 Friction을 탐지하고 심각도순으로 반환한다.
+
+    판정 안 함(실행 오류 · 취소 · 도달 기록이 모두 비어 있음)이면 Friction 을 만들지 않는다.
+    """
+    if status in UNJUDGED_STATUSES or all(_url_reached(step) is None for step in steps):
+        return []
+
     results = [
         detect_navigation_confusion(steps),
         detect_interaction_failure(steps),

@@ -189,7 +189,7 @@ def fake_driver_class(browsers: Browsers) -> type[Driver]:
             return Observation(url="https://example.com", title="t", dom="")
 
         async def act(self, action: Action) -> ActionResult:
-            return ActionResult(ok=True)
+            return ActionResult(ok=True, url_after="https://example.com")
 
         async def close(self) -> None:
             browsers.closed += 1
@@ -1690,8 +1690,11 @@ def test_watcher_decider_marks_page_instructions(
 
 def test_done_run_saves_findings_from_step_logs(fakes: SimpleNamespace) -> None:
     # 회차가 끝나면 실제로 쓴 step 로그를 읽어 진단을 만들고 저장한 뒤 done 으로 끝낸다 (GACA-165).
-    # scroll 만 내다 step 상한에 닿은 Persona 는 과제 실패(high)다 (friction_rules).
-    asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)], max_steps=2)))
+    # scroll 만 내다 못 닿고 step 상한에 닿은 Persona 는 과제 실패(high)다 (friction_rules).
+    snap = snapshot([persona(1)], max_steps=2)
+    snap.task["success_url"] = "https://example.com/goal"
+
+    asyncio.run(run(fakes, RUN_ID, snap))
 
     assert fakes.personas.statuses[1] == "max_steps"
     assert fakes.runs.status == "done"
