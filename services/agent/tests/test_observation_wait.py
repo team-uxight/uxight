@@ -3,6 +3,7 @@
 LLM 없이 tests/fixtures 페이지를 Playwright 로 띄워 DomDriver · SomDriver 관측을 본다.
 - late_fetch.html: 글 · 링크를 fetch 로 받아 넣는다. 응답은 ?wait= 밀리초 뒤에 온다.
 - late_fade.html: 결함 사본의 미끼(DST-ANIM)처럼 글 블록이 0.5초 동안 나타난다.
+- debounce.html: 입력하고 0.3초 뒤에 찾는 검색. 결과는 fetch 로 받는다 (GACA-230).
 """
 
 import asyncio
@@ -10,7 +11,7 @@ import time
 from pathlib import Path
 
 from uxight_agent.driver.base import Observation
-from uxight_agent.driver.dom_driver import STILL_WAIT_MS, DomDriver
+from uxight_agent.driver.dom_driver import STILL_WAIT_MS, TYPE_SETTLE_MS, DomDriver
 from uxight_agent.driver.som_driver import SomDriver
 from uxight_agent.schemas import Action
 
@@ -119,3 +120,60 @@ def test_decorative_animation_not_waited_in_dom_mode() -> None:
 
     assert observation.element_map
     assert elapsed < STILL_WAIT_MS / 1000
+
+
+def type_then_observe(url: str, driver_class: type[DomDriver]) -> tuple[Observation, float]:
+    """검색칸에 입력한 뒤 관측한다. 입력에 걸린 시간(초)도 돌려준다."""
+
+    async def run() -> tuple[Observation, float]:
+        async with driver_class() as driver:
+            await driver.start(url)
+            first = await driver.observe()
+            box = next(i for i, item in first.element_map.items() if item["tag"] == "input")
+            started = time.monotonic()
+            result = await driver.act(Action(kind="type", element_id=box, value="장학"))
+            elapsed = time.monotonic() - started
+            assert result.ok, result.error
+            return await driver.observe(), elapsed
+
+    return asyncio.run(run())
+
+
+def test_search_result_after_type_enters_first_observation(fixture_server) -> None:
+    observation, elapsed = type_then_observe(f"{fixture_server}/debounce.html", DomDriver)
+
+    assert LATE_TEXT in observation.text
+    assert elapsed >= TYPE_SETTLE_MS / 1000
+
+
+def test_som_waits_after_type_too(fixture_server) -> None:
+    observation, _ = type_then_observe(f"{fixture_server}/debounce.html", SomDriver)
+
+    assert LATE_TEXT in observation.text
+
+
+def test_other_actions_do_not_wait_like_type(fixture_server) -> None:
+    async def run() -> list[float]:
+        async with DomDriver() as driver:
+            await driver.start(f"{fixture_server}/debounce.html")
+            first = await driver.observe()
+            button = next(i for i, item in first.element_map.items() if item["text"] == "지우기")
+            times = []
+            for action in (
+                Action(kind="scroll", value="down"),
+                Action(kind="click", element_id=button),
+            ):
+                started = time.monotonic()
+                await driver.act(action)
+                times.append(time.monotonic() - started)
+            return times
+
+    assert all(elapsed < TYPE_SETTLE_MS / 1000 for elapsed in asyncio.run(run()))
+
+
+def test_window_opened_by_timer_after_type_not_followed(fixture_server) -> None:
+    # 입력 0.3초 뒤 타이머가 연 창은 행동이 연 창이 아니다. 입력한 페이지를 잃지 않는다.
+    url = f"{fixture_server}/debounce.html?popup=1"
+    observation, _ = type_then_observe(url, DomDriver)
+
+    assert observation.url == url
