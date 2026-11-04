@@ -33,7 +33,8 @@ from ..llm import LLMClient
 from .findings import TAXONOMIES
 
 # 추론 모델은 생각 토큰도 이 한도에 든다 — 너무 작으면 답이 잘린다 (AGENTS.md).
-MAX_TOKENS = 8000
+# MLAPI 프록시가 스트리밍 아닌 답의 한도를 2000 까지만 받는다. 넘기면 400 이다.
+MAX_TOKENS = 2000
 # 호출 하나의 상한(초). 프록시의 긴 호출은 끊길 수 있어 한 호출 2분 안으로 잡는다 (tech-stack T19).
 TIMEOUT_SECONDS = 120
 MAX_RETRIES = 1
