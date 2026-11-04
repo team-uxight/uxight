@@ -2853,7 +2853,7 @@ components:
           $ref: "#/components/schemas/Taxonomy"
         severity:
           type: string
-          description: 심각도. 값과 산정 기준은 미정이다(GACA-68).
+          description: 심각도. high · medium · low 중 하나다. 회차 × 유형마다 한 건이며, 그 유형에 걸린 Persona 가운데 가장 높은 값이다(GACA-68 판정 규칙).
         summary:
           type: [string, "null"]
           description: 진단 요약
@@ -2923,7 +2923,7 @@ components:
           $ref: "#/components/schemas/Taxonomy"
         severity:
           type: string
-          description: 심각도. 값과 산정 기준은 미정이다(GACA-68).
+          description: 심각도. high · medium · low 중 하나다. 회차 × 유형마다 한 건이며, 그 유형에 걸린 Persona 가운데 가장 높은 값이다(GACA-68 판정 규칙).
         summary:
           type: [string, "null"]
           description: 진단 요약
