@@ -6,6 +6,8 @@ import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasItems;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.not;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -13,6 +15,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jayway.jsonpath.JsonPath;
+import com.uxight.api.domain.task.SuccessRuleClient;
 import com.uxight.api.domain.user.JwtProvider;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
@@ -27,6 +30,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
@@ -64,6 +68,10 @@ class PersonaControllerTest {
   @Autowired
   private EntityManager entityManager;
 
+  // 실험 요청 테스트가 AI 모듈(POST /success-rules)을 부르지 않게 한다
+  @MockitoBean
+  private SuccessRuleClient successRuleClient;
+
   private Long userId;
   private String bearer;
 
@@ -71,6 +79,7 @@ class PersonaControllerTest {
   void setUp() {
     userId = insertUser("persona-owner@uxight.com");
     bearer = "Bearer " + jwtProvider.createAccessToken(userId);
+    when(successRuleClient.createSuccessRule(anyString(), anyString(), anyString())).thenReturn("구매 완료 화면에 도달한다.");
   }
 
   @Test
