@@ -157,15 +157,15 @@ def test_pointer_cells_get_element_numbers() -> None:
     assert '[5] <td> "26학번 (별표32)"' in obs.dom.splitlines()
     # 빠지는 것: 안에 번호 요소가 있는 칸(KOR 버튼) · 번호가 붙은 입력칸의 라벨 · 링크 안 글 ·
     # 글이 100자보다 긴 상자 · 글 없이 aria-label 만 있는 칸 · 숨기거나 투명한 칸.
-    # 칸은 보여도 글이 안 보이는 칸(투명한 글자색 · overflow 로 잘림 · text-indent ·
-    # clip-path)도 빠진다. 글은 본문 글과 같은 기준으로 본다.
+    # 칸은 보여도 글이 안 보이는 칸(투명한 글자색 · overflow 로 잘림 · 작은 스크롤 상자 ·
+    # text-indent · clip-path)도 빠진다. 글은 본문 글과 같은 기준으로 본다.
     assert len(obs.element_map) == 8
     # 번호가 붙은 칸의 글은 요소 줄에만 있다.
     # 번호를 붙이지 않은 큰 상자 · 라벨의 글은 본문에 남는다. 안 보이는 글은 본문에도 없다.
     assert "26학번" not in obs.text
     assert "긴 글 칸." in obs.text
     assert "약관 동의" in obs.text
-    for hidden in ("글자색이 투명한", "잘려서", "밀어낸", "clip-path"):
+    for hidden in ("글자색이 투명한", "잘려서", "스크롤 상자에", "밀어낸", "clip-path"):
         assert hidden not in obs.dom + obs.text
 
 
@@ -183,8 +183,9 @@ def test_hidden_text_stays_out_of_body() -> None:
 
     # 숨은 글과 textarea 입력값은 본문에 없다. 숨은 글: display · visibility · 투명 · 작은 글자 ·
     # 화면 밖 · 접힌 details · template · noscript · script · text-indent · 글자색 투명 ·
-    # 높이 0 상자 · 캐러셀의 다른 슬라이드 · canvas 대체 글 · filter 투명 · 화면 아래 고정.
-    assert obs.text.splitlines() == ["보이는 글", "더보기", "첫 슬라이드"]
+    # 높이 0 상자 · 캐러셀의 다른 슬라이드 · canvas 대체 글 · filter 투명 · 화면 아래 고정 ·
+    # 높이나 너비가 2px 인 상자 · 스크롤 상자에서 지금 안 보이는 부분(GACA-228).
+    assert obs.text.splitlines() == ["보이는 글", "더보기", "첫 슬라이드", "상자 첫 줄", "."]
     # 요소 줄: 화면 아래에 고정한 링크는 빠지고, filter 로 투명하게 한 링크는 글만 빠진다.
     assert obs.dom == '[1] <a href="#filter"> ""'
 

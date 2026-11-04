@@ -339,7 +339,7 @@ _COLLECT_ELEMENTS_JS = """
   //   거의 다 링크라 이것으로 빠진다. textarea 글은 입력값이라 뺀다.
   // - 보이는지는 요소 글보다 까다롭게 본다. 아래를 모두 지켜야 한다.
   //   1) 감싼 요소가 보인다(visibilityOf).
-  //   2) 글 조각의 사각형(Range)이 화면 안이고, overflow hidden · clip 조상의 상자와 겹친다.
+  //   2) 글 조각의 사각형(Range)이 화면 안이고, 글을 자르는 조상의 상자와 읽을 만큼 겹친다.
   //   3) 글자색이 투명하지 않다.
   //   그래서 text-indent 로 밀어낸 글 · 접힌 상자 · 캐러셀의 다른 슬라이드 · canvas 대체 글이
   //   빠진다. 요소 줄은 이 기준을 쓰지 않는다 — text-indent 로 숨긴 아이콘 버튼 이름
@@ -369,8 +369,9 @@ _COLLECT_ELEMENTS_JS = """
   };
   // 글 조각을 감싼 요소마다 한 번만 잰다 — 같은 요소 안의 글 조각마다 조상을 다시 오르지 않게.
   // - shown: 보이는가
-  // - clips: 글을 자르는 overflow hidden · clip 조상의 상자와 clip-path: inset() 이 남기는 상자
-  //   (GACA-225). inset(50%) 처럼 다 가리면 빈 상자다. 다른 모양(polygon 등)은 보지 않는다.
+  // - clips: 글을 자르는 조상의 상자와 clip-path: inset() 이 남기는 상자 (GACA-225).
+  //   overflow 가 hidden · clip 이면 잘리고, auto · scroll 이면 상자 안에서 지금 보이는 부분만
+  //   보인다 (GACA-228). inset(50%) 처럼 다 가리면 빈 상자다. 다른 모양(polygon 등)은 보지 않는다.
   // - block · cell: 줄 나눔용
   const boxes = new Map();
   const boxOf = (node) => {
@@ -383,7 +384,7 @@ _COLLECT_ELEMENTS_JS = """
     const clips = [];
     for (let up = el; up && up !== document.body; up = up.parentElement) {
       const upStyle = getComputedStyle(up);
-      if (/hidden|clip/.test(`${upStyle.overflowX} ${upStyle.overflowY}`)) {
+      if (/hidden|clip|auto|scroll/.test(`${upStyle.overflowX} ${upStyle.overflowY}`)) {
         clips.push(up.getBoundingClientRect());
       }
       if (upStyle.clipPath.startsWith('inset(')) clips.push(insetBox(up, upStyle.clipPath));
@@ -402,9 +403,14 @@ _COLLECT_ELEMENTS_JS = """
   };
   const inView = (r) => r.width > 0 && r.height > 0
     && r.top < innerHeight && r.bottom > 0 && r.left < innerWidth && r.right > 0;
-  // 겹친 넓이가 있어야 겹친다 — 빈 상자(다 가린 clip-path)와는 겹치지 않는다.
-  const overlaps = (r, clip) => Math.min(r.right, clip.right) > Math.max(r.left, clip.left)
-    && Math.min(r.bottom, clip.bottom) > Math.max(r.top, clip.top);
+  // 읽을 만큼 겹쳐야 겹친다. 겹친 길이가 가장 작은 글자 크기보다 작으면 사람이 읽을 수 없다 — 높이
+  // 2px 상자는 글 윗부분이 조금 걸려도 못 읽는다. 그보다 짧은 글 조각('.')은 다 겹치면 된다.
+  // 겹친 길이가 없으면 빠진다(빈 상자 · 다 가린 clip-path).
+  const readable = (length, size) => length > 0 && length >= Math.min(size, minFontSizePx);
+  const overlaps = (r, clip) => readable(
+    Math.min(r.right, clip.right) - Math.max(r.left, clip.left),
+    r.width,
+  ) && readable(Math.min(r.bottom, clip.bottom) - Math.max(r.top, clip.top), r.height);
 
   // 클릭이 걸린 칸 (GACA-225): 링크 · 버튼 · 입력칸이 아닌데 손가락 커서(cursor: pointer)인 요소.
   // 사이트 스크립트가 클릭을 받는다 — 학교 사본 졸업 페이지의 학번 칸은 누르면 새 창을 연다.
