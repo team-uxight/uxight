@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>앱 화면 틀</title>
+</head>
+<body style="margin: 0">
+  <!-- 화면을 덮는 고정 위치 틀 안에 메뉴가 있고, 그 위에 본문 상자가 형제로 뜬다.
+       틀 안에 보이는 것이 있어 dim 이 아니다 (GACA-229) -->
+  <div style="height: 100vh">틀 뒤 글</div>
+  <div style="position: fixed; inset: 0; background: #eee">
+    <nav style="position: absolute; left: 12%; top: 0"><a href="menu.html">틀 메뉴</a></nav>
+  </div>
+  <main style="position: fixed; left: 25%; top: 25%; width: 50%; height: 50%; background: #fff">
+    <p>본문 상자 글</p>
+    <a href="next.html">본문 상자 링크</a>
+  </main>
+</body>
+</html>

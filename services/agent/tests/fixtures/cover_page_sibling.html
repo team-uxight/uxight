@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>페이지 안 팝업</title>
+</head>
+<body style="margin: 0">
+  <!-- dim 의 형제는 페이지 전체를 싼 상자이고, 팝업은 그 안에 있다. 형제가 화면을 다 덮어
+       팝업이 아니므로 모달로 보지 않는다 (GACA-229) -->
+  <div style="position: relative; min-height: 100vh">
+    <a href="page.html">페이지 링크</a>
+    <div style="position: fixed; left: 30%; top: 30%; width: 40%; background: #fff; z-index: 101">
+      <p>안쪽 팝업 글</p>
+    </div>
+  </div>
+  <a href="foot.html">바닥 링크</a>
+  <div style="position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); z-index: 100"></div>
+</body>
+</html>

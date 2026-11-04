@@ -4,10 +4,15 @@ LLM 없이 tests/fixtures 페이지를 Playwright 로 띄워 DomDriver 관측을
 - modal_layer.html: 결함 사본의 '필수 정보가 모달 뒤'(INT-H)와 같은 마크업. 표가 40줄이다.
 - som_dialog.html: 브라우저 모달 dialog(showModal).
 - popup_corner.html: 화면 일부만 가리는 공지 팝업 (모달이 아님).
+- sibling_dim.html: 화면을 덮는 dim 과 그 위 팝업이 형제인 레이어 팝업 (GACA-229).
+- cover_background.html · cover_shell.html · cover_page_sibling.html: 모양은 비슷하지만
+  레이어 팝업으로 보지 않는 페이지.
 """
 
 import asyncio
 from pathlib import Path
+
+import pytest
 
 from uxight_agent.driver.base import Observation
 from uxight_agent.driver.dom_driver import DomDriver
@@ -122,3 +127,49 @@ def test_scroll_moves_box_under_screen_center() -> None:
     assert "본문 1번째 문단" in before.text
     assert "본문 1번째 문단" not in after.text
     assert "메뉴 1" in texts(after)  # 메뉴는 그대로
+
+
+@pytest.mark.parametrize(
+    ("opener", "popup_text", "elements"),
+    [
+        ("바로 열기", "팝업 글", ["자세히 보기", "닫기"]),
+        ("묶음 열기", "묶음 팝업 글", ["닫기"]),
+        ("긴 dim 열기", "긴 dim 팝업 글", ["닫기"]),
+    ],
+)
+def test_popup_beside_dim_limits_observation(
+    opener: str, popup_text: str, elements: list[str]
+) -> None:
+    closed, opened = observe_steps((FIXTURES / "sibling_dim.html").as_uri(), opener)
+
+    assert {"홈", "학사일정", opener} <= set(texts(closed))
+    # dim 이 뒤를 덮어 사람은 팝업만 누른다. 형제 팝업 안 요소 · 글만 남는다.
+    assert texts(opened) == elements
+    assert popup_text in opened.text
+    assert "뒤 본문 글" not in opened.text
+
+
+def test_background_returns_after_popup_beside_dim_closed() -> None:
+    url = (FIXTURES / "sibling_dim.html").as_uri()
+    _, _, closed = observe_steps(url, "바로 열기", "닫기")
+
+    assert "홈" in texts(closed)
+    assert "뒤 본문 글" in closed.text
+
+
+def test_background_behind_content_is_not_modal() -> None:
+    [observation] = observe_steps((FIXTURES / "cover_background.html").as_uri())
+
+    assert texts(observation) == ["머리 링크", "가운데 링크"]
+
+
+def test_shell_with_menu_is_not_dim() -> None:
+    [observation] = observe_steps((FIXTURES / "cover_shell.html").as_uri())
+
+    assert texts(observation) == ["틀 메뉴", "본문 상자 링크"]
+
+
+def test_page_wrapper_beside_dim_is_not_popup() -> None:
+    [observation] = observe_steps((FIXTURES / "cover_page_sibling.html").as_uri())
+
+    assert texts(observation) == ["페이지 링크", "바닥 링크"]
