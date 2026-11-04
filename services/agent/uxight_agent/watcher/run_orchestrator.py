@@ -15,6 +15,7 @@ from ..repositories.audit_log_repository import audit_log_repository
 from ..repositories.run_persona_repository import PersonaOutcome, run_persona_repository
 from ..repositories.run_repository import RunSnapshot, run_repository
 from ..usage_report import PriceTable, price_table
+from .persona_diagnosis import diagnose_persona
 from .step_log_writer import step_log_writer
 from .step_rules import (
     BLOCK_REASONS,
@@ -329,6 +330,24 @@ class RunOrchestrator:
 
         # 종료 처리는 이 한 곳에서만 한다. 페르소나 상태를 확정한 뒤 런의 progress를 갱신한다.
         run_persona_repository.mark_finished(run_id, persona_id, outcome)
+
+        try:
+            steps = step_log_writer.read_steps(run_id, persona_id)
+            if steps:
+                diagnosis = diagnose_persona(steps, status=outcome)
+                logger.info(
+                    "run=%s persona=%s UX 진단 결과: %s",
+                    run_id,
+                    persona_id,
+                    diagnosis,
+                )
+        except Exception:
+            logger.exception(
+                "run=%s persona=%s UX 진단 실패",
+                run_id,
+                persona_id,
+            )
+
         self._refresh_progress(run_id)
 
     @contextlib.asynccontextmanager
