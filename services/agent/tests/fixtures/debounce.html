@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>입력 뒤 검색</title>
+</head>
+<body>
+  <h1>공지 찾기</h1>
+  <input name="q" placeholder="검색어">
+  <button onclick="document.getElementById('results').textContent = ''">지우기</button>
+  <div id="results"></div>
+  <!-- 입력이 멎고 0.3초 뒤에 찾는다(디바운스). 응답은 그 뒤 0.4초가 더 걸린다 (GACA-230) -->
+  <script>
+    let timer;
+    document.querySelector('input').addEventListener('input', () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        fetch('late_fetch.json?delay=400').then((r) => r.json()).then((d) => {
+          document.getElementById('results').innerHTML = `<p>${d.text}</p>`;
+        });
+      }, 300);
+    });
+  </script>
+</body>
+</html>

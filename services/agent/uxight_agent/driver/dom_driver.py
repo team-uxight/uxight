@@ -67,6 +67,9 @@ SCREENSHOT_TIMEOUT_MS = 5_000
 STILL_WAIT_MS = 1_500
 # 기다리는 사이 페이지 요청이 끝났는지 보는 간격.
 REQUEST_POLL_MS = 50
+# type 행동 뒤에 더 기다리는 시간 (GACA-230). 입력하고 0.3초쯤 뒤에 찾는 검색(디바운스)은 type 직후
+# 아직 요청을 시작하지 않았다. 사람도 입력하고 잠깐 결과를 본다. 다른 행동 뒤에는 기다리지 않는다.
+TYPE_SETTLE_MS = 500
 # 끝나기를 기다릴 요청. 페이지 스크립트가 글을 받아 오는 요청이다.
 # 이미지 · 글꼴 같은 다른 요청은 기다리지 않는다.
 WAITED_REQUEST_TYPES = frozenset({"fetch", "xhr"})
@@ -1143,6 +1146,8 @@ class DomDriver(Driver):
             await handle.click(timeout=ACTION_TIMEOUT_MS)
         else:
             await handle.fill(action.value, timeout=ACTION_TIMEOUT_MS)
+            # 이 사이 시작한 요청은 관측 전 기다림(_wait_still)이 마저 기다린다.
+            await asyncio.sleep(TYPE_SETTLE_MS / 1000)
         return ActionResult(ok=True)
 
     def _require_page(self) -> Page:
