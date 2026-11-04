@@ -30,9 +30,9 @@ Persona Agent의 행동 로그(`steps.jsonl`)에서 사용성 문제의 신호�
 | 결과 | 조건 | Friction |
 | --- | --- | --- |
 | 성공 | 닿음, `done` 으로 끝남 | 과제 실패 없음 |
-| 어렵게 성공 | 닿음, `max_steps` · `stuck` · `timeout` · `token_limit` 으로 끝남 | 과제 실패 없음. 처음 닿은 뒤 step 이 과도한 단계의 근거다. 길 찾기 혼란은 전체 step 을 본다 |
+| 어렵게 성공 | 닿음, `max_steps` · `stuck` · `timeout` · `token_limit` 으로 끝남 | 과제 실패 없음. 처음 닿은 뒤 step 이 과도한 단계의 근거다. 길 찾기 혼란은 처음 닿은 뒤 step 도 세고, 닿기 전 step 과 함께 근거로 쓴다 |
 | 실패 | 한 번도 못 닿음 | 과제 실패 |
-| 판정 안 함 | `fail` · `cancelled` 로 끝남, 또는 도달 기록이 모두 비어 있음 | Friction 없음 |
+| 판정 안 함 | `fail` · `cancelled` 로 끝남, 도달 기록이 모두 비어 있음, 또는 끝난 이유를 모름 | Friction 없음 |
 
 ### 판정 세부 원칙
 
@@ -41,7 +41,7 @@ Persona Agent의 행동 로그(`steps.jsonl`)에서 사용성 문제의 신호�
 - `PARSE_FAILED`, `DOMAIN_BLOCKED`는 브라우저 조작 실패 코드로 분류하지 않는다.
 - 과제 실패를 붙일지는 닿았는지로 정하고, 끝난 이유는 심각도와 사유에만 쓴다.
 - `fail`은 Agent 또는 LLM 오류가 원인일 수 있으므로 Friction을 만들지 않는다.
-- Agent의 `done`과 URL 미도달이 충돌하면 확정적인 실패가 아닌 **판정 불일치 신호**로 보고 사람의 검토가 필요하다고 표시한다.
+- Agent의 `done`과 URL 미도달이 충돌하면 결과는 실패지만 UX 결함으로 단정하지 않고, **판정 불일치 신호**로 사람의 검토가 필요하다고 표시한다.
 - `url_reached=None`은 URL 성공 조건이 설정되지 않았거나 판정할 수 없는 상태이므로 `False`와 구분한다.
 - `excessive_steps`는 URL 도달이 `True`인 실행만 판정한다.
 - 여러 Friction이 발견되면 High → Medium → Low 순으로 반환한다. 심각도가 같으면 탐지 함수의 원래 순서를 유지한다.
@@ -51,9 +51,9 @@ Persona Agent의 행동 로그(`steps.jsonl`)에서 사용성 문제의 신호�
 
 | 심각도 | 의미 | 현재 적용 사례 |
 | --- | --- | --- |
-| High | 목표에 못 닿고 상한이나 같은 화면 반복으로 끝남 | `max_steps`, `stuck`, `timeout` |
-| Medium | 반복 탐색·조작 실패·완료 판정 불일치 또는 매우 긴 경로 | 탐색 혼란, 조작 실패, 판정 불일치, 못 닿은 `token_limit`, 16단계 이상 |
-| Low | 성공했으나 기준보다 많은 단계 사용 | 11~15단계 |
+| High | 목표에 못 닿고 step · 시간 상한이나 같은 화면 반복으로 끝남 | `max_steps`, `stuck`, `timeout` |
+| Medium | 반복 탐색·조작 실패·완료 판정 불일치 또는 매우 긴 경로 | 탐색 혼란, 조작 실패, 판정 불일치, 못 닿은 `token_limit`(토큰 상한이 끝낸 것이라 사이트 탓으로 단정하지 않는다), 16단계 이상 |
+| Low | 성공했으나 기준보다 많은 단계 사용, 또는 닿은 뒤 끝내지 못함 | 11~15단계, 어렵게 성공의 15단계 이하 |
 | None | 탐지된 Friction 없음 | 정상 완료 등 |
 
 위 기준과 임계값은 GACA-68의 초기 규칙이며, 실제 사용자 데이터에 따라 조정할 수 있다.
@@ -72,7 +72,7 @@ Persona Agent의 행동 로그(`steps.jsonl`)에서 사용성 문제의 신호�
 
 ### 주요 근거
 
-- Persona 2: 뒤로 가기 4회, 이전 페이지 재방문 4회, 목표 도달까지 12단계 사용.
+- Persona 2: 뒤로 가기 4회, 이전 페이지 재방문 4회, 목표 최초 도달까지 11단계 사용.
 - Persona 3: `ELEMENT_NOT_INTERACTABLE` 오류 발생. Agent는 완료를 선언했으나 목표 URL에는 도달하지 못함.
 - Persona 4: 최대 단계에 도달하여 종료. 뒤로 가기와 재방문이 반복되고 `ELEMENT_NOT_FOUND` 오류가 발생함.
 - Persona 5: `PARSE_FAILED`로 실행 실패. 웹사이트 자체의 UX 문제라고 단정할 수 없어 판정하지 않음.
@@ -91,6 +91,6 @@ URL이 변하지 않는 화면 전환이나 페이지 내부 작업은 URL만으
 
 `uv run pytest tests/test_friction_rules.py -v`
 
-- 결과: **44 passed**
+- 결과: **45 passed**
 - 검증: 샘플 Persona 5개, Persona 결과 넷, 탐색 혼란, 반복 클릭, 브라우저 오류, 오탐 방지, 과도한 단계 경계값
 - 남은 연동: LLM 보조 판정

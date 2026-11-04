@@ -1707,11 +1707,52 @@ def test_done_run_saves_findings_from_step_logs(fakes: SimpleNamespace) -> None:
     assert findings[0].summary is None  # 설명은 GACA-166 이 채운다
 
 
+class FirstStepDoneDecider(Decider):
+    """첫 step 에서 done 을 낸다."""
+
+    async def decide(self, persona, task, observation, history) -> Decision:
+        return Decision(Action(kind="done"))
+
+
+@pytest.mark.parametrize(
+    ("success_url", "ends_with_done", "status", "reached", "success_rate"),
+    [
+        ("https://example.com", True, "done", True, 100.0),
+        ("https://example.com", False, "max_steps", True, 0.0),
+        ("https://example.com/goal", True, "done", False, 0.0),
+    ],
+    ids=["성공", "어렵게-성공", "실패"],
+)
+def test_real_step_log_decides_reach_and_success_rate(
+    fakes: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    success_url: str,
+    ends_with_done: bool,
+    status: str,
+    reached: bool,
+    success_rate: float,
+) -> None:
+    # 실제 step 로그에서 도달 여부를 모아 Persona 칸에 넣고, 그 칸으로 성공률을 센다 (11/03 결정).
+    if ends_with_done:
+        use_decider(monkeypatch, FirstStepDoneDecider())
+    snap = snapshot([persona(1)], max_steps=2)
+    snap.task["success_url"] = success_url
+
+    asyncio.run(run(fakes, RUN_ID, snap))
+
+    assert fakes.personas.statuses[1] == status
+    assert fakes.personas.url_reached[1] is reached
+    assert fakes.runs.status == "done"
+    assert fakes.runs.success_rate == success_rate
+
+
 def test_diagnosis_error_fails_run(fakes: SimpleNamespace) -> None:
     # 진단을 저장하지 못하면 done 으로 두지 않는다 — 진단 0건이 '문제 없음'으로 보이기 때문이다.
     fakes.findings.fail = True
+    snap = snapshot([persona(1)], max_steps=2)
+    snap.task["success_url"] = "https://example.com/goal"
 
-    asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)], max_steps=2)))
+    asyncio.run(run(fakes, RUN_ID, snap))
 
     assert fakes.personas.statuses[1] == "max_steps"
     assert fakes.runs.status == "failed"

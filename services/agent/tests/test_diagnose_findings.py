@@ -83,9 +83,9 @@ def test_evidence_merges_consecutive_steps_into_ranges() -> None:
 
 def test_empty_logs_and_no_frictions_give_no_findings() -> None:
     # 로그가 빈 Persona 는 건너뛰고, 아무 문제도 없으면 진단 0건이다.
-    steps = {1: [], 2: [step(1, "https://a.test/")]}
+    reached = {**step(1, "https://a.test/"), "task": {"url_reached": True}}
 
-    assert build_findings(steps, {1: "max_steps", 2: "timeout"}) == []
+    assert build_findings({1: [], 2: [reached]}, {1: "max_steps", 2: "done"}) == []
 
 
 def test_unreached_personas_never_leave_zero_findings() -> None:

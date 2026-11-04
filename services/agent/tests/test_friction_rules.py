@@ -387,6 +387,20 @@ def test_hard_success_uses_steps_after_first_reach(status):
     assert status in result.reason
 
 
+def test_hard_success_counts_steps_after_reach_for_confusion():
+    """어렵게 성공의 길 찾기 혼란은 처음 닿은 뒤 step 도 세고, 닿기 전 step 과 함께 근거로 쓴다."""
+    steps = logged([False, True, False, False, False])
+    for step, url in zip(steps, ["A", "B", "A", "B", "A"], strict=True):
+        step["url"] = url
+
+    results = detect_frictions(steps, status="stuck")
+
+    assert [(r.type, r.steps) for r in results] == [
+        ("navigation_confusion", (3, 4, 5)),
+        ("excessive_steps", (3, 4, 5)),
+    ]
+
+
 def test_hard_success_counts_all_steps_for_severity():
     """끝까지 쓴 step 이 16개 이상이면 중간이다."""
     [result] = detect_frictions(logged([True] + [False] * 15), status="max_steps")
@@ -413,8 +427,13 @@ def test_unjudged_status_makes_no_friction(status):
 
 
 def test_all_null_reached_makes_no_friction():
-    """도달 기록이 모두 비었으면 못 닿은 것과 구분해 판정하지 않는다."""
-    assert detect_frictions(logged([None, None]), status="done") == []
+    """도달 기록이 모두 비면 판정 안 함이다. 뒤로 가기 · 오류가 있어도 Friction 이 없다."""
+    steps = logged([None, None, None])
+    steps[0]["action"]["kind"] = "back"
+    steps[1]["action"]["kind"] = "back"
+    steps[2]["result"]["error_code"] = "ELEMENT_NOT_FOUND"
+
+    assert detect_frictions(steps, status="max_steps") == []
 
 
 def test_partly_null_reached_is_still_judged():

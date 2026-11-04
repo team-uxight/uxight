@@ -84,7 +84,7 @@ def detect_interaction_failure(steps: list[dict]) -> FrictionResult | None:
     return None
 
 
-def detect_task_failure(steps: list[dict], status: str) -> FrictionResult | None:
+def detect_task_failure(steps: list[dict], status: str | None) -> FrictionResult | None:
     """한 번도 목표에 못 닿은 Persona 를 과제 실패로 판정한다 (11/03 결정의 '실패').
 
     붙일지는 닿았는지로 정하고, 끝난 이유(status)는 심각도와 사유에만 쓴다.
@@ -146,7 +146,7 @@ def detect_navigation_confusion(steps: list[dict]) -> FrictionResult | None:
 
 def detect_excessive_steps(
     steps: list[dict],
-    status: str,
+    status: str | None,
     threshold: int = 10,
 ) -> FrictionResult | None:
     """목표에 처음 닿기까지의 단계 수로 판정한다.
@@ -165,7 +165,10 @@ def detect_excessive_steps(
 
     if extra:
         evidence = tuple(step["step"] for step in extra)
-        reason = f"목표에 처음 닿은 뒤 {len(extra)}단계를 더 쓰고 {status} 상태로 종료됨"
+        reason = (
+            f"{first + 1}단계에 목표에 처음 닿은 뒤 {len(extra)}단계를 더 쓰고 "
+            f"{status} 상태로 종료됨"
+        )
     else:
         evidence = (steps[first]["step"],)
         reason = f"목표 최초 도달까지 {step_count}단계 사용 (기준: {threshold}단계)"
