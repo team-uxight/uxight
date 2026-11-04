@@ -74,3 +74,121 @@ def test_progress_counts_token_limit_and_stuck(
 
     with engine.begin() as conn:
         assert conn.execute(text("SELECT progress FROM runs")).scalar() == len(counted)
+
+
+def test_mark_done_aggregates_persona_metrics(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """회차 지표 집계, NULL 처리, 중복 저장 방지를 검증한다."""
+    from datetime import datetime
+
+    engine = sqlite_engine(tmp_path)
+
+    @event.listens_for(engine, "connect")
+    def add_timestampdiff(dbapi_conn, conn_rec) -> None:
+        def timestampdiff(unit, start, end):
+            if unit != "MICROSECOND":
+                raise ValueError(f"Unexpected unit: {unit}")
+            delta = datetime.fromisoformat(end) - datetime.fromisoformat(start)
+            return round(delta.total_seconds() * 1_000_000)
+
+        dbapi_conn.create_function("TIMESTAMPDIFF", 3, timestampdiff)
+
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE runs (run_id INTEGER PRIMARY KEY, "
+                "status TEXT NOT NULL, finished_at TEXT)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE TABLE run_personas (run_id INTEGER, steps INTEGER, "
+                "backtracks INTEGER, tokens INTEGER, cost_usd REAL, "
+                "started_at TEXT, finished_at TEXT)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE TABLE run_metrics (run_id INTEGER UNIQUE, "
+                "success_rate REAL, avg_steps REAL, avg_backtracks REAL, "
+                "avg_seconds REAL, tokens INTEGER, cost_usd REAL)"
+            )
+        )
+        conn.execute(text("INSERT INTO runs (run_id, status) VALUES (1, 'running'), (2, 'queued')"))
+        conn.execute(
+            text(
+                "INSERT INTO run_personas VALUES "
+                "(1, 10, NULL, 100, 0.25, "
+                "'2026-10-21 12:00:00', '2026-10-21 12:00:10'), "
+                "(1, 20, NULL, 300, 0.75, "
+                "'2026-10-21 12:00:00', '2026-10-21 12:00:30')"
+            )
+        )
+
+    monkeypatch.setattr(repository_module, "engine", engine)
+
+    # SQLite는 MICROSECOND를 키워드로 인식하지 않으므로
+    # 테스트 실행 시에만 문자열 인자로 전달한다.
+    original_execute = engine.dialect.do_execute
+
+    def sqlite_execute(cursor, statement, parameters, context=None):
+        statement = statement.replace(
+            "TIMESTAMPDIFF(MICROSECOND,",
+            "TIMESTAMPDIFF('MICROSECOND',",
+        )
+        return original_execute(cursor, statement, parameters, context)
+
+    monkeypatch.setattr(engine.dialect, "do_execute", sqlite_execute)
+
+    repository = RunRepository()
+    repository.mark_done(1, success_rate=50.0)
+    repository.mark_done(1, success_rate=99.0)
+    repository.mark_done(2, success_rate=100.0)
+
+    with engine.begin() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT run_id, success_rate, avg_steps, avg_backtracks, "
+                "avg_seconds, tokens, cost_usd FROM run_metrics"
+            )
+        ).all()
+        statuses = conn.execute(text("SELECT run_id, status FROM runs ORDER BY run_id")).all()
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row[0] == 1
+    assert row[1] == pytest.approx(50.0)
+    assert row[2] == pytest.approx(15.0)
+    assert row[3] is None
+    assert row[4] == pytest.approx(20.0)
+    assert row[5] == 400
+    assert row[6] == pytest.approx(1.0)
+    assert [tuple(r) for r in statuses] == [(1, "done"), (2, "queued")]
+
+    # 일부 Persona의 비용이 미측정이면 부분 합계를 전체 비용으로 표시하지 않는다.
+    with engine.begin() as conn:
+        conn.execute(text("INSERT INTO runs (run_id, status) VALUES (3, 'running')"))
+        conn.execute(
+            text(
+                "INSERT INTO run_personas VALUES "
+                "(3, 5, NULL, 50, 0.10, "
+                "'2026-10-21 12:00:00', '2026-10-21 12:00:05'), "
+                "(3, 7, NULL, 70, NULL, "
+                "'2026-10-21 12:00:00', '2026-10-21 12:00:07')"
+            )
+        )
+
+    repository.mark_done(3, success_rate=0.0)
+
+    with engine.begin() as conn:
+        missing_cost = conn.execute(
+            text(
+                "SELECT avg_steps, avg_seconds, tokens, cost_usd FROM run_metrics WHERE run_id = 3"
+            )
+        ).one()
+
+    assert missing_cost[0] == pytest.approx(6.0)
+    assert missing_cost[1] == pytest.approx(6.0)
+    assert missing_cost[2] == 120
+    assert missing_cost[3] is None
