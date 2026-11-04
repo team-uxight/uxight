@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>스크롤 상자</title>
+  <style>
+    body { margin: 0; font: 14px/20px sans-serif; }
+    #box { height: 300px; margin: 100px 0 0; overflow: auto; }
+    #box p { margin: 0; }
+  </style>
+</head>
+<body>
+  <!-- 모달이 아닌 페이지의 스크롤 상자 (GACA-228). 화면 가운데가 이 상자 안이다 -->
+  <div id="box"></div>
+  <p>뒤 글</p>
+  <div style="height: 2000px"></div>
+  <p>바닥 글</p>
+  <script>
+    const box = document.getElementById('box');
+    for (let n = 1; n <= 60; n++) box.insertAdjacentHTML('beforeend', `<p>${n}번째 줄</p>`);
+  </script>
+</body>
+</html>

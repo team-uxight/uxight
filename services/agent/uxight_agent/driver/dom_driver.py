@@ -183,22 +183,25 @@ _MODAL_LAYER_JS = """
 # 없으면 층 안에서 문서 순서로 첫 스크롤 상자다. 메뉴와 본문이 따로 스크롤하는 앱 화면에서도
 # 본문이 움직인다.
 # 상자는 바로 움직인다(instant). 창 스크롤처럼 부드러운 스크롤을 기다리지 않아도 된다.
+# 모달이 없어도 화면 가운데 요소에서 위로 가장 가까운, 더 움직일 수 있는 스크롤 상자를 먼저 움직인다
+# (GACA-228). 화면 가운데에서 휠을 굴린 것과 같다. 상자 끝에 닿으면 창이 움직인다. 본문 글은
+# 상자 안에서 지금 보이는 글만 담으므로, 이게 없으면 상자 아래쪽 글을 끝내 못 읽는다.
 _SCROLL_JS = """
 (direction) => {
   const layer = (__MODAL_LAYER__)();
   const scrollable = (el) => /auto|scroll/.test(getComputedStyle(el).overflowY)
     && el.scrollHeight > el.clientHeight;
+  const moves = (el) => scrollable(el) && (direction > 0
+    ? el.scrollTop + el.clientHeight < el.scrollHeight - 1 : el.scrollTop > 0);
   let box = null;
-  if (layer) {
-    for (let el = document.elementFromPoint(innerWidth / 2, innerHeight / 2);
-      el && layer.contains(el); el = el.parentElement) {
-      if (scrollable(el)) {
-        box = el;
-        break;
-      }
+  for (let el = document.elementFromPoint(innerWidth / 2, innerHeight / 2);
+    el && el !== document.body && (!layer || layer.contains(el)); el = el.parentElement) {
+    if (layer ? scrollable(el) : moves(el)) {
+      box = el;
+      break;
     }
-    box ??= [layer, ...layer.querySelectorAll('*')].find(scrollable);
   }
+  if (layer) box ??= [layer, ...layer.querySelectorAll('*')].find(scrollable);
   if (box) box.scrollBy({ top: direction * box.clientHeight, behavior: 'instant' });
   else scrollBy(0, direction * innerHeight);
 }
@@ -366,7 +369,7 @@ _COLLECT_ELEMENTS_JS = """
   //   거의 다 링크라 이것으로 빠진다. textarea 글은 입력값이라 뺀다.
   // - 보이는지는 요소 글보다 까다롭게 본다. 아래를 모두 지켜야 한다.
   //   1) 감싼 요소가 보인다(visibilityOf).
-  //   2) 글 조각의 사각형(Range)이 화면 안이고, overflow hidden · clip 조상의 상자와 겹친다.
+  //   2) 글 조각의 사각형(Range)이 화면 안이고, 글을 자르는 조상의 상자와 읽을 만큼 겹친다.
   //   3) 글자색이 투명하지 않다.
   //   그래서 text-indent 로 밀어낸 글 · 접힌 상자 · 캐러셀의 다른 슬라이드 · canvas 대체 글이
   //   빠진다. 요소 줄은 이 기준을 쓰지 않는다 — text-indent 로 숨긴 아이콘 버튼 이름
@@ -394,10 +397,19 @@ _COLLECT_ELEMENTS_JS = """
       top: r.top + size(top, r.height), bottom: r.bottom - size(bottom, r.height),
     };
   };
+  const innerBox = (el) => {
+    const r = el.getBoundingClientRect();
+    const left = r.left + el.clientLeft;
+    const top = r.top + el.clientTop;
+    return { left, top, right: left + el.clientWidth, bottom: top + el.clientHeight };
+  };
   // 글 조각을 감싼 요소마다 한 번만 잰다 — 같은 요소 안의 글 조각마다 조상을 다시 오르지 않게.
   // - shown: 보이는가
-  // - clips: 글을 자르는 overflow hidden · clip 조상의 상자와 clip-path: inset() 이 남기는 상자
-  //   (GACA-225). inset(50%) 처럼 다 가리면 빈 상자다. 다른 모양(polygon 등)은 보지 않는다.
+  // - clips: 글을 자르는 조상의 안쪽 상자와 clip-path: inset() 이 남기는 상자 (GACA-225).
+  //   overflow 가 hidden · clip 이면 잘리고, auto · scroll 이면 상자 안에서 지금 보이는 부분만
+  //   보인다 (GACA-228). contain: paint 도 자른다. 글은 테두리 안쪽에서 잘리고, 인라인 요소에는
+  //   overflow 가 듣지 않는다. 절대 위치 요소는 기준 조상까지의 상자에 잘리지 않는다.
+  //   inset(50%) 처럼 다 가리면 빈 상자다. 다른 모양(polygon 등)은 보지 않는다.
   // - block · cell: 줄 나눔용
   const boxes = new Map();
   const boxOf = (node) => {
@@ -408,13 +420,16 @@ _COLLECT_ELEMENTS_JS = """
     while (getComputedStyle(el).display === 'contents') el = el.parentElement;
     const style = getComputedStyle(el);
     const clips = [];
+    let base = null; // 절대 위치 요소의 기준 조상. 여기까지의 상자는 건너뛴다
     for (let up = el; up && up !== document.body; up = up.parentElement) {
+      if (up === base) base = null;
       const upStyle = getComputedStyle(up);
-      if (/hidden|clip/.test(`${upStyle.overflowX} ${upStyle.overflowY}`)) {
-        clips.push(up.getBoundingClientRect());
-      }
+      const cuts = /hidden|clip|auto|scroll/.test(`${upStyle.overflowX} ${upStyle.overflowY}`)
+        || /paint|strict|content/.test(upStyle.contain);
+      if (!base && cuts && !/^(inline|contents)$/.test(upStyle.display)) clips.push(innerBox(up));
       if (upStyle.clipPath.startsWith('inset(')) clips.push(insetBox(up, upStyle.clipPath));
       if (upStyle.position === 'fixed') break; // 고정 위치 요소는 그 위 조상의 상자에 잘리지 않는다
+      if (!base && upStyle.position === 'absolute') base = up.offsetParent;
     }
     const block = blockOf(node);
     box = {
@@ -429,9 +444,39 @@ _COLLECT_ELEMENTS_JS = """
   };
   const inView = (r) => r.width > 0 && r.height > 0
     && r.top < innerHeight && r.bottom > 0 && r.left < innerWidth && r.right > 0;
-  // 겹친 넓이가 있어야 겹친다 — 빈 상자(다 가린 clip-path)와는 겹치지 않는다.
-  const overlaps = (r, clip) => Math.min(r.right, clip.right) > Math.max(r.left, clip.left)
-    && Math.min(r.bottom, clip.bottom) > Math.max(r.top, clip.top);
+  // 글 사각형이 자르는 상자들이 함께 남기는 곳과 읽을 만큼 겹치는가. 상자마다 따로 재면 두 상자가
+  // 서로 다른 곳을 남겨 아무것도 안 보이는 글이 통과한다.
+  // 읽을 만큼은 글 높이의 절반이다. 높이 2px 상자는 글 윗부분이 조금 걸려도 못 읽는다.
+  // 가로는 글자 하나 폭쯤이고, 그보다 짧은 글 조각('.')은 다 겹치면 된다.
+  // 겹친 길이가 없으면 빠진다(빈 상자 · 다 가린 clip-path · 읽지 못한 NaN 상자).
+  const seen = (r, clips) => {
+    const left = Math.max(r.left, ...clips.map((clip) => clip.left));
+    const right = Math.min(r.right, ...clips.map((clip) => clip.right));
+    const top = Math.max(r.top, ...clips.map((clip) => clip.top));
+    const bottom = Math.min(r.bottom, ...clips.map((clip) => clip.bottom));
+    return right > left && bottom - top >= r.height / 2
+      && right - left >= Math.min(r.width, r.height / 2);
+  };
+  // 글 조각에서 지금 보이는 글자만 남긴다. 한 글 조각이 여러 줄이면 첫 줄만 보여도 아래 줄이 함께
+  // 들어가므로, 상자에 잘리는 글 조각은 글자마다 잰다.
+  const shownPart = (node, clips) => {
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    const whole = Array.from(range.getClientRects()).every((r) => clips.every((clip) => (
+      r.left >= clip.left - 1 && r.right <= clip.right + 1
+      && r.top >= clip.top - 1 && r.bottom <= clip.bottom + 1)));
+    if (whole) return node.textContent;
+    let kept = '';
+    let start = 0;
+    for (const char of node.textContent) {
+      range.setStart(node, start);
+      range.setEnd(node, start + char.length);
+      start += char.length;
+      if (/\\s/.test(char)) kept += ' ';
+      else if (Array.from(range.getClientRects()).some((r) => seen(r, clips))) kept += char;
+    }
+    return kept;
+  };
 
   // 클릭이 걸린 칸 (GACA-225): 링크 · 버튼 · 입력칸이 아닌데 손가락 커서(cursor: pointer)인 요소.
   // 사이트 스크립트가 클릭을 받는다 — 학교 사본 졸업 페이지의 학번 칸은 누르면 새 창을 연다.
@@ -456,8 +501,8 @@ _COLLECT_ELEMENTS_JS = """
       const box = boxOf(node);
       const shown = box.shown && Array.from(range.getClientRects()).some((r) => r.width > 0
         && r.height > 0 && r.right > 0 && r.left < innerWidth && r.bottom + scrollY > 0
-        && box.clips.every((clip) => overlaps(r, clip)));
-      if (shown) text += ` ${node.textContent}`;
+        && seen(r, box.clips));
+      if (shown) text += ` ${shownPart(node, box.clips)}`;
     }
     return text;
   };
@@ -544,7 +589,9 @@ _COLLECT_ELEMENTS_JS = """
       const rects = Array.from(range.getClientRects()).filter(inView);
       if (!rects.length) continue; // 화면 밖이거나 그려지지 않은 글 (canvas 대체 글 등)
       const box = boxOf(node);
-      if (!box.shown || !rects.some((r) => box.clips.every((clip) => overlaps(r, clip)))) continue;
+      if (!box.shown || !rects.some((r) => seen(r, box.clips))) continue;
+      const part = shownPart(node, box.clips).replace(/\\s+/g, ' ');
+      if (!part.trim()) continue;
       if (box.block !== lastBlock) {
         const unit = box.cell ?? box.block;
         if (unit !== lastUnit) text += takeIds(lastUnit);
@@ -555,8 +602,8 @@ _COLLECT_ELEMENTS_JS = """
             ? ` | ${skippedCells(row, lastCell.cellIndex + 1, box.cell.cellIndex)}`
             : `\\n${row ? skippedCells(row, 0, box.cell.cellIndex) : ''}`;
       }
-      text += piece;
-      size += piece.replaceAll(' ', '').length;
+      text += part;
+      size += part.replaceAll(' ', '').length;
       lastBlock = box.block;
       lastCell = box.cell;
     }
