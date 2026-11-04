@@ -950,6 +950,10 @@ class DomDriver(Driver):
         except Exception as e:
             first_line = str(e).splitlines()[0] if str(e) else ""
             result = ActionResult(ok=False, error=f"{type(e).__name__}: {first_line}")
+        if action.kind == "type" and result.ok:
+            # 이 사이 시작한 요청은 관측 전 기다림(_wait_still)이 마저 기다린다. 새 창을 따라갈지 본
+            # 뒤에 기다린다 — 입력 뒤 타이머가 연 창은 행동이 연 창이 아니다.
+            await asyncio.sleep(TYPE_SETTLE_MS / 1000)
         # 요청을 끊지 못한 이동(리다이렉트 등)으로 허용 밖에 와 있으면 행동 전 주소로 되돌린다
         # (guard.domain 3단계). 행동 전 주소가 파괴적 경로면 다시 GET 하지 않고
         # 마지막으로 기억한 주소로 되돌린다 (GACA-224).
@@ -1146,8 +1150,6 @@ class DomDriver(Driver):
             await handle.click(timeout=ACTION_TIMEOUT_MS)
         else:
             await handle.fill(action.value, timeout=ACTION_TIMEOUT_MS)
-            # 이 사이 시작한 요청은 관측 전 기다림(_wait_still)이 마저 기다린다.
-            await asyncio.sleep(TYPE_SETTLE_MS / 1000)
         return ActionResult(ok=True)
 
     def _require_page(self) -> Page:

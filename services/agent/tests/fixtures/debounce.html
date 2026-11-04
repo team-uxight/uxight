@@ -15,6 +15,7 @@
     document.querySelector('input').addEventListener('input', () => {
       clearTimeout(timer);
       timer = setTimeout(() => {
+        if (new URLSearchParams(location.search).has('popup')) window.open('late_fade.html');
         fetch('late_fetch.json?delay=400').then((r) => r.json()).then((d) => {
           document.getElementById('results').innerHTML = `<p>${d.text}</p>`;
         });

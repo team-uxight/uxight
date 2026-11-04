@@ -169,3 +169,11 @@ def test_other_actions_do_not_wait_like_type(fixture_server) -> None:
             return times
 
     assert all(elapsed < TYPE_SETTLE_MS / 1000 for elapsed in asyncio.run(run()))
+
+
+def test_window_opened_by_timer_after_type_not_followed(fixture_server) -> None:
+    # 입력 0.3초 뒤 타이머가 연 창은 행동이 연 창이 아니다. 입력한 페이지를 잃지 않는다.
+    url = f"{fixture_server}/debounce.html?popup=1"
+    observation, _ = type_then_observe(url, DomDriver)
+
+    assert observation.url == url
