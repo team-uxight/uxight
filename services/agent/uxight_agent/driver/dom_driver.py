@@ -118,8 +118,9 @@ async ({ maxMs, selector }) => {
 #   네 귀퉁이 점이 고정 · 절대 위치 dim 에 들고, 가운데 점이 그 형제 안이면 형제를 모달로 본다.
 #   아래 셋은 레이어 팝업이 아니다.
 #   dim 안에 보이는 것이 있다 — 메뉴가 든 앱 화면 틀이다.
-#   화면 가운데에서 dim 아래에 다른 요소가 없다 — 본문 뒤에 깐 배경이다.
-#   형제가 화면을 다 덮는다 — 팝업이 아니라 페이지다.
+#   팝업 밖에 화면 안에서 실제로 누를 수 있는 요소가 있다 — 덮인 페이지가 아니다. 본문 뒤 배경 ·
+#   hero 의 반투명 막 · 로그인 화면이 그렇고, 팝업 밖 닫기 버튼 · 나란히 뜬 팝업도 여기서 남는다.
+#   형제가 화면을 다 덮는다 — 페이지 전체를 싼 상자다.
 _MODAL_LAYER_JS = """
 () => {
   // 화면 크기 (스크롤바 뺌). 쿼크 모드에서는 html 이 문서 크기라 창 크기를 쓴다.
@@ -157,14 +158,19 @@ _MODAL_LAYER_JS = """
   const [center, ...corners] = hits;
   for (let dim = corners[0]; dim && dim !== document.body; dim = dim.parentElement) {
     if (!/fixed|absolute/.test(getComputedStyle(dim).position)) continue;
-    if (!corners.every((hit) => dim.contains(hit)) || dim.contains(center)) continue;
+    if (!corners.every((hit) => dim.contains(hit))) continue;
     if (!covers(dim) || hasShown(dim)) continue;
-    const stack = document.elementsFromPoint(width / 2, height / 2);
-    const below = stack.indexOf(dim);
-    if (below < 0 || stack.slice(below + 1).every((el) => el.contains(dim))) continue;
     let popup = center;
     while (popup && popup.parentElement !== dim.parentElement) popup = popup.parentElement;
-    if (popup && !covers(popup) && hasShown(popup)) return popup;
+    if (!popup || covers(popup) || !hasShown(popup)) continue;
+    const reachable = (el) => {
+      const r = el.getBoundingClientRect();
+      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return hit !== null && el.contains(hit);
+    };
+    const outside = Array.from(document.querySelectorAll(actionable))
+      .some((el) => !popup.contains(el) && shown(el) && reachable(el));
+    if (!outside) return popup;
   }
   return null;
 }

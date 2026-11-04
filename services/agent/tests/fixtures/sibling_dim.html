@@ -23,6 +23,9 @@
     <button onclick="open_('body-level')">바로 열기</button>
     <button onclick="open_('wrapped')">묶음 열기</button>
     <button onclick="open_('page-long')">긴 dim 열기</button>
+    <button onclick="open_('long-popup')">긴 팝업 열기</button>
+    <button onclick="open_('outside-close')">밖 닫기 열기</button>
+    <button onclick="open_('empty-popup')">빈 팝업 열기</button>
   </p>
   <div style="height: 1500px"></div>
 
@@ -51,7 +54,27 @@
     </div>
   </div>
 
+  <div id="long-popup">
+    <div class="dim"></div>
+    <div class="popup" style="height: 200px; overflow: auto"><div id="rows"></div></div>
+  </div>
+
+  <!-- 닫기 버튼이 팝업 밖에 있다. 누를 수 있는 것이 밖에 남아 모달로 보지 않는다 -->
+  <div id="outside-close">
+    <div class="dim"></div>
+    <div class="popup"><p>글만 있는 팝업</p></div>
+    <button class="popup" style="left: 80%; width: 60px; padding: 0" onclick="close_('outside-close')">밖 닫기</button>
+  </div>
+
+  <!-- 팝업 자리에 보이는 것이 없다 -->
+  <div id="empty-popup">
+    <div class="dim"></div>
+    <div class="popup"></div>
+  </div>
+
   <script>
+    const rows = document.getElementById('rows');
+    for (let n = 1; n <= 40; n++) rows.insertAdjacentHTML('beforeend', `<p>${n}번째 줄</p>`);
     const open_ = (id) => document.getElementById(id).classList.add('open');
     const close_ = (id) => document.getElementById(id).classList.remove('open');
   </script>

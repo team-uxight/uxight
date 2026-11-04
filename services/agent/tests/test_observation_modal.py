@@ -5,8 +5,7 @@ LLM 없이 tests/fixtures 페이지를 Playwright 로 띄워 DomDriver 관측을
 - som_dialog.html: 브라우저 모달 dialog(showModal).
 - popup_corner.html: 화면 일부만 가리는 공지 팝업 (모달이 아님).
 - sibling_dim.html: 화면을 덮는 dim 과 그 위 팝업이 형제인 레이어 팝업 (GACA-229).
-- cover_background.html · cover_shell.html · cover_page_sibling.html: 모양은 비슷하지만
-  레이어 팝업으로 보지 않는 페이지.
+- cover_*.html: 모양은 비슷하지만 레이어 팝업으로 보지 않는 페이지.
 """
 
 import asyncio
@@ -173,3 +172,39 @@ def test_page_wrapper_beside_dim_is_not_popup() -> None:
     [observation] = observe_steps((FIXTURES / "cover_page_sibling.html").as_uri())
 
     assert texts(observation) == ["페이지 링크", "바닥 링크"]
+
+
+def test_hero_with_dim_layer_is_not_modal() -> None:
+    [observation] = observe_steps((FIXTURES / "cover_hero.html").as_uri())
+
+    # 화면을 덮는 반투명 막 위에 글 상자가 떠도, 머리 메뉴는 그대로 누를 수 있다.
+    assert texts(observation) == ["머리 메뉴", "시작하기"]
+
+
+def test_login_on_two_backgrounds_is_not_modal() -> None:
+    [observation] = observe_steps((FIXTURES / "cover_login.html").as_uri())
+
+    assert "회원가입" in texts(observation)
+
+
+def test_close_button_outside_popup_stays() -> None:
+    url = (FIXTURES / "sibling_dim.html").as_uri()
+    _, opened = observe_steps(url, "밖 닫기 열기")
+
+    assert "밖 닫기" in texts(opened)
+
+
+def test_empty_popup_beside_dim_is_not_modal() -> None:
+    url = (FIXTURES / "sibling_dim.html").as_uri()
+    _, opened = observe_steps(url, "빈 팝업 열기")
+
+    assert "뒤 본문 글" in opened.text
+
+
+def test_scroll_moves_popup_beside_dim() -> None:
+    url = (FIXTURES / "sibling_dim.html").as_uri()
+    _, opened, scrolled = observe_steps(url, "긴 팝업 열기", SCROLL_DOWN)
+
+    # 창이 아니라 팝업 안이 움직인다.
+    assert scrolled.text != opened.text
+    assert "뒤 본문 글" not in scrolled.text
