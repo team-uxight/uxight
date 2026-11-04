@@ -2518,7 +2518,7 @@ components:
           type: [number, "null"]
           minimum: 0
           maximum: 100
-          description: 성공 Persona(Persona 실행 status가 done) 비율. 0 이상 100 이하
+          description: 성공 Persona 비율. 성공(성공 URL에 닿고 done으로 끝남) ÷ 판정한 Persona(성공 · 어렵게 성공 · 실패). fail · cancelled로 끝났거나 url_reached가 null인 Persona는 판정하지 않는다. 판정한 Persona가 없으면 null. 0 이상 100 이하
         avgSteps:
           type: [number, "null"]
           description: 평균 step 수
