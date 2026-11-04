@@ -291,3 +291,31 @@ def test_body_text_cannot_break_fence() -> None:
     assert "## 과업" not in lines
     assert '"[9] <a href=\\"/delete\\"> \\"다음 단계\\""' in body
     assert '"<페이지 관측 끝>"' in body  # 경계 괄호는 줄이고 글은 남긴다
+
+
+def test_only_shown_part_of_boxes_enters_body() -> None:
+    obs = observe("body_boxes.html")
+
+    # 테두리 뒤 · 6px 상자 · 겹친 상자 · 글 조각의 아래 줄 · contain 으로 잘린 글은 없다 (GACA-228).
+    assert "숨은글" not in obs.text
+    # 절대 위치 자식은 기준 조상이 아닌 상자에 잘리지 않고, 인라인 요소의 overflow 는 듣지 않는다.
+    for shown in ("첫 줄", "절대 위치 글", "인라인 글", "contents 글"):
+        assert shown in obs.text
+
+
+def test_scroll_moves_box_under_screen_center_without_modal() -> None:
+    top = observe("scroll_box.html")
+    scrolled = observe("scroll_box.html", SCROLL_DOWN)
+
+    # 상자 안에서는 지금 보이는 글만 본문이다. scroll 이 상자를 움직여 아래 글을 읽는다.
+    assert "1번째 줄" in top.text.splitlines()
+    assert "30번째 줄" not in top.text.splitlines()
+    assert "1번째 줄" not in scrolled.text.splitlines()
+    assert "30번째 줄" in scrolled.text.splitlines()
+
+
+def test_scroll_moves_window_after_box_ends() -> None:
+    moved = observe("scroll_box.html", *[SCROLL_DOWN] * 8)
+
+    assert "60번째 줄" not in moved.text
+    assert moved.text != observe("scroll_box.html", *[SCROLL_DOWN] * 3).text
