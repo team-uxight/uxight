@@ -25,3 +25,5 @@ services/agent/logs/
 .DS_Store
 .idea/
 .vscode/
+# 모델 비교 결과 (uxight_agent.bakeoff)
+services/agent/eval/results/

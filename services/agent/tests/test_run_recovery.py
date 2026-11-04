@@ -35,6 +35,10 @@ class FakeRunRepository:
         self.statuses = dict(statuses)
         self.errors: dict[int, str] = {}
         self.cancel_requested = set(cancel_requested)
+        self.daily_left: int | None = None  # 하루 예산 남은 토큰 (None = 예산 없음)
+
+    def daily_tokens_left(self) -> int | None:
+        return self.daily_left
 
     def accept_if_queued(self, run_id: int) -> bool:
         if self.statuses.get(run_id) != "queued":
@@ -202,4 +206,91 @@ def test_error_right_after_accept_closes_run_as_failed(
     assert runs.statuses[7] == "failed"
     assert runs.errors[7] == "실행 오류로 중단: RuntimeError"
     assert "running" not in personas.get_statuses(7).values()
+    assert started == []
+
+
+def test_missing_llm_settings_close_run_before_browsers(monkeypatch: pytest.MonkeyPatch) -> None:
+    # LLM 설정이 비면 브라우저를 띄우기 전에 짧은 사유로 마감한다.
+    runs, personas = install(monkeypatch, {7: "queued"})
+    started: list = []
+
+    async def fake_run_personas(run_id: int, snapshot: RunSnapshot) -> None:
+        started.append(run_id)
+
+    monkeypatch.setattr(runs_router.run_orchestrator, "run_personas", fake_run_personas)
+    monkeypatch.setattr(orchestrator_module, "_llm", None)
+    for name in ("LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL"):
+        monkeypatch.delenv(name, raising=False)
+
+    res = TestClient(main.app).post("/runs", json={"run_id": 7})
+
+    assert res.json() == {"run_id": 7, "status": "failed"}
+    assert runs.errors[7] == "LLM 설정 없음"
+    assert "running" not in personas.get_statuses(7).values()
+    assert started == []
+
+
+@pytest.mark.parametrize(
+    "prices",
+    ['{"a/b": [1]}', '{"a/b": 0.1}', "not json", '{"a/b": [-1, 2]}'],
+    ids=["one-value", "bare-number", "not-json", "negative"],
+)
+def test_malformed_llm_prices_close_run_before_browsers(
+    monkeypatch: pytest.MonkeyPatch, prices: str
+) -> None:
+    # LLM_PRICES 형식이 틀리면 브라우저를 띄우기 전에 짧은 사유로 마감한다.
+    runs, personas = install(monkeypatch, {7: "queued"})
+    started: list = []
+
+    async def fake_run_personas(run_id: int, snapshot: RunSnapshot) -> None:
+        started.append(run_id)
+
+    monkeypatch.setattr(runs_router.run_orchestrator, "run_personas", fake_run_personas)
+    monkeypatch.setattr(runs_router.run_orchestrator, "_run_prices", {})
+    monkeypatch.setattr(orchestrator_module, "llm_client", lambda: None)  # LLM 설정은 있다고 본다
+    monkeypatch.setenv("LLM_PRICES", prices)
+
+    res = TestClient(main.app).post("/runs", json={"run_id": 7})
+
+    assert res.json() == {"run_id": 7, "status": "failed"}
+    assert runs.errors[7] == "LLM_PRICES 형식 오류"
+    assert "running" not in personas.get_statuses(7).values()
+    assert started == []
+    assert 7 not in runs_router.run_orchestrator._run_prices
+
+
+def test_accepted_run_keeps_the_price_table_made_at_accept(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 수락할 때 검사하며 만든 단가표를 회차가 끝날 때까지 들고 있다가 step 이 쓴다.
+    install(monkeypatch, {7: "queued"})
+
+    async def fake_run_personas(run_id: int, snapshot: RunSnapshot) -> None:
+        pass
+
+    monkeypatch.setattr(runs_router.run_orchestrator, "run_personas", fake_run_personas)
+    monkeypatch.setattr(runs_router.run_orchestrator, "_run_prices", {})
+    monkeypatch.setattr(orchestrator_module, "llm_client", lambda: None)
+    monkeypatch.setenv("LLM_PRICES", '{"example/model": [1, 2]}')
+
+    res = TestClient(main.app).post("/runs", json={"run_id": 7})
+
+    assert res.status_code == 202
+    table = runs_router.run_orchestrator._run_prices[7]
+    assert table["example/model"] == (1.0, 2.0, 1.0)  # 캐시 단가를 안 주면 입력 단가
+    assert table["gpt-6-luna"] == (0.10, 0.50, 0.01)  # 기본표 위에 얹는다
+
+
+def test_spent_daily_budget_does_not_start_new_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    runs, personas = install(monkeypatch, {7: "queued"})
+    runs.daily_left = -5
+    started: list = []
+
+    async def fake_run_personas(run_id: int, snapshot: RunSnapshot) -> None:
+        started.append(run_id)
+
+    monkeypatch.setattr(runs_router.run_orchestrator, "run_personas", fake_run_personas)
+
+    res = TestClient(main.app).post("/runs", json={"run_id": 7})
+
+    assert res.json() == {"run_id": 7, "status": "failed"}
+    assert runs.errors[7] == "하루 토큰 예산 초과"
     assert started == []

@@ -49,7 +49,8 @@ class RunRepository:
     def mark_done(self, run_id: int, success_rate: float) -> None:
         # runs.status='done' UPDATE와 run_metrics INSERT는 한 트랜잭션으로 묶는다.
         # 상태가 실제로 바뀐 경우에만 INSERT해서 회차 당 1행을 보장한다.
-        # Walking Skeleton에서는 avg_*, tokens, cost_usd를 채우지 않는다(NULL).
+        # Persona별 실행 기록에서 회차 지표를 확정한다.
+        # NULL 측정값은 임의로 0으로 바꾸지 않는다.
         with engine.begin() as conn:
             result = conn.execute(
                 text(
@@ -61,8 +62,19 @@ class RunRepository:
             if result.rowcount == 1:
                 conn.execute(
                     text(
-                        "INSERT INTO run_metrics (run_id, success_rate) "
-                        "VALUES (:run_id, :success_rate)"
+                        "INSERT INTO run_metrics "
+                        "(run_id, success_rate, avg_steps, avg_backtracks, "
+                        "avg_seconds, tokens, cost_usd) "
+                        "SELECT :run_id, :success_rate, "
+                        "AVG(steps), AVG(backtracks), "
+                        "AVG(CASE WHEN started_at IS NOT NULL "
+                        "AND finished_at IS NOT NULL "
+                        "THEN TIMESTAMPDIFF(MICROSECOND, started_at, finished_at) "
+                        "/ 1000000.0 END), "
+                        "SUM(tokens), "
+                        "CASE WHEN COUNT(*) = COUNT(cost_usd) "
+                        "THEN SUM(cost_usd) ELSE NULL END "
+                        "FROM run_personas WHERE run_id = :run_id"
                     ),
                     {"run_id": run_id, "success_rate": success_rate},
                 )
@@ -146,14 +158,16 @@ class RunRepository:
         )
 
     def refresh_progress(self, run_id: int) -> None:
-        # progress = 정상 종료된(done/max_steps) 페르소나 수. fail/timeout/cancelled는 세지 않는다.
+        # progress = 정상 종료된(done/max_steps/token_limit/stuck) 페르소나 수.
+        # fail/timeout/cancelled는 세지 않는다. token_limit 은 전에 max_steps 로 적던 끝이다.
         # +1 대신 매번 다시 세어 덮어쓰므로 중복 호출이나 동시 완료에도 값이 정확하다.
         with engine.begin() as conn:
             conn.execute(
                 text(
                     "UPDATE runs SET progress = ("
                     "  SELECT COUNT(*) FROM run_personas "
-                    "  WHERE run_id = :run_id AND status IN ('done', 'max_steps')"
+                    "  WHERE run_id = :run_id "
+                    "  AND status IN ('done', 'max_steps', 'token_limit', 'stuck')"
                     ") WHERE run_id = :run_id"
                 ),
                 {"run_id": run_id},
@@ -166,6 +180,25 @@ class RunRepository:
                 text("UPDATE runs SET heartbeat_at = NOW() WHERE run_id = :run_id"),
                 {"run_id": run_id},
             )
+
+    def daily_tokens_left(self) -> int | None:
+        """하루 토큰 예산에서 오늘 쓴 토큰(오늘 시작한 회차의 runs.tokens 합)을 뺀 값.
+
+        예산은 스냅샷이 아니라 policies 의 지금 값이다 — 관리자가 낮추면 진행 중인 회차에도
+        바로 적용된다 (V4__policies.sql). 예산이 없으면(NULL) None.
+        """
+        with engine.connect() as conn:
+            row = conn.execute(
+                text(
+                    "SELECT (SELECT daily_token_budget FROM policies "
+                    "        ORDER BY policy_id LIMIT 1) AS budget, "
+                    "       (SELECT COALESCE(SUM(tokens), 0) FROM runs "
+                    "        WHERE started_at >= CURDATE()) AS used"
+                )
+            ).one()
+        if row.budget is None:
+            return None
+        return int(row.budget) - int(row.used)
 
     def is_cancel_requested(self, run_id: int) -> bool:
         with engine.begin() as conn:

@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>겹친 dialog</title>
+</head>
+<body>
+  <!-- 확인 창이 문서 앞쪽에 있다. 신청서를 먼저 열고, 그 위에 확인 창을 연다.
+       맨 위(누를 수 있는) 창은 확인 창이다 -->
+  <button type="button">뒤 버튼</button>
+  <dialog id="ask">
+    <p>작성 중인 글이 사라진다. 나갈까?</p>
+    <button type="button" onclick="this.closest('dialog').close()">예, 나가기</button>
+    <button type="button" onclick="this.closest('dialog').close()">아니오</button>
+  </dialog>
+  <dialog id="apply">
+    <p>수강 신청서</p>
+    <button type="button" onclick="this.closest('dialog').close()">신청서 닫기</button>
+  </dialog>
+  <script>
+    document.getElementById('apply').showModal();
+    document.getElementById('ask').showModal();
+  </script>
+</body>
+</html>

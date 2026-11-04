@@ -1,5 +1,6 @@
 package com.uxight.api.domain.run;
 
+import com.uxight.api.domain.improvement.Improvement;
 import com.uxight.api.domain.project.Project;
 import com.uxight.api.domain.task.Task;
 import jakarta.persistence.Column;
@@ -69,8 +70,9 @@ public class Run {
   @JoinColumn(name = "parent_run_id", updatable = false)
   private Run parentRun;              // 다음 회차만. 직전 회차
 
-  @Column(updatable = false)
-  private Long improvementId;         // 다음 회차만. improvements 테이블 도입 때 연관 관계로 바꾼다
+  @ManyToOne(fetch = FetchType.LAZY)
+  @JoinColumn(name = "improvement_id", updatable = false)
+  private Improvement improvement;    // 다음 회차만. 승인한 개선안 — AI 모듈은 이전 회차들의 패치까지 누적해 주입한다
 
   @Column(updatable = false)
   private String targetUrlSnapshot;
@@ -164,5 +166,27 @@ public class Run {
   /** 최초 회차는 자기 자신이 실험 식별자다. INSERT(IDENTITY) 뒤에 부른다 — 커밋 때 first_run_id 만 UPDATE 된다. */
   public void markAsFirstRound() {
     this.firstRun = this;
+  }
+
+  /**
+   * 승인한 개선안으로 진행하는 다음 회차 (design-decision 2.3). 직전 회차의 대상 URL · 허용 도메인 · Task · Persona · 정책 스냅샷과
+   * mode · loop_max 를 그대로 복사한다 — 한 실험의 회차는 모두 실험 요청 시점의 스냅샷으로 실행하므로 성공 기준을 다시 만들지 않고,
+   * Persona 도 전원 투입한다. first_run_id 는 직전 회차의 값이라 INSERT 때 함께 들어간다.
+   */
+  public static Run nextRound(Run previous, Improvement improvement) {
+    Run next = new Run(previous.project, previous.task, previous.mode, previous.loopMax, previous.targetUrlSnapshot,
+        previous.allowedDomainsSnapshot, previous.taskSnapshot, previous.policySnapshot, previous.personaSnapshot);
+    next.parentRun = previous;
+    next.firstRun = previous.firstRun;
+    next.improvement = improvement;
+    return next;
+  }
+
+  /**
+   * 이 회차에서 다음 회차를 승인 · 반려할 수 있는 회차 조건 (design-decision 2.2) — loop 모드 · 끝남(done) · 취소 요청 없음 ·
+   * 몇 번째 회차인지(round)가 최대 회차 수 미만. 개선안 쪽 조건(승인된 개선안 없음 · 미결정)은 ImprovementService 가 본다.
+   */
+  public boolean isNextRoundDecidable(int round) {
+    return mode == RunMode.loop && status == RunStatus.done && !cancelRequested && loopMax != null && round < loopMax;
   }
 }

@@ -27,6 +27,11 @@
 - Spring은 파일 경로를 run_id, persona_id, step 숫자로 직접 만든다. 로그 안의 `observation.screenshot`이나 `run_personas.log_path`를 경로로 쓰지 않는다.
 - Action 파싱은 최대 2회 재시도하며, 3회 연속 실패하면 Persona 실행을 실패(`fail`)로 처리한다.
 - max_steps 도달은 step을 추가하지 않고 `run_personas.status = 'max_steps'`로 기록한다.
+- 토큰 상한(회차 당)이나 하루 토큰 예산으로 끝나면 `token_limit`, 같은 화면의 관측이 3번 이어져 끝나면 `stuck`으로 기록한다. 둘 다 step을 추가하지 않는다.
+- 같은 화면은 요소 줄(`observation.elements_hash`)과 지금 화면 안의 본문 글이 둘 다 같은 것이다. 본문 글은 로그에 없어서 stuck은 로그만으로 다시 셀 수 없다.
+- 마지막 화면을 남기는 끝은 max_steps, token_limit, stuck, timeout(step 상한, 토큰 상한 · 하루 토큰 예산, 같은 화면 3번, 시간 상한)이다. 이렇게 끝난 Persona는 마지막 행동 뒤 화면을 `step-<n+1>.png`로 남길 수 있다. 파일 번호는 마지막 step 번호 + 1이다. 이 스크린샷의 step 로그 줄은 없다.
+- 마지막 화면은 done, fail, cancelled로 끝난 Persona에는 없다. 마지막 step의 행동을 브라우저에 보내지 않았거나(가드 차단, Action 파싱 실패 등) 찍기에 실패해도 마지막 화면은 없다. 이때 스크린샷 조회는 404(LOG-ERR-002)다.
+- 시간 상한으로 끊긴 step의 행동이 이미 실행됐다면 그 결과가 마지막 화면에 보일 수 있다.
 
 ## 3. Step 객체
 
@@ -323,15 +328,17 @@ LLM 출력이 Action 스키마에 맞지 않고, 재시도 후에도 유효한 A
 
 ### 6.1 Task 판정과 run_personas
 
-- 메인 기준: `run_personas.status = 'done'`. Agent가 done 행동으로 성공 기준 충족을 선언하고 종료한 경우다.
-- 보조 기준: `run_personas.url_reached`. Persona 실행 중 한 번이라도 `task.url_reached`가 true였으면 true다. 마지막 URL로 정하면, 성공 페이지에 도달한 뒤 떠난 Persona가 실패로 기록되어 아래 표의 사람 검토 대상을 놓친다.
+- 도달: `run_personas.url_reached`. Persona 실행 중 한 번이라도 `task.url_reached`가 true였으면 true다. 판정 전에는 NULL이다(10/11 결정 T27, 09/20의 D21을 뒤집음).
+  - 마지막 URL로 정하면, 성공 페이지에 도달한 뒤 떠난 Persona가 실패로 기록된다. 그래서 한 번이라도 닿았는지로 본다.
+- done은 Agent가 '끝냈다'고 선언한 것이다. `run_personas.status = 'done'`은 끝난 이유일 뿐 성공을 뜻하지 않는다. 포기하고 낸 done도 있다.
+- Persona 결과는 도달과 끝난 이유로 넷이다(11/03 결정 T42). 성공률은 성공 ÷ 판정한 Persona다.
 
-| done | url_reached | 해석 |
+| url_reached | status | 결과 |
 | --- | --- | --- |
-| true | true | 성공 |
-| true | false | Agent 착각이거나 URL 규칙이 못 잡는 성공. 사람 검토 대상 |
-| false | true | 목표에 도달했지만 Persona가 인지하지 못함. 사람 검토 대상 |
-| false | false | 실패 |
+| true | done | 성공 |
+| true | max_steps · stuck · timeout · token_limit | 어렵게 성공. 성공률에 넣지 않고 따로 센다 |
+| false | done 포함 아무것이나 | 실패 |
+| NULL 이거나, status가 fail · cancelled | — | 판정 안 함 |
 
 - run_personas에는 컬럼을 추가하지 않는다. Python은 `steps`, `tokens`, `cost_usd`를 step마다 갱신하며, `steps`는 steps.jsonl의 줄 수와 같다.
 - 차단 수, 파싱 실패 수, 소요 시간은 컬럼으로 두지 않는다. Friction Detector는 steps.jsonl을 직접 읽고, 소요 시간은 `started_at`과 `finished_at`으로 계산한다.

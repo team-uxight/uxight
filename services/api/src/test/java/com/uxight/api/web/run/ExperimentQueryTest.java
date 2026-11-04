@@ -295,8 +295,12 @@ class ExperimentQueryTest {
     Long first = insertExperiment(project, "done", false, null, LocalDateTime.of(2026, 10, 1, 10, 30));
     Long second = insertNextRound(first, project, "done", null);
     Long third = insertNextRound(first, project, "running", null);
-    jdbcTemplate.update("UPDATE runs SET improvement_id = 7, finished_at = '2026-10-02 11:00:00' WHERE run_id = ?", second);
-    jdbcTemplate.update("UPDATE runs SET improvement_id = 9 WHERE run_id = ?", third);
+    // 2회차는 1회차의 개선안, 3회차는 2회차의 개선안을 적용했다 (runs.improvement_id → improvements 외래 키)
+    long improvementOfFirst = insertImprovement(first);
+    long improvementOfSecond = insertImprovement(second);
+    jdbcTemplate.update("UPDATE runs SET improvement_id = ?, finished_at = '2026-10-02 11:00:00' WHERE run_id = ?",
+        improvementOfFirst, second);
+    jdbcTemplate.update("UPDATE runs SET improvement_id = ? WHERE run_id = ?", improvementOfSecond, third);
     // 지표는 Python 이 회차 종료 때 확정한다 — 진행 중인 3회차는 아직 없다
     jdbcTemplate.update("INSERT INTO run_metrics (run_id, success_rate, avg_steps, avg_backtracks, avg_seconds, tokens, "
         + "cost_usd) VALUES (?, 66.67, 12.50, 1.00, 95.25, 3000, 0.0420)", first);
@@ -305,13 +309,13 @@ class ExperimentQueryTest {
     mvc.perform(get("/api/runs/{firstRunId}/rounds", first).header(HttpHeaders.AUTHORIZATION, bearer))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.*", hasSize(2)))
-        .andExpect(jsonPath("$.awaitingApproval").value(false))   // 승인 기능 도입 전 — 상태 계산이 승인 대기를 내지 않는다
+        .andExpect(jsonPath("$.awaitingApproval").value(false))   // 마지막 회차가 실행 중 — 승인 대기가 아니다
         .andExpect(jsonPath("$.rounds[*].runId").value(contains(first.intValue(), second.intValue(), third.intValue())))
         .andExpect(jsonPath("$.rounds[*].round").value(contains(1, 2, 3)))
         .andExpect(jsonPath("$.rounds[*].status").value(contains("done", "done", "running")))
         .andExpect(jsonPath("$.rounds[0].*", hasSize(7)))
         .andExpect(jsonPath("$.rounds[0].appliedImprovementId").value(nullValue()))   // 최초 회차
-        .andExpect(jsonPath("$.rounds[1].appliedImprovementId").value(7))
+        .andExpect(jsonPath("$.rounds[1].appliedImprovementId").value(improvementOfFirst))
         .andExpect(jsonPath("$.rounds[0].createdAt").isString())
         .andExpect(jsonPath("$.rounds[0].finishedAt").value("2026-10-01T10:30:00"))
         .andExpect(jsonPath("$.rounds[2].finishedAt").value(nullValue()))
@@ -446,6 +450,12 @@ class ExperimentQueryTest {
         + "tokens, finished_at) VALUES (?, ?, 'diagnose', ?, 'https://a.example.com', JSON_ARRAY(), JSON_OBJECT(), "
         + "JSON_OBJECT(), JSON_ARRAY(JSON_OBJECT('persona_id', 1)), ?, ?, ?, ?)",
         projectId, taskId, firstRunId, status, cancelRequested, tokens, finishedAt);
+    return jdbcTemplate.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+  }
+
+  private long insertImprovement(long runId) {
+    jdbcTemplate.update("INSERT INTO improvements (run_id, finding_ids, option_no, patch_kind, patch) "
+        + "VALUES (?, JSON_ARRAY(), 1, 'relabel', JSON_OBJECT())", runId);
     return jdbcTemplate.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
   }
 }

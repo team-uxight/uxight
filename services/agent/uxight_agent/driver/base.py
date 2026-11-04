@@ -6,10 +6,21 @@ from ..schemas import Action
 
 @dataclass(frozen=True)
 class ActionResult:
-    """act()의 수행 결과. 실패해도 예외 대신 ok=False와 error를 돌려준다."""
+    """act()의 수행 결과. 실패해도 예외 대신 ok=False와 error를 돌려준다.
+
+    error_code 는 step 로그의 오류 코드다 (행동 로그 명세 3.8). 실행하지 않은 step(파싱 실패 ·
+    차단 · LLM 호출 실패)도 이 결과로 남긴다.
+    late 는 늦은 이동을 되돌린 DOMAIN_BLOCKED 다 — 관측 전이나 행동 전에 페이지가 스스로
+    허용 밖으로 갔고, 이 step 의 행동이 간 것이 아니다 (GACA-224).
+    프롬프트의 '지난 행동' 문구만 다르게 하고 로그에는 쓰지 않는다.
+    """
 
     ok: bool
     error: str | None = None
+    error_code: str | None = None
+    url_after: str | None = None  # 행동 뒤 페이지 주소. 모르면 None (로그엔 행동 전 주소)
+    destination: str | None = None  # DOMAIN_BLOCKED 일 때 막은 목적지 (계정 · 쿼리 뺌, 200자 안)
+    late: bool = False
 
 
 @dataclass(frozen=True)
@@ -17,14 +28,24 @@ class Observation:
     """observe()가 돌려주는 현재 페이지 상태.
 
     dom은 LLM에게 보여줄 텍스트, element_map은 ID → 요소 정보.
-    screenshot은 SoM 방식 드라이버가 찍은 PNG 바이트이고, DOM 방식에서는 None이다.
-    SoM 방식도 입력칸을 가린 그림을 얻지 못하면 None이다 — 그 step은 글 관측(dom)만으로 진행한다.
+    text 는 요소 줄에 없고 지금 화면 안에 보이는 본문 글이다 — 블록마다 한 줄 (GACA-217).
+    글이 있는 표 칸 · 문단 안에 번호 요소가 있으면 글 뒤에 그 요소 번호가 ' [n]' 으로 붙는다
+    (GACA-222).
+    링크 요소의 url 은 브라우저가 풀어 쓴 목적지다 — 도메인 가드가 이것으로 막는다.
+    blocked 는 관측 전에 드라이버가 되돌린 허용 밖 주소다(계정 · 쿼리 뺌, 200자 안).
+    행동이 끝난 뒤 주 창이 늦게 허용 밖으로 갔다 (GACA-224). 관측은 되돌린 화면이고,
+    허용 밖 페이지의 글은 들어 있지 않다.
+    screenshot은 입력칸을 가린 화면 PNG 바이트다. SoM 방식은 번호 박스를 그린 그림(모델 입력),
+    DOM 방식은 step 로그용 그림이다. 가린 그림을 얻지 못하면 None이다 — 그 step은 글 관측(dom)만
+    으로 진행하고 로그의 screenshot 은 null 이다.
     """
 
     url: str
     title: str
     dom: str
+    text: str = ""
     element_map: dict[int, dict] = field(default_factory=dict)
+    blocked: str | None = None
     screenshot: bytes | None = field(default=None, repr=False)
 
 
@@ -34,6 +55,29 @@ class Driver(ABC):
     Walking Skeleton은 DOM 방식(DomDriver)을 쓰지만, 실제 구현에서는
     스크린샷(SoM) 방식이나 DOM + SoM 하이브리드로 교체할 수 있어야 한다.
     """
+
+    # 관측 방식 (step 로그 observation.mode). 화면 그림을 모델에 보내는 드라이버는 "som".
+    mode = "dom"
+
+    def __init__(
+        self, allowed_hosts: frozenset[str] = frozenset(), block_outside_subrequests: bool = True
+    ) -> None:
+        # 허용 도메인('호스트:포트', guard.domain). 드라이버는 이 밖으로 이동하지 않는다.
+        # start(url) 의 주소는 늘 허용이다.
+        self._allowed_hosts = allowed_hosts
+        # 허용 밖 하위 요청 차단 (GACA-180 · 227). 기본값 켬 — 운영 Watcher 와 bench 가 쓰고,
+        # 끄는 것은 시험뿐이다.
+        # 켜면 브라우저가 허용 밖으로 연결하지 않는다.
+        # route 에서 하위 요청 · iframe 이동을 끊고, route 를 거치지 않는 연결(worker · 떠날 때의
+        # beacon · 추측 prefetch · WebRTC · QUIC)은 브라우저 설정으로 막는다 (DomDriver).
+        self._block_outside_subrequests = block_outside_subrequests
+        # 요청 단계에서 끊은 허용 밖 이동 요청 수 (guard.domain 2단계).
+        # 성능 benchmark 가 가드 조건마다 센다 (GACA-180). 운영은 읽지 않는다.
+        self.blocked_requests = 0
+        # 허용 밖 하위 요청 차단이 route 에서 끊은 하위 요청 · iframe 이동과 가짜로 받은 허용 밖
+        # WebSocket 수. 위와 따로 센다 — 이것으로는 행동이 차단이 되지 않는다.
+        # 브라우저 설정(프록시)이 막은 연결은 드라이버가 보지 못해 세지 않는다.
+        self.blocked_outside_subrequests = 0
 
     @abstractmethod
     async def start(self, url: str) -> None:
