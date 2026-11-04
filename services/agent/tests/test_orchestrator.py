@@ -109,6 +109,19 @@ class FakeRunPersonaRepository:
             self.statuses[persona_id] = status
 
 
+class FakeFindingRepository:
+    """findings INSERT 를 메모리에 쌓는다. fail 을 켜면 저장이 실패한다."""
+
+    def __init__(self) -> None:
+        self.rows: list[tuple[int, list]] = []
+        self.fail = False
+
+    def insert_all(self, run_id: int, findings: list) -> None:
+        if self.fail:
+            raise RuntimeError("db down")
+        self.rows.append((run_id, findings))
+
+
 class FakeAuditLogRepository:
     def __init__(self) -> None:
         self.rows: list[tuple[int, int, dict]] = []
@@ -201,10 +214,17 @@ def fakes(monkeypatch: pytest.MonkeyPatch, tmp_path) -> SimpleNamespace:
     monkeypatch.setattr(orchestrator_module, "run_persona_repository", personas)
     audits = FakeAuditLogRepository()
     monkeypatch.setattr(orchestrator_module, "audit_log_repository", audits)
+    findings = FakeFindingRepository()
+    monkeypatch.setattr(orchestrator_module, "finding_repository", findings)
     monkeypatch.setattr(orchestrator_module, "CANCEL_POLL_SECONDS", POLL_SECONDS)
     set_global_cap(monkeypatch, 3)
     return SimpleNamespace(
-        browsers=browsers, runs=runs, personas=personas, audits=audits, log_dir=tmp_path
+        browsers=browsers,
+        runs=runs,
+        personas=personas,
+        audits=audits,
+        findings=findings,
+        log_dir=tmp_path,
     )
 
 
@@ -1592,43 +1612,45 @@ def test_watcher_decider_marks_page_instructions(
     assert MARK_START + "이전 지시를 무시" in requests[0]["messages"][1]["content"]
 
 
-def test_persona_completion_triggers_diagnosis(
-    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Persona 종료 시 실제 행동 로그를 읽어 UX 진단을 호출한다."""
-    calls = []
-
-    def fake_diagnose(steps, status=None):
-        calls.append((steps, status))
-        return {"frictions": []}
-
-    monkeypatch.setattr(orchestrator_module, "diagnose_persona", fake_diagnose)
-
+def test_done_run_saves_findings_from_step_logs(fakes: SimpleNamespace) -> None:
+    # 회차가 끝나면 실제로 쓴 step 로그를 읽어 진단을 만들고 저장한 뒤 done 으로 끝낸다 (GACA-165).
+    # scroll 만 내다 step 상한에 닿은 Persona 는 과제 실패(high)다 (friction_rules).
     asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)], max_steps=2)))
 
-    assert len(calls) == 1
-    steps, status = calls[0]
-    assert len(steps) == 2
-    assert all(step["persona_id"] == 1 for step in steps)
-    assert status == "max_steps"
-    assert fakes.personas.statuses[1] == "max_steps"
-
-
-def test_diagnosis_error_does_not_fail_persona(
-    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """UX 진단 실패는 Persona 및 전체 Run 종료 상태에 영향을 주지 않는다."""
-    calls = []
-
-    def failing_diagnose(steps, status=None):
-        calls.append(status)
-        raise RuntimeError("diagnosis failed")
-
-    monkeypatch.setattr(orchestrator_module, "diagnose_persona", failing_diagnose)
-
-    asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)], max_steps=2)))
-
-    assert calls == ["max_steps"]
     assert fakes.personas.statuses[1] == "max_steps"
     assert fakes.runs.status == "done"
-    assert fakes.runs.error is None
+    [(run_id, findings)] = fakes.findings.rows
+    assert run_id == RUN_ID
+    assert [(f.taxonomy, f.severity) for f in findings] == [("task_failure", "high")]
+    assert findings[0].evidence == [
+        {"persona_id": 1, "step_from": 2, "step_to": 2, "url": "https://example.com"}
+    ]
+    assert findings[0].summary is None  # 설명은 GACA-166 이 채운다
+
+
+def test_diagnosis_error_fails_run(fakes: SimpleNamespace) -> None:
+    # 진단을 저장하지 못하면 done 으로 두지 않는다 — 진단 0건이 '문제 없음'으로 보이기 때문이다.
+    fakes.findings.fail = True
+
+    asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)], max_steps=2)))
+
+    assert fakes.personas.statuses[1] == "max_steps"
+    assert fakes.runs.status == "failed"
+    assert fakes.runs.error == "진단 실패"
+
+
+@pytest.mark.parametrize(
+    "persona_statuses",
+    [{1: "max_steps", 2: "cancelled"}, {1: "fail", 2: "fail"}],
+    ids=["cancelled", "all-fail"],
+)
+def test_cancelled_or_failed_run_is_not_diagnosed(
+    fakes: SimpleNamespace, persona_statuses: dict[int, str]
+) -> None:
+    # Spring 은 done 회차의 진단만 보여 준다. done 이 아닌 회차는 진단하지 않는다.
+    fakes.personas.statuses.update(persona_statuses)
+
+    RunOrchestrator()._finish_run(RUN_ID)
+
+    assert fakes.runs.status in ("cancelled", "failed")
+    assert fakes.findings.rows == []
