@@ -2,7 +2,9 @@ import functools
 import http.server
 import json
 import threading
+import time
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 import httpx
 import pytest
@@ -78,3 +80,10 @@ def fixture_server():
 class _QuietHandler(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *args) -> None:
         pass
+
+    def do_GET(self) -> None:
+        # 주소에 ?delay=밀리초 가 있으면 그만큼 늦게 답한다 (늦게 오는 글, GACA-157).
+        delay = parse_qs(urlsplit(self.path).query).get("delay")
+        if delay:
+            time.sleep(int(delay[0]) / 1000)
+        super().do_GET()

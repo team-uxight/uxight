@@ -11,8 +11,8 @@ from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from uxight_agent.driver import som_driver
 from uxight_agent.driver.base import Observation
-from uxight_agent.driver.dom_driver import ID_ATTRIBUTE, DomDriver
-from uxight_agent.driver.som_driver import MARK_ATTRIBUTE, STILL_WAIT_MS, SomDriver
+from uxight_agent.driver.dom_driver import ID_ATTRIBUTE, STILL_WAIT_MS, DomDriver
+from uxight_agent.driver.som_driver import MARK_ATTRIBUTE, SomDriver
 from uxight_agent.schemas import Action
 
 FIXTURES = Path(__file__).parent / "fixtures"

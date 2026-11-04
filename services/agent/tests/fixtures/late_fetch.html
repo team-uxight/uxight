@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>늦게 오는 글</title>
+</head>
+<body>
+  <h1>장학 안내</h1>
+  <p>신청 일정은 아래에 나온다.</p>
+  <p><a href="late_fade.html">등록 안내</a></p>
+  <div id="slot"></div>
+  <!-- 글 · 링크를 fetch 로 받아 넣는다. 응답은 주소의 ?wait= 밀리초만큼 늦게 온다(conftest 서버의 ?delay=).
+       ?replace= 밀리초를 주면 받아 오는 사이 그때 주소의 검색어를 바꾼다(같은 문서 안 주소 변경) -->
+  <script>
+    const params = new URLSearchParams(location.search);
+    fetch(`late_fetch.json?delay=${params.get('wait') ?? '800'}`).then((r) => r.json()).then((d) => {
+      document.getElementById('slot').innerHTML = `<p>${d.text}</p><a href="${d.href}">${d.link}</a>`;
+    });
+    if (params.has('replace')) {
+      setTimeout(() => history.replaceState(null, '', `${location.pathname}?q=scholar`), Number(params.get('replace')));
+    }
+  </script>
+</body>
+</html>
