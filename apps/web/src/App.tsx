@@ -1,49 +1,71 @@
-import { useState } from 'react'
-import './App.css'
+import { lazy, Suspense } from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import Login from './pages/Login';
+import SignUp from './pages/SignUp';
+import ProtectedRoute from './components/ProtectedRoute';
+import ResearcherLayout from './components/ResearcherLayout';
+import RDashboard from './pages/R-Dashboard';
+import RRunSetting from './pages/R-RunSetting';
+import RMonitor from './pages/R-Monitor';
+import RMonitorLive from './pages/R-MonitorLive';
+import RDiagnosis from './pages/R-Diagnosis';
+import RFixes from './pages/R-Fixes';
+import RReports from './pages/R-Reports';
+import RCompare from './pages/R-Compare';
+import DesignSystem from './pages/DesignSystem';
+import AdminLayout from './components/AdminLayout';
+import AdminAccounts from './pages/A-Accounts';
+import AdminPolicy from './pages/A-Policy';
+import AdminUsage from './pages/A-Usage';
+import SomViewerDemo from './pages/SomViewerDemo';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080'
-
-type Health = { status: string; service: string }
-type RunCreated = { id: number; status: string }
+// 프리뷰 CSS 가 전역(.admin-sidebar 등)이라 운영자 화면을 덮어쓰므로 해당 라우트에서만 로드한다.
+const PreviewLayout = lazy(() => import('./preview/components/AdminLayout'));
+const PreviewUsers = lazy(() => import('./preview/pages/AdminUsers'));
+const PreviewResources = lazy(() => import('./preview/pages/AdminResources'));
+const PreviewAudit = lazy(() => import('./preview/pages/AdminAudit'));
 
 export default function App() {
-  const [health, setHealth] = useState<string>('—')
-  const [run, setRun] = useState<string>('—')
-
-  async function checkHealth() {
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/health`)
-      const body = (await res.json()) as Health
-      setHealth(`${body.service}: ${body.status}`)
-    } catch (e) {
-      setHealth(`error: ${(e as Error).message}`)
-    }
-  }
-
-  async function createRun() {
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/runs`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targetUrl: 'https://www.gachon.ac.kr', task: '장학금 신청 방법 찾기' }),
-      })
-      const body = (await res.json()) as RunCreated
-      setRun(`run #${body.id} → ${body.status}`)
-    } catch (e) {
-      setRun(`error: ${(e as Error).message}`)
-    }
-  }
-
   return (
-    <main>
-      <h1>UXight</h1>
-      <p>walking skeleton — web → api → agent → mysql → web</p>
-      <section>
-        <button onClick={checkHealth}>GET /api/health</button> <code>{health}</code>
-      </section>
-      <section>
-        <button onClick={createRun}>POST /api/runs</button> <code>{run}</code>
-      </section>
-    </main>
-  )
+    <BrowserRouter>
+      <Suspense fallback={null}>
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="/signup" element={<SignUp />} />
+        <Route path="/design-system" element={<DesignSystem />} />
+        <Route path="/som-viewer-demo" element={<SomViewerDemo />} />
+        <Route element={<PreviewLayout />}>
+          <Route path="/admin-preview" element={<PreviewUsers />} />
+          <Route path="/admin-preview/resources" element={<PreviewResources />} />
+          <Route path="/admin-preview/audit" element={<PreviewAudit />} />
+        </Route>
+
+        <Route element={<ProtectedRoute allowedRoles={['admin', 'maintainer', 'researcher']} />}>
+          <Route element={<ResearcherLayout />}>
+            <Route path="/dashboard" element={<RDashboard />} />
+            <Route path="/run-setting" element={<RRunSetting />} />
+            <Route path="/monitor" element={<RMonitor />} />
+            <Route path="/monitor/:runId" element={<RMonitorLive />} />
+            <Route path="/diagnosis" element={<RDiagnosis />} />
+            <Route path="/fixes" element={<RFixes />} />
+            <Route path="/reports" element={<RReports />} />
+            <Route path="/compare" element={<RCompare />} />
+            <Route path="/history" element={<Navigate to="/compare" replace />} />
+          </Route>
+        </Route>
+
+        <Route element={<ProtectedRoute allowedRoles={['admin', 'maintainer']} />}>
+          <Route element={<AdminLayout />}>
+            <Route path="/admin/accounts" element={<AdminAccounts />} />
+            <Route path="/admin/policy" element={<AdminPolicy />} />
+            <Route path="/admin/usage" element={<AdminUsage />} />
+          </Route>
+        </Route>
+
+        {/* 기본 리다이렉트 */}
+        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      </Routes>
+      </Suspense>
+    </BrowserRouter>
+  );
 }

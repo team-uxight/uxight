@@ -1,0 +1,1224 @@
+/* ==========================================
+   UXight Admin - 계정·권한 관리
+   Figma A1 / 1440 × 1024
+   ========================================== */
+
+.admin-users {
+  --au-navy: #1f1d3d;
+  --au-text: #24233f;
+  --au-muted: #a1a4b4;
+  --au-border: #e6e5f2;
+
+  width: 100%;
+  min-width: 0;
+  padding-top: 0;
+
+  font-family: "Pretendard", "Noto Sans KR", sans-serif;
+  color: var(--au-text);
+}
+
+.admin-users *,
+.admin-users *::before,
+.admin-users *::after {
+  box-sizing: border-box;
+}
+
+.admin-users button,
+.admin-users input,
+.admin-users select {
+  font: inherit;
+}
+
+.admin-users button {
+  cursor: pointer;
+}
+
+/* ==========================================
+   1. 제목 및 상단 액션
+   ========================================== */
+
+.admin-users-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+
+  width: 100%;
+  min-height: 90px;
+  margin-bottom: 120px;
+}
+
+.admin-users-heading-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.admin-users-heading h1 {
+  margin: 0;
+
+  color: #1f1d3d;
+  font-size: 24px;
+  font-weight: 800;
+  line-height: 1.25;
+  letter-spacing: -0.5px;
+}
+
+.admin-users-heading p {
+  margin: 0;
+
+  color: rgba(31, 29, 61, 0.6);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.4;
+}
+
+.admin-users-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* 공통 버튼 */
+
+.admin-users-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+
+  min-height: 40px;
+  padding: 0 16px;
+
+  border: 1px solid transparent;
+  border-radius: 10px;
+
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.2;
+  white-space: nowrap;
+
+  transition:
+    background-color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
+}
+
+.admin-users-btn-secondary {
+  background: #ffffff;
+  border-color: #e6e5f2;
+  color: #54536b;
+}
+
+.admin-users-btn-secondary:hover:not(:disabled) {
+  background: #f7f7fc;
+  border-color: #d5d2e8;
+}
+
+.admin-users-btn-primary {
+  background: linear-gradient(110deg, #413d58 0%, #1f1d3d 100%);
+
+  color: #ffffff;
+
+  box-shadow: 0 7px 8px rgba(111, 91, 210, 0.18);
+}
+
+.admin-users-btn-primary:hover:not(:disabled) {
+  box-shadow: 0 9px 16px rgba(66, 50, 137, 0.24);
+
+  transform: translateY(-1px);
+}
+
+.admin-users-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* ==========================================
+   2. 안내 및 오류 메시지
+   ========================================== */
+
+.admin-users-notice,
+.admin-users-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+
+  margin-bottom: 16px;
+  padding: 12px 16px;
+
+  border-radius: 10px;
+
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.admin-users-notice {
+  background: rgba(226, 247, 239, 0.95);
+  border: 1px solid #bce5d5;
+  color: #17684d;
+}
+
+.admin-users-error {
+  background: #fff1f1;
+  border: 1px solid #f2c6c6;
+  color: #a43636;
+}
+
+.admin-users-notice button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  padding: 4px;
+
+  border: 0;
+  background: transparent;
+  color: inherit;
+}
+
+/* ==========================================
+   3. 사용자 목록 패널
+   ========================================== */
+
+.admin-users-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 17px;
+
+  width: 100%;
+  padding: 23px 24px 30px;
+
+  border: 1px solid rgba(255, 255, 255, 0.58);
+  border-radius: 17px;
+
+  background: linear-gradient(
+    131deg,
+    rgba(255, 255, 255, 0.7) 10%,
+    rgba(255, 255, 255, 0.3) 90%
+  );
+
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+
+  backdrop-filter: blur(30px);
+  -webkit-backdrop-filter: blur(30px);
+}
+
+/* 패널 헤더 */
+
+.admin-users-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+
+  width: 100%;
+  min-height: 46px;
+}
+
+.admin-users-panel-head h2 {
+  margin: 0 0 6px;
+
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: #24233f;
+}
+
+.admin-users-panel-head p {
+  margin: 0;
+
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.45;
+  color: #a1a4b4;
+}
+
+.admin-users-count {
+  flex-shrink: 0;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  min-height: 25px;
+  padding: 5px 10px;
+
+  border-radius: 30px;
+  background: #1f1d3d;
+
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+/* ==========================================
+   4. 검색 및 필터
+   ========================================== */
+
+.admin-users-filters {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+
+  width: 100%;
+  min-width: 0;
+  padding-top: 3px;
+}
+
+.admin-users-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  flex: 1;
+  min-width: 170px;
+  height: 40px;
+  padding: 0 12px;
+
+  border: 1px solid #e9e8f0;
+  border-radius: 10px;
+  background: #fafbff;
+  color: #a0a5b5;
+}
+
+.admin-users-search svg {
+  flex-shrink: 0;
+}
+
+.admin-users-search input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+
+  padding: 0;
+
+  border: 0;
+  outline: 0;
+  background: transparent;
+
+  color: #24233f;
+  font-size: 12px;
+}
+
+.admin-users-search input::placeholder {
+  color: #a0a5b5;
+  opacity: 1;
+}
+
+.admin-users-search:focus-within {
+  border-color: #948dc3;
+  box-shadow: 0 0 0 3px rgba(111, 91, 210, 0.08);
+}
+
+.admin-users-select {
+  flex-shrink: 0;
+
+  width: 126px;
+  height: 40px;
+  padding: 0 12px;
+
+  border: 1px solid #e9e8f0;
+  border-radius: 10px;
+  outline: none;
+
+  background: #fafbff;
+  color: #54536b;
+
+  font-size: 12px;
+  font-weight: 500;
+
+  cursor: pointer;
+}
+
+.admin-users-select:focus-visible {
+  border-color: #948dc3;
+  box-shadow: 0 0 0 3px rgba(111, 91, 210, 0.1);
+}
+
+.admin-users-filters > .admin-users-btn {
+  flex-shrink: 0;
+}
+
+/* ==========================================
+   5. 테이블
+   ========================================== */
+
+.admin-users-table-wrap {
+  width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+
+  border: 1px solid #e9e8f0;
+  border-radius: 10px;
+
+  background: rgba(255, 255, 255, 0.38);
+}
+
+.admin-users-table {
+  width: 100%;
+  min-width: 1015px;
+
+  border-collapse: collapse;
+  table-layout: fixed;
+
+  color: #24233f;
+  font-size: 12px;
+}
+
+.admin-users-table th,
+.admin-users-table td {
+  padding: 12px;
+  text-align: left;
+  vertical-align: middle;
+  overflow-wrap: anywhere;
+}
+
+/* Figma의 열 비율 */
+
+.admin-users-table th:nth-child(1) {
+  width: 16%;
+}
+.admin-users-table th:nth-child(2) {
+  width: 23%;
+}
+.admin-users-table th:nth-child(3) {
+  width: 13%;
+}
+.admin-users-table th:nth-child(4) {
+  width: 10%;
+}
+.admin-users-table th:nth-child(5) {
+  width: 12%;
+}
+.admin-users-table th:nth-child(6) {
+  width: 12%;
+}
+.admin-users-table th:nth-child(7) {
+  width: 9%;
+}
+.admin-users-table th:nth-child(8) {
+  width: 5%;
+}
+
+.admin-users-table thead {
+  background: rgba(246, 246, 252, 0.88);
+}
+
+.admin-users-table thead tr {
+  height: 48px;
+}
+
+.admin-users-table th {
+  border-bottom: 1px solid #e6e5f2;
+
+  color: #54536b;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.admin-users-table tbody tr {
+  height: 58px;
+  border-bottom: 1px solid #ecebf4;
+}
+
+.admin-users-table tbody tr:last-child {
+  border-bottom: none;
+}
+
+.admin-users-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.admin-users-table td {
+  color: #54536b;
+  font-weight: 500;
+}
+
+.admin-users-table td:nth-child(2) {
+  word-break: break-all;
+}
+
+/* 이름 + 아바타 */
+
+.admin-users-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.admin-users-name-cell strong {
+  color: #24233f;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.admin-users-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 27px;
+  height: 27px;
+  flex-shrink: 0;
+
+  border-radius: 50%;
+
+  background: linear-gradient(135deg, #d8d2ff, #c5f4eb);
+
+  color: #554ab1;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* 역할 배지 */
+
+.admin-users-role {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  min-height: 24px;
+  padding: 5px 9px;
+
+  border-radius: 20px;
+
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.admin-users-role-admin {
+  background: #eee9ff;
+  color: #6851ae;
+}
+
+.admin-users-role-maintainer {
+  background: #e8edff;
+  color: #5167a8;
+}
+
+.admin-users-role-researcher {
+  background: #e9f5f2;
+  color: #358677;
+}
+
+/* 활성 / 비활성 배지 */
+
+.admin-users-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  min-height: 27px;
+  padding: 6px 9px;
+
+  border-radius: 20px;
+
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.admin-users-status.is-active {
+  background: #e4f8ed;
+  color: #238a59;
+}
+
+.admin-users-status.is-inactive {
+  background: #f2f0f3;
+  color: #8b8793;
+}
+
+.admin-users-muted {
+  color: #a1a4b4 !important;
+}
+
+/* ==========================================
+   6. 사용자 관리 메뉴
+   ========================================== */
+
+.admin-users-manage-cell {
+  overflow: visible;
+}
+
+.admin-users-menu-wrap {
+  position: relative;
+}
+
+.admin-users-menu-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 33px;
+  height: 29px;
+
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #54536b;
+}
+
+.admin-users-menu-trigger:hover:not(:disabled),
+.admin-users-menu-trigger[aria-expanded="true"] {
+  background: #efedf8;
+  color: #1f1d3d;
+}
+
+.admin-users-menu-trigger:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.admin-users-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+
+  width: 184px;
+  padding: 8px;
+
+  border: 1px solid #e6e5f2;
+  border-radius: 12px;
+
+  background: #ffffff;
+
+  box-shadow: 0 12px 32px rgba(31, 29, 61, 0.18);
+}
+
+.admin-users-menu-title {
+  margin: 4px 8px 8px;
+
+  color: #9a98ac;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.admin-users-menu button {
+  display: block;
+  width: 100%;
+  padding: 10px;
+
+  border: 0;
+  border-radius: 7px;
+
+  background: transparent;
+  color: #383650;
+
+  font-size: 12px;
+  text-align: left;
+}
+
+.admin-users-menu button:hover:not(:disabled) {
+  background: #f3f1fa;
+}
+
+.admin-users-menu button:disabled {
+  color: #b1afba;
+  cursor: not-allowed;
+}
+
+.admin-users-menu-divider {
+  height: 1px;
+  margin: 6px 0;
+
+  background: #e9e8f0;
+}
+
+/* ==========================================
+   7. 페이지 이동
+   ========================================== */
+
+.admin-users-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+
+  padding-top: 4px;
+
+  color: #77758e;
+  font-size: 12px;
+}
+
+.admin-users-pagination > div {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.admin-users-pagination button {
+  padding: 7px 12px;
+
+  border: 1px solid #e6e5f2;
+  border-radius: 8px;
+
+  background: #ffffff;
+  color: #54536b;
+
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.admin-users-pagination button:hover:not(:disabled) {
+  background: #f5f3fb;
+}
+
+.admin-users-pagination button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ==========================================
+   8. 변경 확인 모달
+   ========================================== */
+
+.admin-users-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  padding: 20px;
+
+  background: rgba(21, 19, 42, 0.46);
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+}
+
+.admin-users-modal {
+  width: 100%;
+  max-width: 430px;
+  padding: 28px;
+
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  border-radius: 18px;
+
+  background: #ffffff;
+  box-shadow: 0 20px 60px rgba(21, 19, 42, 0.25);
+}
+
+.admin-users-modal h2 {
+  margin: 0 0 12px;
+
+  color: #1f1d3d;
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.admin-users-modal p {
+  margin: 0;
+
+  color: #54536b;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.admin-users-modal p strong {
+  color: #1f1d3d;
+}
+
+.admin-users-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+
+  margin-top: 28px;
+}
+
+/* ==========================================
+   9. 접근성
+   ========================================== */
+
+.admin-users button:focus-visible,
+.admin-users select:focus-visible {
+  outline: 3px solid rgba(53, 212, 200, 0.65);
+  outline-offset: 2px;
+}
+
+/* ==========================================
+   10. 반응형
+   ========================================== */
+
+@media (max-width: 1200px) {
+  .admin-users-heading {
+    margin-bottom: 70px;
+  }
+
+  .admin-users-filters {
+    flex-wrap: wrap;
+  }
+
+  .admin-users-search {
+    flex-basis: 100%;
+  }
+}
+
+@media (max-width: 900px) {
+  .admin-users-heading {
+    margin-bottom: 36px;
+  }
+
+  .admin-users-panel {
+    padding: 20px;
+  }
+}
+
+@media (max-width: 600px) {
+  .admin-users-heading {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 20px;
+
+    margin-bottom: 28px;
+  }
+
+  .admin-users-actions {
+    width: 100%;
+  }
+
+  .admin-users-actions .admin-users-btn {
+    flex: 1;
+  }
+
+  .admin-users-panel {
+    padding: 16px;
+    border-radius: 14px;
+  }
+
+  .admin-users-panel-head {
+    align-items: flex-start;
+  }
+
+  .admin-users-panel-head p {
+    max-width: 240px;
+  }
+
+  .admin-users-select {
+    flex: 1;
+    min-width: 100px;
+  }
+
+  .admin-users-pagination {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .admin-users-pagination > div {
+    align-self: flex-end;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-users *,
+  .admin-users *::before,
+  .admin-users *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+
+/* ==========================================
+   계정·권한 콘텐츠 스크롤 조정
+   ========================================== */
+
+.admin-users {
+  min-height: 100%;
+  padding-bottom: 24px;
+}
+
+/* 페이지 제목은 콘텐츠와 함께 스크롤 */
+.admin-users-heading {
+  flex-shrink: 0;
+}
+
+/* 테이블은 필요할 때 가로 스크롤 */
+.admin-users-table-wrap {
+  overflow-x: auto;
+}
+
+/* 작은 화면에서는 간격 축소 */
+@media (max-width: 900px) {
+  .admin-users-heading {
+    margin-bottom: 36px;
+  }
+}
+
+/* ==========================================
+   Figma A1 - 계정 현황 카드 4개
+   ========================================== */
+
+/* 제목 아래의 기존 큰 빈 공간 제거 */
+.admin-users .admin-users-heading {
+  min-height: 50px;
+  margin-bottom: 15px;
+}
+
+/* 카드 4개를 가로로 배치 */
+.admin-users-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 15px;
+
+  width: 100%;
+  margin-bottom: 17px;
+}
+
+/* 개별 카드 */
+.admin-users-stat-card {
+  position: relative;
+  isolation: isolate;
+
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+
+  height: 128px;
+  min-height: 119px;
+  min-width: 0;
+  padding: 21px 22px;
+
+  box-sizing: border-box;
+
+  background: linear-gradient(
+    115.64deg,
+    rgba(255, 255, 255, 0.7) 24.89%,
+    rgba(255, 255, 255, 0.3) 77.4%
+  );
+
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+
+  backdrop-filter: blur(30px);
+  -webkit-backdrop-filter: blur(30px);
+
+  border-radius: 16px;
+}
+
+/* 두 번째 카드의 Figma 그라데이션 */
+.admin-users-stat-card:nth-child(2) {
+  background: linear-gradient(
+    114.53deg,
+    rgba(255, 255, 255, 0.63) 21.18%,
+    rgba(255, 255, 255, 0.27) 76.08%
+  );
+}
+
+/* 세 번째 카드 */
+.admin-users-stat-card:nth-child(3) {
+  background: linear-gradient(
+    111.93deg,
+    rgba(255, 255, 255, 0.7) 28.18%,
+    rgba(255, 255, 255, 0.3) 80.97%
+  );
+}
+
+/* 네 번째 카드 */
+.admin-users-stat-card:nth-child(4) {
+  background: linear-gradient(
+    109.64deg,
+    rgba(255, 255, 255, 0.7) 23.64%,
+    rgba(255, 255, 255, 0.3) 79.3%
+  );
+}
+
+/* 카드 제목 */
+.admin-users-stat-label {
+  color: #6b6880;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 17px;
+}
+
+/* 큰 숫자 */
+.admin-users-stat-value {
+  color: #1f1d3d;
+  font-size: 32px;
+  font-weight: 800;
+  line-height: 44px;
+  letter-spacing: -1px;
+}
+
+/* 하단 설명 */
+.admin-users-stat-note {
+  color: #9290a6;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 15px;
+}
+
+/* 오른쪽 상단 아이콘 */
+.admin-users-stat-icon {
+  position: absolute;
+  top: 18px;
+  right: 21px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 34px;
+  height: 34px;
+
+  background: rgba(239, 236, 255, 0.7);
+  border-radius: 11px;
+
+  color: #6860a6;
+}
+
+/* 카드별 아이콘 색상 */
+.admin-users-stat-card:nth-child(2) .admin-users-stat-icon {
+  background: rgba(226, 249, 237, 0.75);
+  color: #399a71;
+}
+
+.admin-users-stat-card:nth-child(3) .admin-users-stat-icon {
+  background: rgba(230, 234, 255, 0.75);
+  color: #6170ad;
+}
+
+.admin-users-stat-card:nth-child(4) .admin-users-stat-icon {
+  background: rgba(248, 235, 239, 0.8);
+  color: #b47d94;
+}
+
+/* 반응형 */
+@media (max-width: 1200px) {
+  .admin-users-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 600px) {
+  .admin-users-stats {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .admin-users-stat-card {
+    height: 120px;
+  }
+}
+
+/* ==========================================
+   Figma 개인별 계정 관리 모달
+   Frame 581:430
+   ========================================== */
+
+/* 모달 배경 */
+.admin-users-detail-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  padding: 20px;
+
+  background: rgba(20, 19, 42, 0.42);
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+}
+
+/* Figma 450 × 426.6 모달 */
+.admin-users-detail-modal {
+  box-sizing: border-box;
+
+  width: 450px;
+  max-width: 100%;
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
+
+  padding: 29px 30px;
+
+  border: 1px solid #eeedf4;
+  border-radius: 20px;
+
+  background: #ffffff;
+
+  box-shadow: 0 4px 10px rgba(31, 29, 61, 0.29);
+
+  font-family: "Noto Sans KR", sans-serif;
+}
+
+/* 상단 보라색 아이콘 */
+.admin-users-detail-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 47px;
+  height: 47px;
+
+  border-radius: 15px;
+  background: #f0edff;
+
+  color: #654ed7;
+  font-size: 24px;
+}
+
+/* 모달 제목 */
+.admin-users-detail-title {
+  margin: 19px 0 0;
+
+  color: #24233f;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.6px;
+  line-height: 27px;
+}
+
+/* 사용자 이메일 및 설명 */
+.admin-users-detail-description {
+  margin: 0;
+  padding: 7px 0 20px;
+
+  color: #84889c;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 21.6px;
+  overflow-wrap: anywhere;
+}
+
+/* 현재 역할, 현재 상태 */
+.admin-users-detail-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  min-height: 40px;
+  padding: 11px 0;
+
+  border-bottom: 1px solid #f1f0f6;
+}
+
+.admin-users-detail-line span {
+  color: #9a9db0;
+  font-size: 12px;
+}
+
+.admin-users-detail-line strong {
+  color: #494661;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* 역할 선택 */
+.admin-users-detail-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+
+  padding-top: 13px;
+}
+
+.admin-users-detail-form label {
+  color: #53536b;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.admin-users-detail-form select {
+  width: 100%;
+  height: 43px;
+
+  padding: 0 16px;
+
+  border: 1px solid #e5e4ef;
+  border-radius: 10px;
+  outline: none;
+
+  background: #ffffff;
+  color: #4e4c62;
+
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.admin-users-detail-form select:focus {
+  border-color: #958acb;
+  box-shadow: 0 0 0 3px rgba(101, 78, 215, 0.1);
+}
+
+/* 하단 버튼 */
+.admin-users-detail-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+
+  padding-top: 23px;
+}
+
+.admin-users-detail-actions button {
+  min-height: 40px;
+  padding: 0 16px;
+
+  border: 1px solid transparent;
+  border-radius: 10px;
+
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+
+  cursor: pointer;
+}
+
+/* 취소 */
+.admin-users-detail-cancel {
+  background: #ffffff;
+  border-color: #e6e5f2 !important;
+  color: #54536b;
+}
+
+/* 비활성화 */
+.admin-users-detail-danger {
+  background: #fff5f7;
+  border-color: #ffdce4 !important;
+  color: #d44061;
+}
+
+/* 역할 변경 */
+.admin-users-detail-save {
+  background: #1f1d3d;
+  color: #ffffff;
+
+  box-shadow: 0 7px 8px rgba(111, 91, 210, 0.18);
+}
+
+.admin-users-detail-actions button:hover:not(:disabled) {
+  filter: brightness(0.97);
+}
+
+.admin-users-detail-actions button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* 작은 화면 */
+@media (max-width: 480px) {
+  .admin-users-detail-modal {
+    padding: 24px 20px;
+  }
+
+  .admin-users-detail-actions {
+    gap: 6px;
+  }
+
+  .admin-users-detail-actions button {
+    padding: 0 10px;
+    font-size: 11px;
+  }
+}
