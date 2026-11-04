@@ -114,6 +114,13 @@ async ({ maxMs, selector }) => {
 #   안에 보이는 글도 누를 것도 없는 막(메뉴 바깥 클릭을 받는 투명 막, 스크린 리더용 숨김 글만
 #   든 dim 등)도 모달이 아니다 — 그 안만 보면 관측이 빈다. 그때는 더 바깥 층을 찾는다.
 #   보이는 것: 투명하지 않고 화면 안에서 4×4px 이상이며, 자기 글이 있거나 누를 수 있는 요소.
+# - 아니면 dim 의 형제 팝업 (GACA-229). 화면을 덮는 dim 과 그 위에 뜬 팝업이 형제인 레이어 팝업이다.
+#   네 귀퉁이 점이 고정 · 절대 위치 dim 에 들고, 가운데 점이 그 형제 안이면 형제를 모달로 본다.
+#   아래 셋은 레이어 팝업이 아니다.
+#   dim 안에 보이는 것이 있다 — 메뉴가 든 앱 화면 틀이다.
+#   팝업 밖에 화면 안에서 실제로 누를 수 있는 요소가 있다 — 덮인 페이지가 아니다. 본문 뒤 배경 ·
+#   hero 의 반투명 막 · 로그인 화면이 그렇고, 팝업 밖 닫기 버튼 · 나란히 뜬 팝업도 여기서 남는다.
+#   형제가 화면을 다 덮는다 — 페이지 전체를 싼 상자다.
 _MODAL_LAYER_JS = """
 () => {
   // 화면 크기 (스크롤바 뺌). 쿼크 모드에서는 html 이 문서 크기라 창 크기를 쓴다.
@@ -138,12 +145,32 @@ _MODAL_LAYER_JS = """
       && (el.matches(actionable) || Array.from(el.childNodes)
         .some((node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim()));
   };
+  const covers = (el) => {
+    const r = el.getBoundingClientRect();
+    return r.left <= 0 && r.top <= 0 && r.right >= width && r.bottom >= height;
+  };
+  const hasShown = (el) => [el, ...el.querySelectorAll('*')].some(shown);
   for (let el = hits[0]; el && el !== document.body; el = el.parentElement) {
     if (getComputedStyle(el).position !== 'fixed') continue;
     if (!hits.every((hit) => el.contains(hit))) continue;
-    const r = el.getBoundingClientRect();
-    if (r.left > 0 || r.top > 0 || r.right < width || r.bottom < height) continue;
-    if (Array.from(el.querySelectorAll('*')).some(shown)) return el;
+    if (covers(el) && Array.from(el.querySelectorAll('*')).some(shown)) return el;
+  }
+  const [center, ...corners] = hits;
+  for (let dim = corners[0]; dim && dim !== document.body; dim = dim.parentElement) {
+    if (!/fixed|absolute/.test(getComputedStyle(dim).position)) continue;
+    if (!corners.every((hit) => dim.contains(hit))) continue;
+    if (!covers(dim) || hasShown(dim)) continue;
+    let popup = center;
+    while (popup && popup.parentElement !== dim.parentElement) popup = popup.parentElement;
+    if (!popup || covers(popup) || !hasShown(popup)) continue;
+    const reachable = (el) => {
+      const r = el.getBoundingClientRect();
+      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return hit !== null && el.contains(hit);
+    };
+    const outside = Array.from(document.querySelectorAll(actionable))
+      .some((el) => !popup.contains(el) && shown(el) && reachable(el));
+    if (!outside) return popup;
   }
   return null;
 }
