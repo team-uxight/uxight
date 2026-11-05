@@ -24,9 +24,7 @@ EXPECTED = {
         ("navigation_confusion", "medium"),
         ("interaction_failure", "medium"),
     ],
-    5: [
-        ("task_failure", "high"),
-    ],
+    5: [],  # fail 은 판정 안 함이라 Friction 을 만들지 않는다
 }
 
 

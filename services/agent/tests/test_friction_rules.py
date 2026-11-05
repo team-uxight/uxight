@@ -24,7 +24,7 @@ EXPECTED = {
         ("navigation_confusion", "medium"),
         ("interaction_failure", "medium"),
     ],
-    5: [("task_failure", "high")],
+    5: [("none", "none")],  # fail 은 판정 안 함이라 Friction 을 만들지 않는다
 }
 
 
@@ -49,10 +49,6 @@ def test_sample_persona_frictions(persona_id):
         actual = [("none", "none")]
 
     assert actual == EXPECTED[persona_id]
-
-    if persona_id == 5:
-        assert "LLM 응답 파싱 오류" in results[0].reason
-        assert "웹사이트 UX 문제로 단정할 수 없음" in results[0].reason
 
 
 def test_successful_task_has_no_failure():
@@ -316,9 +312,9 @@ def test_browser_action_error_has_evidence_step(error_code):
     assert error_code in result.reason
 
 
-@pytest.mark.parametrize("status", ["fail", "max_steps"])
+@pytest.mark.parametrize("status", ["max_steps", "stuck", "timeout"])
 def test_failed_task_has_evidence_step(status):
-    """실패 종료 상태를 탐지하고 마지막 Step을 근거로 기록한다."""
+    """못 닿고 끝난 Persona 를 탐지하고 마지막 Step을 근거로 기록한다."""
     from uxight_agent.watcher.friction_rules import detect_task_failure
 
     steps = [
@@ -349,3 +345,99 @@ def test_failed_task_has_evidence_step(status):
     assert result.severity == "high"
     assert result.steps == (3,)
     assert status in result.reason
+
+
+def logged(reached: list[bool | None]) -> list[dict]:
+    """step 마다 다른 화면으로 움직인 로그. 도달 기록만 인자로 정한다."""
+    return [
+        {
+            "step": index,
+            "url": f"https://example.com/{index}",
+            "action": {"kind": "click", "target": index},
+            "result": {"ok": True, "error_code": None},
+            "task": {"url_reached": value},
+        }
+        for index, value in enumerate(reached, start=1)
+    ]
+
+
+@pytest.mark.parametrize(
+    "status, severity",
+    [
+        ("done", "medium"),
+        ("max_steps", "high"),
+        ("stuck", "high"),
+        ("timeout", "high"),
+        ("token_limit", "medium"),
+    ],
+)
+def test_never_reached_is_task_failure(status, severity):
+    """11/03 결정의 실패: 한 번도 못 닿으면 끝난 이유와 상관없이 과제 실패다."""
+    [result] = detect_frictions(logged([False, False]), status=status)
+
+    assert (result.type, result.severity, result.steps) == ("task_failure", severity, (2,))
+
+
+@pytest.mark.parametrize("status", ["max_steps", "stuck", "timeout", "token_limit"])
+def test_hard_success_uses_steps_after_first_reach(status):
+    """11/03 결정의 어렵게 성공: 과제 실패가 아니고, 처음 닿은 뒤 step 이 근거다."""
+    [result] = detect_frictions(logged([False, True, False, False]), status=status)
+
+    assert (result.type, result.severity, result.steps) == ("excessive_steps", "low", (3, 4))
+    assert status in result.reason
+
+
+def test_hard_success_counts_steps_after_reach_for_confusion():
+    """어렵게 성공의 길 찾기 혼란은 처음 닿은 뒤 step 도 세고, 닿기 전 step 과 함께 근거로 쓴다."""
+    steps = logged([False, True, False, False, False])
+    for step, url in zip(steps, ["A", "B", "A", "B", "A"], strict=True):
+        step["url"] = url
+
+    results = detect_frictions(steps, status="stuck")
+
+    assert [(r.type, r.steps) for r in results] == [
+        ("navigation_confusion", (3, 4, 5)),
+        ("excessive_steps", (3, 4, 5)),
+    ]
+
+
+def test_hard_success_counts_all_steps_for_severity():
+    """끝까지 쓴 step 이 16개 이상이면 중간이다."""
+    [result] = detect_frictions(logged([True] + [False] * 15), status="max_steps")
+
+    assert result.severity == "medium"
+    assert result.steps == tuple(range(2, 17))
+
+
+@pytest.mark.parametrize("count, expected", [(10, []), (12, [(12,)])])
+def test_hard_success_reached_on_last_step_uses_threshold(count, expected):
+    """마지막 step 에서 닿았으면 더 움직인 step 이 없어 기준대로 판정한다."""
+    results = detect_frictions(logged([False] * (count - 1) + [True]), status="max_steps")
+
+    assert [r.steps for r in results] == expected
+
+
+@pytest.mark.parametrize("status", ["fail", "cancelled", None])
+def test_unjudged_status_makes_no_friction(status):
+    """11/03 결정의 판정 안 함: 실행 오류 · 취소 · 끝난 이유를 모름은 Friction 을 만들지 않는다."""
+    steps = logged([True, False, False])
+    steps[1]["result"]["error_code"] = "BROWSER_ACTION_FAILED"
+
+    assert detect_frictions(steps, status=status) == []
+
+
+def test_all_null_reached_makes_no_friction():
+    """도달 기록이 모두 비면 판정 안 함이다. 뒤로 가기 · 오류가 있어도 Friction 이 없다."""
+    steps = logged([None, None, None])
+    steps[0]["action"]["kind"] = "back"
+    steps[1]["action"]["kind"] = "back"
+    steps[2]["result"]["error_code"] = "ELEMENT_NOT_FOUND"
+
+    assert detect_frictions(steps, status="max_steps") == []
+
+
+def test_partly_null_reached_is_still_judged():
+    """비교하지 못한 step 이 섞여도 못 닿은 기록이 있으면 판정한다."""
+    [result] = detect_frictions(logged([None, False]), status="done")
+
+    assert result.type == "task_failure"

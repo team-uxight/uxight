@@ -37,13 +37,13 @@ def test_one_finding_per_taxonomy_with_highest_severity() -> None:
 
     # 심각도 순, 같으면 유형 정의 순(길 찾기 혼란 → 조작 실패 → 과제 실패 → 과도한 단계)
     assert [(f.taxonomy, f.severity) for f in findings] == [
-        ("task_failure", "high"),  # Persona 3(medium) · 4(high) · 5(high) 중 가장 높은 값
+        ("task_failure", "high"),  # Persona 3(medium) · 4(high) 중 가장 높은 값
         ("navigation_confusion", "medium"),
         ("interaction_failure", "medium"),
         ("excessive_steps", "low"),
     ]
     assert [sorted({h.persona_id for h in f.hits}) for f in findings] == [
-        [3, 4, 5],
+        [3, 4],
         [2, 4],
         [3, 4],
         [2],
@@ -83,6 +83,17 @@ def test_evidence_merges_consecutive_steps_into_ranges() -> None:
 
 def test_empty_logs_and_no_frictions_give_no_findings() -> None:
     # 로그가 빈 Persona 는 건너뛰고, 아무 문제도 없으면 진단 0건이다.
-    steps = {1: [], 2: [step(1, "https://a.test/")]}
+    reached = {**step(1, "https://a.test/"), "task": {"url_reached": True}}
 
-    assert build_findings(steps, {1: "max_steps", 2: "timeout"}) == []
+    assert build_findings({1: [], 2: [reached]}, {1: "max_steps", 2: "done"}) == []
+
+
+def test_unreached_personas_never_leave_zero_findings() -> None:
+    # 모두 못 닿고 끝난 회차가 진단 0건이면 '문제 없음'으로 보인다 (11/03 결정의 실패).
+    never = [{**step(1, "https://a.test/"), "task": {"url_reached": False}}]
+    statuses = {1: "stuck", 2: "timeout", 3: "token_limit"}
+
+    [finding] = build_findings(dict.fromkeys(statuses, never), statuses)
+
+    assert (finding.taxonomy, finding.severity) == ("task_failure", "high")
+    assert [h.persona_id for h in finding.hits] == [1, 2, 3]
