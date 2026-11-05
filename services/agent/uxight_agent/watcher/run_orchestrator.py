@@ -320,7 +320,7 @@ class RunOrchestrator:
         findings = build_findings(steps_by_persona, statuses)
         if findings:
             names = {p["persona_id"]: p.get("name") for p in snapshot.personas}
-            diagnosed = sum(1 for steps in steps_by_persona.values() if steps)
+            goal = snapshot.task.get("goal") or ""
             llm = make_summary_llm()
             # 유형별 설명은 서로 기다리지 않는다 — 회차당 최대 4번, 최악 약 40초.
             results = await asyncio.gather(
@@ -328,9 +328,7 @@ class RunOrchestrator:
                     summarize(
                         llm,
                         f,
-                        build_facts(
-                            f, steps_by_persona, snapshot.task.get("goal") or "", names, diagnosed
-                        ),
+                        build_facts(f, steps_by_persona, statuses, goal, names),
                         run_id=run_id,
                     )
                     for f in findings

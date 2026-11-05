@@ -14,6 +14,7 @@ from uxight_agent.diagnose.summary import (
     MAX_TOKENS,
     build_facts,
     check_summary,
+    persona_result,
     summarize,
     template_summary,
 )
@@ -24,7 +25,7 @@ NAMES = {1: "정상", 2: "헤매는 신입생", 3: "급한 재학생", 4: "느�
 def finding_and_facts(taxonomy: str):
     steps, statuses = load_run()
     finding = next(f for f in build_findings(steps, statuses) if f.taxonomy == taxonomy)
-    return finding, build_facts(finding, steps, "이번 학기 수강신청 기간 찾기", NAMES, 5)
+    return finding, build_facts(finding, steps, statuses, "이번 학기 수강신청 기간 찾기", NAMES)
 
 
 def test_facts_list_task_personas_and_evidence_steps() -> None:
@@ -32,7 +33,14 @@ def test_facts_list_task_personas_and_evidence_steps() -> None:
 
     assert "유형: 조작 실패" in facts.text
     assert "Task 목표: 이번 학기 수강신청 기간 찾기" in facts.text
-    assert "걸린 Persona: 2명 (진단한 Persona 5명)" in facts.text
+    # 판정 안 함(5번 fail)은 판정한 Persona 수에서 뺀다.
+    assert "걸린 Persona: 2명 (판정한 Persona 4명)" in facts.text
+    # 걸린 Persona 마다 최종 결과 — LLM 이 근거 step 만 보고 끝을 짐작하지 않게 한다.
+    assert (
+        "Persona 별 최종 결과:\n"
+        "- 급한 재학생: 실패 (목표에 한 번도 닿지 못하고 done 상태로 끝남)\n"
+        "- 느린 교직원: 실패 (목표에 한 번도 닿지 못하고 max_steps 상태로 끝남)" in facts.text
+    )
     # 근거 step 마다 Persona 이름 · URL 경로 · 행동 · 오류 · 판단
     assert (
         "- 급한 재학생 step 4: URL 경로 /kor/1075/subview.do, 행동 click, "
@@ -54,9 +62,22 @@ GOOD = "급한 재학생은 /kor/1075/subview.do 에서 배너를 눌렀지만 s
         ("첫 문장이다. 둘째 문장이다. 셋째 문장이다.", "too_many_sentences"),
         ("Persona 9명이 조작에 실패했다.", "unknown_number"),
         ("급한 재학생은 /kor/1157/login.do 에서 막혔다.", "unknown_path"),
+        # 경로 바로 뒤의 조사는 경로가 아니다 (dev LLM 27번 중 4번).
+        ("급한 재학생은 /kor/1075/subview.do에서 막혔다.", None),
+        ("급한 재학생은 https://school.example.com/kor/1075/subview.do에서 막혔다.", None),
         ("급한 재학생은 '로그인' 버튼을 찾지 못했다.", "unknown_quote"),
     ],
-    ids=["ok", "empty", "too-long", "three-sentences", "number", "path", "quote"],
+    ids=[
+        "ok",
+        "empty",
+        "too-long",
+        "three-sentences",
+        "number",
+        "path",
+        "path-with-josa",
+        "url-with-josa",
+        "quote",
+    ],
 )
 def test_check_summary_rejects_content_outside_evidence(text: str, failed: str | None) -> None:
     _, facts = finding_and_facts("interaction_failure")
@@ -115,6 +136,28 @@ def test_summarize_without_llm_uses_rule_sentence() -> None:
 
     # 가장 심한 Persona(high)의 규칙 사유를 붙인다.
     assert source == "template"
-    assert (
-        text == "Persona 3명에게서 과제 실패 문제가 나타났다. 과제 실행이 max_steps 상태로 종료됨."
+    assert text == (
+        "Persona 2명에게서 과제 실패 문제가 나타났다. "
+        "목표 URL에 한 번도 닿지 못하고 max_steps 상태로 종료됨."
     )
+
+
+def reached(*values: bool | None) -> list[dict]:
+    return [{"step": n, "task": {"url_reached": v}} for n, v in enumerate(values, start=1)]
+
+
+@pytest.mark.parametrize(
+    ("steps", "status", "result"),
+    [
+        (reached(False, True), "done", "성공"),
+        (reached(True, False), "max_steps", "어렵게 성공"),
+        (reached(False, False), "done", "실패"),
+        (reached(False, False), "stuck", "실패"),
+        (reached(False, True), "fail", None),
+        (reached(None, None), "done", None),
+    ],
+    ids=["success", "hard-success", "fail-done", "fail-stuck", "run-error", "no-reach-record"],
+)
+def test_persona_result_follows_four_outcomes(steps, status, result) -> None:
+    # 11/03 결정 T42 의 Persona 결과 넷. 판정 안 함은 None.
+    assert persona_result(steps, status) == result

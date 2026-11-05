@@ -517,7 +517,7 @@ def test_run_does_not_finish_while_persona_running(
         }
     )
 
-    RunOrchestrator()._finish_run(RUN_ID)
+    asyncio.run(RunOrchestrator()._finish_run(RUN_ID, snapshot([])))
 
     assert fakes.runs.status == "running"
     assert fakes.runs.success_rate is None
@@ -548,7 +548,7 @@ def test_success_rate_uses_url_reached_and_excludes_unjudged(
         }
     )
 
-    RunOrchestrator()._finish_run(RUN_ID)
+    asyncio.run(RunOrchestrator()._finish_run(RUN_ID, snapshot([])))
 
     assert fakes.runs.status == "done"
     assert fakes.runs.success_rate == 25.0
@@ -1708,7 +1708,8 @@ def test_done_run_saves_findings_from_step_logs(fakes: SimpleNamespace) -> None:
     ]
     # 설명 LLM 이 없으면 규칙 문장이다 (GACA-166).
     assert findings[0].summary == (
-        "Persona 1명에게서 과제 실패 문제가 나타났다. 과제 실행이 max_steps 상태로 종료됨."
+        "Persona 1명에게서 과제 실패 문제가 나타났다. "
+        "목표 URL에 한 번도 닿지 못하고 max_steps 상태로 종료됨."
     )
 
 
@@ -1719,13 +1720,20 @@ def test_findings_get_llm_summary(
     llm, requests = scripted_llm("p1은 step 2에서 step 상한에 닿아 과제를 끝내지 못했다.")
     monkeypatch.setattr(orchestrator_module, "make_summary_llm", lambda: llm)
 
-    asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)], max_steps=2)))
+    # 성공 URL 이 없으면 판정 안 함이라 진단이 없다 — 못 닿는 URL 을 준다.
+    snap = snapshot([persona(1)], max_steps=2)
+    snap.task["success_url"] = "https://example.com/goal"
+
+    asyncio.run(run(fakes, RUN_ID, snap))
 
     [(_, findings)] = fakes.findings.rows
     assert findings[0].summary == "p1은 step 2에서 step 상한에 닿아 과제를 끝내지 못했다."
     assert fakes.runs.status == "done"
-    # 사실 목록에 Persona 이름 · 근거 step 이 들어간다.
-    assert "- p1 step 2: URL 경로 /" in requests[0]["messages"][1]["content"]
+    # 사실 목록에 Persona 이름 · 최종 결과 · 근거 step 이 들어간다.
+    facts = requests[0]["messages"][1]["content"]
+    assert "걸린 Persona: 1명 (판정한 Persona 1명)" in facts
+    assert "- p1: 실패 (목표에 한 번도 닿지 못하고 max_steps 상태로 끝남)" in facts
+    assert "- p1 step 2: URL 경로 /" in facts
 
 
 class FirstStepDoneDecider(Decider):
