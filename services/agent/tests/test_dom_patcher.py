@@ -67,9 +67,10 @@ def test_patch_applies_and_describes_visible_text(kind, patch, expected_descript
                         "(el) => Array.from(el.children).map(child => child.id)"
                     ) == ["notice", "scholarship"]
                 elif kind == "highlight":
-                    assert await page.locator("#scholarship").evaluate(
-                        "(el) => el.style.outlineStyle"
-                    ) == "solid"
+                    assert (
+                        await page.locator("#scholarship").evaluate("(el) => el.style.outlineStyle")
+                        == "solid"
+                    )
                 elif kind == "help_text":
                     assert await page.locator("[data-uxight-help]").inner_text() == (
                         "장학금 정보를 확인하세요"
@@ -210,9 +211,7 @@ def test_move_description_uses_destination_text_before_moving(position):
                     f"'학생지원' 요소를 '학사 안내' 기준 {position} 위치로 이동"
                 )
 
-                assert await page.locator("#main").locator(
-                    "#scholarship"
-                ).count() == 1
+                assert await page.locator("#main").locator("#scholarship").count() == 1
             finally:
                 await browser.close()
 
