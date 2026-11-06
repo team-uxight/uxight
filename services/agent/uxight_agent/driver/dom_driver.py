@@ -312,22 +312,44 @@ _COLLECT_ELEMENTS_JS = """
   // 다른 요소에 가려 지금 누를 수 없는 요소 (GACA-232). 열린 메뉴 뒤 버튼이 그렇다 — 사람도 메뉴를
   // 닫아야 누른다. 관측에 남기면 모델이 누르고 시간 초과를 기다린다.
   // - Playwright 의 click 은 요소의 첫 상자 가운데를 누르므로 같은 점을 본다.
-  // - 화면 밖 점은 가렸는지 알 수 없어 남긴다. 화면 아래 요소는 스크롤하면 보인다.
   // - 입력칸 위에 뜬 자기 라벨은 눌러도 입력칸으로 가므로 가린 것이 아니다.
   // - 아무것도 안 보이는 막(투명 막 · 글 없는 dim)은 가린 것으로 치지 않는다. 사람 눈에는 뒤가
   //   보이고, 뒤를 다 빼면 관측이 빈다. 그 뒤 요소는 지금처럼 눌러 보면 시간 초과가 난다.
+  // - 화면 밖 요소는 스크롤하면 보이므로 남긴다. 단 메뉴가 그 세로줄을 위아래로 다 덮으면 어디로
+  //   스크롤해도 메뉴 뒤다. 학교 사본의 메뉴는 화면보다 크고, 스크롤하면 고정 위치로 따라온다.
+  //   본문처럼 스크롤로 비켜나는 층과 가르려고, 흐름 밖(absolute · fixed)이고 그 아래에 다른
+  //   내용이 깔린 층만 센다. 머리글 띠는 세로줄 일부만 덮으므로 위쪽 30% 아래 점만 본다.
+  const coverOf = (hit, el) => { // 가린 층: el 을 품지 않는 가장 바깥 조상
+    let cover = hit;
+    while (cover.parentElement && !cover.parentElement.contains(el)) cover = cover.parentElement;
+    return cover;
+  };
+  const showsContent = (cover) => [cover, ...cover.querySelectorAll('*')]
+    .some((node) => (__SHOWN__)(node, innerWidth, innerHeight));
+  const overPage = (x, y, el) => {
+    const stack = document.elementsFromPoint(x, y);
+    if (!stack.length || el.contains(stack[0])) return false;
+    const cover = coverOf(stack[0], el);
+    let floating = false;
+    for (let node = stack[0]; node && !floating; node = node.parentElement) {
+      floating = /absolute|fixed/.test(getComputedStyle(node).position);
+      if (node === cover) break;
+    }
+    return floating && showsContent(cover)
+      && stack.some((node) => !cover.contains(node) && !node.contains(cover));
+  };
   const covered = (el) => {
     const box = Array.from(el.getClientRects()).find((r) => r.width * r.height > 0.99);
     if (!box) return false;
     const x = box.left + box.width / 2;
     const y = box.top + box.height / 2;
-    if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) return false;
+    if (x < 0 || x >= innerWidth) return false;
+    if (y < 0 || y >= innerHeight) {
+      return [0.3, 0.5, 0.7, 0.9].every((rate) => overPage(x, innerHeight * rate, el));
+    }
     const hit = document.elementFromPoint(x, y);
     if (!hit || el.contains(hit) || hit.closest('label')?.control === el) return false;
-    let cover = hit; // 가린 층: el 을 품지 않는 가장 바깥 조상
-    while (cover.parentElement && !cover.parentElement.contains(el)) cover = cover.parentElement;
-    return [cover, ...cover.querySelectorAll('*')]
-      .some((node) => (__SHOWN__)(node, innerWidth, innerHeight));
+    return showsContent(coverOf(hit, el));
   };
 
   const selector = 'a[href], button, input:not([type=hidden]), select, textarea, '

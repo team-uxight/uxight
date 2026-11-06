@@ -13,6 +13,7 @@ from uxight_agent.schemas import Action
 FIXTURES = Path(__file__).parent / "fixtures"
 URL = (FIXTURES / "menu_cover.html").as_uri()
 MENU = "대학생활"
+FULL_MENU = "전체메뉴"
 
 
 def texts(observation: Observation) -> list[str]:
@@ -77,6 +78,25 @@ def test_every_observed_element_can_be_clicked_with_menu_open() -> None:
 def test_elements_below_the_screen_stay() -> None:
     # 화면 아래 요소는 가렸는지 알 수 없다. 스크롤하면 보이므로 남긴다.
     assert "아래쪽 링크" in texts(observe_after(MENU))
+
+
+def test_elements_below_the_screen_leave_when_menu_covers_the_whole_screen() -> None:
+    # 화면보다 큰 메뉴가 열리면 어디로 스크롤해도 그 뒤다. 사람도 메뉴를 닫아야 누른다.
+    opened = observe_after(FULL_MENU)
+
+    assert "전체 메뉴 링크" in texts(opened)
+    assert not {"아래쪽 링크", "바닥 링크"} & set(texts(opened))
+    assert {"아래쪽 링크", "바닥 링크"} <= set(texts(observe_after(FULL_MENU, FULL_MENU)))
+
+
+def test_long_text_over_background_does_not_hide_links_below() -> None:
+    # 본문은 스크롤로 비켜난다. 뒤에 고정 배경이 깔려 있어도 가린 것이 아니다.
+    async def run() -> Observation:
+        async with DomDriver() as driver:
+            await driver.start((FIXTURES / "below_background.html").as_uri())
+            return await driver.observe()
+
+    assert "아래쪽 링크" in texts(asyncio.run(run()))
 
 
 def test_wrapped_link_stays() -> None:

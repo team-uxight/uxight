@@ -8,6 +8,8 @@
   header { position: relative; height: 40px; background: #eee; }
   #mega { display: none; position: absolute; top: 40px; left: 0; right: 0; height: 240px; background: #fff; z-index: 10; }
   header.on #mega { display: block; }
+  #full { display: none; position: absolute; top: 40px; left: 0; right: 0; height: 3000px; background: #fff; z-index: 20; }
+  header.all #full { display: block; }
   main { padding: 20px; }
   .tall { height: 1400px; }
   .field { position: relative; width: 240px; }
@@ -20,6 +22,8 @@
 <header id="top">
   <button onclick="document.getElementById('top').classList.toggle('on')">대학생활</button>
   <div id="mega"><a href="#menu">장학공지</a></div>
+  <button onclick="document.getElementById('top').classList.toggle('all')">전체메뉴</button>
+  <div id="full"><a href="#all">전체 메뉴 링크</a></div>
 </header>
 <main>
   <button>가려지는 버튼</button>
@@ -33,5 +37,6 @@
   <div class="tall"></div>
   <a href="#low">아래쪽 링크</a>
 </main>
+<footer><a href="#foot">바닥 링크</a></footer>
 </body>
 </html>
