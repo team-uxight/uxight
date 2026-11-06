@@ -106,6 +106,20 @@ async ({ maxMs, selector }) => {
 }
 """
 
+# 대상 페이지 안에서 실행되는 함수. 사람에게 보이는 내용인가.
+# 투명하지 않고 화면 안에서 4×4px 이상이며, 자기 글이 있거나 누를 수 있는 요소.
+_SHOWN_JS = """
+(el, width, height) => {
+  const r = el.getBoundingClientRect();
+  return r.width >= 4 && r.height >= 4 && r.right > 0 && r.bottom > 0
+    && r.left < width && r.top < height
+    && el.checkVisibility({ opacityProperty: true, visibilityProperty: true })
+    && (el.matches('a[href], button, input, select, textarea, [role=button], [role=link]')
+      || Array.from(el.childNodes)
+        .some((node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim()));
+}
+"""
+
 # 대상 페이지 안에서 실행되는 함수. 지금 열린 모달 층을 돌려준다. 없으면 null (GACA-157).
 # 사람은 모달이 열리면 그 안만 보고 누른다. 관측도 그 안만 하고, scroll 도 그 안을 움직인다.
 # - 브라우저 모달 dialog(showModal)가 열려 있으면 맨 위의 것. 맨 위는 마지막으로 연 것이라
@@ -140,14 +154,7 @@ _MODAL_LAYER_JS = """
     .map(([x, y]) => document.elementFromPoint(width * x, height * y));
   if (hits.includes(null)) return null;
   const actionable = 'a[href], button, input, select, textarea, [role=button], [role=link]';
-  const shown = (el) => {
-    const r = el.getBoundingClientRect();
-    return r.width >= 4 && r.height >= 4 && r.right > 0 && r.bottom > 0
-      && r.left < width && r.top < height
-      && el.checkVisibility({ opacityProperty: true, visibilityProperty: true })
-      && (el.matches(actionable) || Array.from(el.childNodes)
-        .some((node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim()));
-  };
+  const shown = (el) => (__SHOWN__)(el, width, height);
   const covers = (el) => {
     const r = el.getBoundingClientRect();
     return r.left <= 0 && r.top <= 0 && r.right >= width && r.bottom >= height;
@@ -177,7 +184,7 @@ _MODAL_LAYER_JS = """
   }
   return null;
 }
-""".strip()
+""".strip().replace("__SHOWN__", _SHOWN_JS.strip())
 
 # 대상 페이지 안에서 실행되는 스크립트. 한 화면만큼 스크롤한다.
 # 모달이 열려 있으면 그 층 안의 스크롤 상자를 움직인다 (GACA-157). 창을 움직여도 고정 위치 층은
@@ -302,9 +309,31 @@ _COLLECT_ELEMENTS_JS = """
     return text;
   };
 
+  // 다른 요소에 가려 지금 누를 수 없는 요소 (GACA-232). 열린 메뉴 뒤 버튼이 그렇다 — 사람도 메뉴를
+  // 닫아야 누른다. 관측에 남기면 모델이 누르고 시간 초과를 기다린다.
+  // - Playwright 의 click 은 요소의 첫 상자 가운데를 누르므로 같은 점을 본다.
+  // - 화면 밖 점은 가렸는지 알 수 없어 남긴다. 화면 아래 요소는 스크롤하면 보인다.
+  // - 입력칸 위에 뜬 자기 라벨은 눌러도 입력칸으로 가므로 가린 것이 아니다.
+  // - 아무것도 안 보이는 막(투명 막 · 글 없는 dim)은 가린 것으로 치지 않는다. 사람 눈에는 뒤가
+  //   보이고, 뒤를 다 빼면 관측이 빈다. 그 뒤 요소는 지금처럼 눌러 보면 시간 초과가 난다.
+  const covered = (el) => {
+    const box = Array.from(el.getClientRects()).find((r) => r.width * r.height > 0.99);
+    if (!box) return false;
+    const x = box.left + box.width / 2;
+    const y = box.top + box.height / 2;
+    if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) return false;
+    const hit = document.elementFromPoint(x, y);
+    if (!hit || el.contains(hit) || hit.closest('label')?.control === el) return false;
+    let cover = hit; // 가린 층: el 을 품지 않는 가장 바깥 조상
+    while (cover.parentElement && !cover.parentElement.contains(el)) cover = cover.parentElement;
+    return [cover, ...cover.querySelectorAll('*')]
+      .some((node) => (__SHOWN__)(node, innerWidth, innerHeight));
+  };
+
   const selector = 'a[href], button, input:not([type=hidden]), select, textarea, '
     + '[role=button], [role=link]';
   const items = [];
+  const behind = new Set(); // 가려서 뺀 요소. 안의 글도 본문 글에 넣지 않는다
   let nextId = 1;
   for (const el of document.querySelectorAll(selector)) {
     if (layer && !layer.contains(el)) continue;
@@ -317,6 +346,10 @@ _COLLECT_ELEMENTS_JS = """
       ? Array.from(el.labels).find((l) => visibleText(l).trim())
       : undefined;
     if (el.disabled || (visibility === 'hidden' && !label)) {
+      continue;
+    }
+    if (covered(label ?? el)) {
+      behind.add(label ?? el);
       continue;
     }
     (label ?? el).setAttribute(idAttr, String(nextId));
@@ -518,6 +551,10 @@ _COLLECT_ELEMENTS_JS = """
     }
     const text = shownText(el).trim().replace(/\\s+/g, ' ');
     if (!text || text.length > maxValueLength) continue;
+    if (covered(el)) {
+      behind.add(el);
+      continue;
+    }
     el.setAttribute(idAttr, String(nextId));
     items.push({
       id: nextId,
@@ -571,7 +608,7 @@ _COLLECT_ELEMENTS_JS = """
       root,
       NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT,
       (node) => (node.nodeType === Node.ELEMENT_NODE
-        && (node.hasAttribute(idAttr) || node.localName === 'textarea')
+        && (node.hasAttribute(idAttr) || behind.has(node) || node.localName === 'textarea')
         ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
     );
     const range = document.createRange();
@@ -617,7 +654,7 @@ _COLLECT_ELEMENTS_JS = """
   // 관측의 글과 주소가 같은 문서의 것이다. 도메인 가드가 이 주소로 판정한다.
   return { items, text: bodyText(), url: location.href, title: document.title };
 }
-""".replace("__MODAL_LAYER__", _MODAL_LAYER_JS)
+""".replace("__MODAL_LAYER__", _MODAL_LAYER_JS).replace("__SHOWN__", _SHOWN_JS)
 
 
 class DomDriver(Driver):
