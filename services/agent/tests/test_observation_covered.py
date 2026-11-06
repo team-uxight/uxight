@@ -164,7 +164,26 @@ def test_link_under_fixed_header_stays_after_scroll() -> None:
     # 고정 머리글 밑은 스크롤로 비켜난다. Playwright 도 스크롤을 바꿔 가며 다시 누른다.
     scrolled = observe_page("cover_fixed_header.html", Action(kind="scroll", value="down"))
 
+    # 20px 마다 링크가 있어 어느 만큼 스크롤해도 하나는 머리글 밑이다. 하나도 빠지면 안 된다.
     assert {"머리 메뉴", "첫째 링크", "둘째 링크"} <= set(texts(scrolled))
+    assert {f"목록 {i}" for i in range(1, 101)} <= set(texts(scrolled))
+
+
+def test_fixed_menu_over_the_whole_screen_hides_elements() -> None:
+    # 고정 층이라도 세로줄을 다 덮으면 어디로 스크롤해도 그 뒤다.
+    opened = observe_after("고정메뉴")
+
+    assert "고정 메뉴 링크" in texts(opened)
+    assert not {"가려지는 버튼", "가려지는 링크", "아래쪽 링크"} & set(texts(opened))
+
+
+def test_whole_screen_background_image_is_not_a_cover() -> None:
+    # 배경 그림은 투명도를 모른다. 화면을 다 덮는 그림 dim 뒤를 빼면 관측이 빈다.
+    assert {"홈", "학사일정"} <= set(texts(observe_page("cover_image_dim.html")))
+
+
+def test_short_panel_with_background_image_hides_link() -> None:
+    assert "덮인 링크" not in texts(observe_page("cover_image_panel.html"))
 
 
 def test_link_pushed_out_of_scroll_box_stays() -> None:

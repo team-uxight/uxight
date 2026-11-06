@@ -326,7 +326,11 @@ _COLLECT_ELEMENTS_JS = """
     if (!node.checkVisibility({ opacityProperty: true, visibilityProperty: true })) return false;
     if (/^(img|video|canvas|svg|iframe|object|embed)$/.test(node.localName)) return true;
     const style = getComputedStyle(node);
-    if (style.backgroundImage !== 'none' || alphaOf(style.backgroundColor) >= 0.9) return true;
+    if (alphaOf(style.backgroundColor) >= 0.9) return true;
+    // 배경 그림은 투명도를 모른다. 화면을 다 덮는 층의 그림은 dim 일 수 있어 세지 않는다.
+    const r = node.getBoundingClientRect();
+    const screen = r.left <= 0 && r.top <= 0 && r.right >= innerWidth && r.bottom >= innerHeight;
+    if (style.backgroundImage !== 'none' && !screen) return true;
     return alphaOf(style.color) >= minOpacity && Array.from(node.childNodes)
       .some((child) => child.nodeType === Node.TEXT_NODE && child.textContent.trim());
   };
@@ -361,7 +365,7 @@ _COLLECT_ELEMENTS_JS = """
       const style = getComputedStyle(up);
       if (!/auto|scroll/.test(`${style.overflowX} ${style.overflowY}`)) continue;
       const r = up.getBoundingClientRect();
-      if (x < r.left || x >= r.right || y < r.top || y >= r.bottom) return true;
+      if (x < r.left || x >= r.right - 1 || y < r.top || y >= r.bottom - 1) return true;
     }
     return false;
   };
