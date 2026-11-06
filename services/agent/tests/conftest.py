@@ -22,16 +22,17 @@ def scripted_llm(tmp_path, monkeypatch):
     답 하나는 모델이 낸 글(content) 문자열이다. None 이면 HTTP 500 (호출 실패),
     (글, "length") 처럼 주면 그 finish_reason 으로 끝난 답, NO_CHOICES 면 choices 가 빈 답이다.
     돌려주는 requests 에 SDK 가 보낸 요청 본문이 쌓인다.
+    answer 를 주면 차례 대신 answer(요청 본문)의 값을 답으로 쓴다 — 동시에 도는 호출을 시험할 때.
     """
     monkeypatch.setenv("LLM_USAGE_LOG", str(tmp_path / "llm-usage.jsonl"))
 
-    def make(*replies) -> tuple[LLMClient, list[dict]]:
+    def make(*replies, answer=None) -> tuple[LLMClient, list[dict]]:
         queue = list(replies)
         requests: list[dict] = []
 
         def handler(request: httpx.Request) -> httpx.Response:
             requests.append(json.loads(request.content))
-            reply = queue.pop(0)
+            reply = answer(requests[-1]) if answer else queue.pop(0)
             if reply is None:
                 return httpx.Response(500, json={"error": {"message": "boom"}})
             content, finish = reply if isinstance(reply, tuple) else (reply, "stop")

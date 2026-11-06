@@ -11,6 +11,7 @@
 """
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from ..watcher.friction_rules import FrictionResult, detect_frictions
 
@@ -46,7 +47,7 @@ class Finding:
 
 
 def build_findings(
-    steps_by_persona: dict[int, list[dict]], statuses: dict[int, str]
+    steps_by_persona: dict[Any, list[dict]], statuses: dict[Any, str]
 ) -> list[Finding]:
     """Persona 별 step 로그 · 종료 상태로 회차의 진단 목록을 만든다. 로그가 빈 Persona 는 건너뛴다.
 

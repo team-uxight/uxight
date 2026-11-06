@@ -113,7 +113,7 @@ class Variant(BaseModel):
     body_text: bool = True  # 끄면 관측에서 본문 글을 뺀다 — 본문 글(GACA-217)의 효과 비교
     # on = 가드 켬(운영 값). off = 가드 끔 — 가드 셋이 막을지 판단만 기록한다 (GACA-180)
     guard: GuardMode = "on"
-    # 자리만 있다. 지금 코드에 스위치가 없어 운영 값만 받는다. 다중 진단은 GACA-181
+    # 자리만 있다. 단일 · 다중 진단은 변형이 아니다 — 같은 실행 로그로 bench_diagnose 가 둘 다 잰다
     diagnosis: Literal["single"] = "single"
 
 

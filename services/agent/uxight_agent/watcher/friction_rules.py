@@ -39,6 +39,43 @@ def _url_reached(step: dict) -> bool | None:
     return (step.get("task") or {}).get("url_reached")
 
 
+def _first_reached(steps: list[dict]) -> int | None:
+    return next((i for i, step in enumerate(steps) if _url_reached(step) is True), None)
+
+
+def is_unjudged(steps: list[dict], status: str | None) -> bool:
+    """Persona 결과 넷 중 '판정 안 함'이다 — 실행 오류 · 취소 · 도달 기록이 모두 비어 있음."""
+    return status in UNJUDGED_STATUSES or all(_url_reached(step) is None for step in steps)
+
+
+def ever_reached(steps: list[dict]) -> bool:
+    """목표에 한 번이라도 닿았다."""
+    return _first_reached(steps) is not None
+
+
+def counted_steps(steps: list[dict], status: str | None) -> int | None:
+    """과도한 단계에서 세는 step 수. 한 번도 못 닿았으면 None 이다 — 닿은 실행만 판정한다.
+
+    done 으로 끝났으면 처음 닿기까지, 아니면(어렵게 성공) 끝까지 쓴 step 수다.
+    """
+    first = _first_reached(steps)
+    if first is None:
+        return None
+    return first + 1 if status == "done" else len(steps)
+
+
+def rule_severity(taxonomy: str, step_count: int, status: str | None) -> Severity:
+    """유형 · step 수 · 끝난 이유로 심각도를 매긴다.
+
+    판정 규칙과, 진단자가 새로 더한 진단(GACA-181)이 같이 쓴다. 진단자는 심각도를 쓰지 않는다.
+    """
+    if taxonomy == "task_failure":
+        return "high" if status in HIGH_SEVERITY_ENDS else "medium"
+    if taxonomy == "excessive_steps":
+        return "medium" if step_count >= 16 else "low"
+    return "medium"
+
+
 def detect_interaction_failure(steps: list[dict]) -> FrictionResult | None:
     """반복 클릭으로 진행하지 못하거나 브라우저 조작 오류가 발생한 경우 탐지한다."""
     browser_errors = {
@@ -103,7 +140,7 @@ def detect_task_failure(steps: list[dict], status: str | None) -> FrictionResult
 
     return FrictionResult(
         type="task_failure",
-        severity="high" if status in HIGH_SEVERITY_ENDS else "medium",
+        severity=rule_severity("task_failure", len(steps), status),
         steps=(steps[-1]["step"],),
         reason=reason,
     )
@@ -154,12 +191,12 @@ def detect_excessive_steps(
     어렵게 성공(닿았지만 done 으로 끝내지 못함)이면 처음 닿은 뒤의 step 이 근거다 (11/03 결정).
     닿고도 더 움직인 step 은 기준과 상관없이 과도한 단계다.
     """
-    first = next((i for i, step in enumerate(steps) if _url_reached(step) is True), None)
-    if first is None:
+    first = _first_reached(steps)
+    step_count = counted_steps(steps, status)
+    if first is None or step_count is None:
         return None
 
     extra = steps[first + 1 :] if status != "done" else []
-    step_count = first + 1 + len(extra)
     if not extra and step_count <= threshold:
         return None
 
@@ -175,7 +212,7 @@ def detect_excessive_steps(
 
     return FrictionResult(
         type="excessive_steps",
-        severity="medium" if step_count >= 16 else "low",
+        severity=rule_severity("excessive_steps", step_count, status),
         steps=evidence,
         reason=reason,
     )
@@ -190,7 +227,7 @@ def detect_frictions(
 
     판정 안 함(실행 오류 · 취소 · 도달 기록이 모두 비어 있음)이면 Friction 을 만들지 않는다.
     """
-    if status in UNJUDGED_STATUSES or all(_url_reached(step) is None for step in steps):
+    if is_unjudged(steps, status):
         return []
 
     results = [

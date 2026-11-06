@@ -182,8 +182,9 @@ def action_log(action: Action | None) -> dict | None:
 
 
 def same_url(url: str, success_url: str) -> bool:
-    # 조각(#…)과 끝의 / 는 같은 페이지로 본다.
-    def normalize(value: str) -> str:
-        return value.split("#", 1)[0].rstrip("/")
+    return page_url(url) == page_url(success_url)
 
-    return normalize(url) == normalize(success_url)
+
+def page_url(url: str) -> str:
+    """조각(#…)과 끝의 / 는 같은 페이지로 본다."""
+    return url.split("#", 1)[0].rstrip("/")
