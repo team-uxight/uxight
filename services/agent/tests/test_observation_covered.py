@@ -147,3 +147,54 @@ def test_file_link_in_new_window_is_not_a_failure(fixture_server) -> None:
     assert result.downloaded
     assert result.url_after.endswith("/download_link.html")
     assert "본문 안내 글" in after.text
+
+
+def observe_page(fixture: str, *actions: Action) -> Observation:
+    async def run() -> Observation:
+        async with DomDriver() as driver:
+            await driver.start((FIXTURES / fixture).as_uri())
+            for action in actions:
+                await driver.act(action)
+            return await driver.observe()
+
+    return asyncio.run(run())
+
+
+def test_link_under_fixed_header_stays_after_scroll() -> None:
+    # 고정 머리글 밑은 스크롤로 비켜난다. Playwright 도 스크롤을 바꿔 가며 다시 누른다.
+    scrolled = observe_page("cover_fixed_header.html", Action(kind="scroll", value="down"))
+
+    assert {"머리 메뉴", "첫째 링크", "둘째 링크"} <= set(texts(scrolled))
+
+
+def test_link_pushed_out_of_scroll_box_stays() -> None:
+    # 상자 밖으로 밀린 요소는 화면 밖처럼 남긴다. 빼면 상자를 움직일 길이 없다.
+    assert "목록 20번 링크" in texts(observe_page("cover_scroll_box.html"))
+
+
+def test_input_under_text_stays_when_text_is_not_its_label() -> None:
+    # 입력칸은 fill 로 쓴다. 칸 크기 안의 글은 가린 것이 아니다.
+    for fixture in ("cover_label_nofor.html", "cover_input_span.html"):
+        items = observe_page(fixture).element_map.values()
+        assert any(item["tag"] == "input" for item in items), fixture
+
+
+def test_dead_link_loses_number_but_keeps_text() -> None:
+    # pointer-events:none 링크는 눌리지 않는다. 사람 눈에는 보이므로 글은 남긴다.
+    observation = observe_page("cover_dead_link.html")
+
+    assert "신청 마감" not in texts(observation)
+    assert "신청 마감" in observation.text
+
+
+def test_veil_beside_shown_content_does_not_hide_elements() -> None:
+    # 막과 같은 부모에 보이는 글이 있어도 막 자체는 아무것도 안 그린다.
+    assert texts(observe_page("cover_veil_toast.html"))
+    assert len(texts(observe_page("cover_veil_header.html"))) >= 4
+
+
+def test_link_under_image_is_left_out() -> None:
+    names = texts(observe_page("cover_image.html"))
+
+    assert "덮인 링크" not in names
+    assert "보이는 링크" in names

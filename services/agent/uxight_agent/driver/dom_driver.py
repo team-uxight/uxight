@@ -106,20 +106,6 @@ async ({ maxMs, selector }) => {
 }
 """
 
-# 대상 페이지 안에서 실행되는 함수. 사람에게 보이는 내용인가.
-# 투명하지 않고 화면 안에서 4×4px 이상이며, 자기 글이 있거나 누를 수 있는 요소.
-_SHOWN_JS = """
-(el, width, height) => {
-  const r = el.getBoundingClientRect();
-  return r.width >= 4 && r.height >= 4 && r.right > 0 && r.bottom > 0
-    && r.left < width && r.top < height
-    && el.checkVisibility({ opacityProperty: true, visibilityProperty: true })
-    && (el.matches('a[href], button, input, select, textarea, [role=button], [role=link]')
-      || Array.from(el.childNodes)
-        .some((node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim()));
-}
-"""
-
 # 대상 페이지 안에서 실행되는 함수. 지금 열린 모달 층을 돌려준다. 없으면 null (GACA-157).
 # 사람은 모달이 열리면 그 안만 보고 누른다. 관측도 그 안만 하고, scroll 도 그 안을 움직인다.
 # - 브라우저 모달 dialog(showModal)가 열려 있으면 맨 위의 것. 맨 위는 마지막으로 연 것이라
@@ -154,7 +140,14 @@ _MODAL_LAYER_JS = """
     .map(([x, y]) => document.elementFromPoint(width * x, height * y));
   if (hits.includes(null)) return null;
   const actionable = 'a[href], button, input, select, textarea, [role=button], [role=link]';
-  const shown = (el) => (__SHOWN__)(el, width, height);
+  const shown = (el) => {
+    const r = el.getBoundingClientRect();
+    return r.width >= 4 && r.height >= 4 && r.right > 0 && r.bottom > 0
+      && r.left < width && r.top < height
+      && el.checkVisibility({ opacityProperty: true, visibilityProperty: true })
+      && (el.matches(actionable) || Array.from(el.childNodes)
+        .some((node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim()));
+  };
   const covers = (el) => {
     const r = el.getBoundingClientRect();
     return r.left <= 0 && r.top <= 0 && r.right >= width && r.bottom >= height;
@@ -184,7 +177,7 @@ _MODAL_LAYER_JS = """
   }
   return null;
 }
-""".strip().replace("__SHOWN__", _SHOWN_JS.strip())
+""".strip()
 
 # 대상 페이지 안에서 실행되는 스크립트. 한 화면만큼 스크롤한다.
 # 모달이 열려 있으면 그 층 안의 스크롤 상자를 움직인다 (GACA-157). 창을 움직여도 고정 위치 층은
@@ -309,47 +302,88 @@ _COLLECT_ELEMENTS_JS = """
     return text;
   };
 
+  const alphaOf = (color) => { // 계산된 색('rgba(0, 0, 0, 0.5)' · 'oklch(0 0 0 / 50%)')의 투명도
+    const inner = color.slice(color.indexOf('(') + 1, color.lastIndexOf(')'));
+    const alpha = inner.includes('/') ? inner.split('/')[1] : inner.split(',')[3];
+    return alpha === undefined ? 1 : parseFloat(alpha) / (alpha.trim().endsWith('%') ? 100 : 1);
+  };
+
   // 다른 요소에 가려 지금 누를 수 없는 요소 (GACA-232). 열린 메뉴 뒤 버튼이 그렇다 — 사람도 메뉴를
   // 닫아야 누른다. 관측에 남기면 모델이 누르고 시간 초과를 기다린다.
+  // clickBlock 은 'behind'(가려 안 보인다 — 번호도 글도 뺀다), 'dead'(보이지만 눌리지 않는다 —
+  // 번호만 뺀다), null(남긴다) 을 돌려준다.
   // - Playwright 의 click 은 요소의 첫 상자 가운데를 누르므로 같은 점을 본다.
-  // - 입력칸 위에 뜬 자기 라벨은 눌러도 입력칸으로 가므로 가린 것이 아니다.
-  // - 아무것도 안 보이는 막(투명 막 · 글 없는 dim)은 가린 것으로 치지 않는다. 사람 눈에는 뒤가
-  //   보이고, 뒤를 다 빼면 관측이 빈다. 그 뒤 요소는 지금처럼 눌러 보면 시간 초과가 난다.
-  // - 화면 밖 요소는 스크롤하면 보이므로 남긴다. 단 메뉴가 그 세로줄을 위아래로 다 덮으면 어디로
-  //   스크롤해도 메뉴 뒤다. 학교 사본의 메뉴는 화면보다 크고, 스크롤하면 고정 위치로 따라온다.
-  //   본문처럼 스크롤로 비켜나는 층과 가르려고, 흐름 밖(absolute · fixed)이고 그 아래에 다른
-  //   내용이 깔린 층만 센다. 머리글 띠는 세로줄 일부만 덮으므로 위쪽 30% 아래 점만 본다.
-  const coverOf = (hit, el) => { // 가린 층: el 을 품지 않는 가장 바깥 조상
-    let cover = hit;
-    while (cover.parentElement && !cover.parentElement.contains(el)) cover = cover.parentElement;
-    return cover;
+  // - 글 · 그림 · 불투명 배경이 그 점에서 위를 덮을 때만 가린 것이다. 투명 막 · 글 없는 dim 은
+  //   사람 눈에 뒤가 보이고, 뒤를 다 빼면 관측이 빈다. 그 뒤 요소는 눌러 보면 시간 초과가 난다.
+  // - 입력칸은 fill 로 쓰므로 자기 칸 크기 안의 글(띄운 라벨 · 안내 글)은 가린 것이 아니다.
+  // - 스크롤 상자 밖으로 밀린 요소는 화면 밖처럼 남긴다. 상자를 움직이면 보인다.
+  // - 고정 · sticky 층은 스크롤로 비켜나면 남긴다. Playwright 도 스크롤을 바꿔 가며 다시 누른다.
+  // - 화면 밖 요소는 스크롤하면 보이므로 남긴다. 단 층 하나가 그 세로줄을 위아래로 다 덮으면 어디로
+  //   스크롤해도 그 뒤다. 학교 사본의 메뉴는 화면보다 크고, 스크롤하면 고정 위치로 따라온다.
+  //   본문처럼 비켜나는 층과 가르려고, 흐름 밖(absolute · fixed)이고 아래에 다른 내용이 깔린 층만
+  //   센다. 머리글 띠는 세로줄 일부만 덮으므로 위쪽 30% 아래 점만 본다.
+  const paints = (node) => {
+    if (!node.checkVisibility({ opacityProperty: true, visibilityProperty: true })) return false;
+    if (/^(img|video|canvas|svg|iframe|object|embed)$/.test(node.localName)) return true;
+    const style = getComputedStyle(node);
+    if (style.backgroundImage !== 'none' || alphaOf(style.backgroundColor) >= 0.9) return true;
+    return alphaOf(style.color) >= minOpacity && Array.from(node.childNodes)
+      .some((child) => child.nodeType === Node.TEXT_NODE && child.textContent.trim());
   };
-  const showsContent = (cover) => [cover, ...cover.querySelectorAll('*')]
-    .some((node) => (__SHOWN__)(node, innerWidth, innerHeight));
-  const overPage = (x, y, el) => {
-    const stack = document.elementsFromPoint(x, y);
-    if (!stack.length || el.contains(stack[0])) return false;
-    const cover = coverOf(stack[0], el);
-    let floating = false;
-    for (let node = stack[0]; node && !floating; node = node.parentElement) {
-      floating = /absolute|fixed/.test(getComputedStyle(node).position);
-      if (node === cover) break;
+  const paintersOver = (stack, el) => {
+    const end = stack.findIndex((node) => el.contains(node) || node.contains(el));
+    return stack.slice(0, end < 0 ? stack.length : end).filter(paints);
+  };
+  const pinned = (node) => {
+    for (let up = node; up; up = up.parentElement) {
+      if (/fixed|sticky/.test(getComputedStyle(up).position)) return true;
     }
-    return floating && showsContent(cover)
-      && stack.some((node) => !cover.contains(node) && !node.contains(cover));
+    return false;
   };
-  const covered = (el) => {
+  const floatingCover = (x, y, el) => { // 그 점에서 el 쪽 위에 뜬 층. 없으면 null
+    const stack = document.elementsFromPoint(x, y);
+    if (!stack.length || el.contains(stack[0]) || stack[0].contains(el)) return null;
+    let cover = stack[0]; // el 을 품지 않는 가장 바깥 조상
+    let floating = false;
+    for (let node = cover; node && !node.contains(el); node = node.parentElement) {
+      cover = node;
+      floating ||= /absolute|fixed/.test(getComputedStyle(node).position);
+    }
+    const under = stack.some((node) => !cover.contains(node) && !node.contains(cover));
+    return floating && under && paintersOver(stack, el).length ? cover : null;
+  };
+  const tallCover = (x, el) => {
+    const covers = [0.3, 0.5, 0.7, 0.9].map((rate) => floatingCover(x, innerHeight * rate, el));
+    return covers[0] !== null && covers.every((cover) => cover === covers[0]);
+  };
+  const outsideScrollBox = (el, x, y) => {
+    for (let up = el.parentElement; up && up !== document.body; up = up.parentElement) {
+      const style = getComputedStyle(up);
+      if (!/auto|scroll/.test(`${style.overflowX} ${style.overflowY}`)) continue;
+      const r = up.getBoundingClientRect();
+      if (x < r.left || x >= r.right || y < r.top || y >= r.bottom) return true;
+    }
+    return false;
+  };
+  const clickBlock = (el) => {
     const box = Array.from(el.getClientRects()).find((r) => r.width * r.height > 0.99);
-    if (!box) return false;
+    if (!box) return null;
     const x = box.left + box.width / 2;
     const y = box.top + box.height / 2;
-    if (x < 0 || x >= innerWidth) return false;
-    if (y < 0 || y >= innerHeight) {
-      return [0.3, 0.5, 0.7, 0.9].every((rate) => overPage(x, innerHeight * rate, el));
-    }
-    const hit = document.elementFromPoint(x, y);
-    if (!hit || el.contains(hit) || hit.closest('label')?.control === el) return false;
-    return showsContent(coverOf(hit, el));
+    if (x < 0 || x >= innerWidth || outsideScrollBox(el, x, y)) return null;
+    if (y < 0 || y >= innerHeight) return tallCover(x, el) ? 'behind' : null;
+    const stack = document.elementsFromPoint(x, y);
+    const hit = stack[0];
+    if (!hit || el.contains(hit) || hit.closest('label')?.control === el) return null;
+    const field = el.matches('input, textarea, select');
+    if (hit.contains(el)) return field ? null : 'dead';
+    const wider = (node) => {
+      const r = node.getBoundingClientRect();
+      return r.width > box.width + 1 || r.height > box.height + 1;
+    };
+    const painters = paintersOver(stack, el).filter((node) => !field || wider(node));
+    if (!painters.length) return null;
+    return painters.every(pinned) && !tallCover(x, el) ? null : 'behind';
   };
 
   const selector = 'a[href], button, input:not([type=hidden]), select, textarea, '
@@ -370,8 +404,9 @@ _COLLECT_ELEMENTS_JS = """
     if (el.disabled || (visibility === 'hidden' && !label)) {
       continue;
     }
-    if (covered(label ?? el)) {
-      behind.add(label ?? el);
+    const block = clickBlock(label ?? el);
+    if (block) {
+      if (block === 'behind') behind.add(label ?? el);
       continue;
     }
     (label ?? el).setAttribute(idAttr, String(nextId));
@@ -438,11 +473,6 @@ _COLLECT_ELEMENTS_JS = """
   //   요소 줄과 같은 번호만 쓰므로, 화면 밖 · 숨김처럼 번호가 없는 요소는 붙지 않는다.
   // - 공백을 뺀 글자 수가 maxTextLength 를 넘으면 그만 모은다. 넘게 모아야 Python 이 잘린 것을 알고
   //   … 을 붙인다. 공백 정리와 자르기는 Python 이 한다 (_body_text).
-  const alphaOf = (color) => { // 계산된 색('rgba(0, 0, 0, 0.5)' · 'oklch(0 0 0 / 50%)')의 투명도
-    const inner = color.slice(color.indexOf('(') + 1, color.lastIndexOf(')'));
-    const alpha = inner.includes('/') ? inner.split('/')[1] : inner.split(',')[3];
-    return alpha === undefined ? 1 : parseFloat(alpha) / (alpha.trim().endsWith('%') ? 100 : 1);
-  };
   // clip-path: inset(위 오른쪽 아래 왼쪽) 이 남기는 상자. 값은 px 또는 %, round 는 보지 않는다.
   // 읽지 못하는 값(calc 등)이면 NaN 상자가 되어 어떤 글과도 겹치지 않는다.
   const insetBox = (el, clipPath) => {
@@ -573,8 +603,9 @@ _COLLECT_ELEMENTS_JS = """
     }
     const text = shownText(el).trim().replace(/\\s+/g, ' ');
     if (!text || text.length > maxValueLength) continue;
-    if (covered(el)) {
-      behind.add(el);
+    const block = clickBlock(el);
+    if (block) {
+      if (block === 'behind') behind.add(el);
       continue;
     }
     el.setAttribute(idAttr, String(nextId));
@@ -676,7 +707,7 @@ _COLLECT_ELEMENTS_JS = """
   // 관측의 글과 주소가 같은 문서의 것이다. 도메인 가드가 이 주소로 판정한다.
   return { items, text: bodyText(), url: location.href, title: document.title };
 }
-""".replace("__MODAL_LAYER__", _MODAL_LAYER_JS).replace("__SHOWN__", _SHOWN_JS)
+""".replace("__MODAL_LAYER__", _MODAL_LAYER_JS)
 
 
 class DomDriver(Driver):
