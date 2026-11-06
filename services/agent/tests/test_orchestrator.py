@@ -233,6 +233,8 @@ def fakes(monkeypatch: pytest.MonkeyPatch, tmp_path) -> SimpleNamespace:
     monkeypatch.setattr(orchestrator_module, "audit_log_repository", audits)
     findings = FakeFindingRepository()
     monkeypatch.setattr(orchestrator_module, "finding_repository", findings)
+    # 진단 설명은 LLM 없이 규칙 문장으로 — 설명 LLM 을 쓰는 테스트는 따로 바꿔 끼운다.
+    monkeypatch.setattr(orchestrator_module, "make_summary_llm", lambda: None)
     monkeypatch.setattr(orchestrator_module, "CANCEL_POLL_SECONDS", POLL_SECONDS)
     set_global_cap(monkeypatch, 3)
     return SimpleNamespace(
@@ -492,7 +494,7 @@ def test_run_status_from_persona_statuses(
     # 취소가 섞이면 cancelled, 모두 fail 이면 failed, 그 밖은 done.
     fakes.personas.statuses.update(persona_statuses)
 
-    RunOrchestrator()._finish_run(RUN_ID)
+    asyncio.run(RunOrchestrator()._finish_run(RUN_ID, snapshot([])))
 
     assert fakes.runs.status == run_status
     assert fakes.runs.error == error
@@ -515,7 +517,7 @@ def test_run_does_not_finish_while_persona_running(
         }
     )
 
-    RunOrchestrator()._finish_run(RUN_ID)
+    asyncio.run(RunOrchestrator()._finish_run(RUN_ID, snapshot([])))
 
     assert fakes.runs.status == "running"
     assert fakes.runs.success_rate is None
@@ -546,7 +548,7 @@ def test_success_rate_uses_url_reached_and_excludes_unjudged(
         }
     )
 
-    RunOrchestrator()._finish_run(RUN_ID)
+    asyncio.run(RunOrchestrator()._finish_run(RUN_ID, snapshot([])))
 
     assert fakes.runs.status == "done"
     assert fakes.runs.success_rate == 25.0
@@ -1704,7 +1706,34 @@ def test_done_run_saves_findings_from_step_logs(fakes: SimpleNamespace) -> None:
     assert findings[0].evidence == [
         {"persona_id": 1, "step_from": 2, "step_to": 2, "url": "https://example.com"}
     ]
-    assert findings[0].summary is None  # 설명은 GACA-166 이 채운다
+    # 설명 LLM 이 없으면 규칙 문장이다 (GACA-166).
+    assert findings[0].summary == (
+        "Persona 1명에게서 과제 실패 문제가 나타났다. "
+        "목표 URL에 한 번도 닿지 못하고 max_steps 상태로 종료됨."
+    )
+
+
+def test_findings_get_llm_summary(
+    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, scripted_llm
+) -> None:
+    # 설명 LLM 의 답이 근거 밖 검사를 통과하면 그 문장을 저장한다 (GACA-166).
+    llm, requests = scripted_llm("p1은 step 2에서 step 상한에 닿아 과제를 끝내지 못했다.")
+    monkeypatch.setattr(orchestrator_module, "make_summary_llm", lambda: llm)
+
+    # 성공 URL 이 없으면 판정 안 함이라 진단이 없다 — 못 닿는 URL 을 준다.
+    snap = snapshot([persona(1)], max_steps=2)
+    snap.task["success_url"] = "https://example.com/goal"
+
+    asyncio.run(run(fakes, RUN_ID, snap))
+
+    [(_, findings)] = fakes.findings.rows
+    assert findings[0].summary == "p1은 step 2에서 step 상한에 닿아 과제를 끝내지 못했다."
+    assert fakes.runs.status == "done"
+    # 사실 목록에 Persona 이름 · 최종 결과 · 근거 step 이 들어간다.
+    facts = requests[0]["messages"][1]["content"]
+    assert "걸린 Persona: 1명 (판정한 Persona 1명)" in facts
+    assert "- p1: 실패 (목표에 한 번도 닿지 못하고 max_steps 상태로 끝남)" in facts
+    assert "- p1 step 2: URL 경로 /" in facts
 
 
 class FirstStepDoneDecider(Decider):
@@ -1770,7 +1799,7 @@ def test_cancelled_or_failed_run_is_not_diagnosed(
     # Spring 은 done 회차의 진단만 보여 준다. done 이 아닌 회차는 진단하지 않는다.
     fakes.personas.statuses.update(persona_statuses)
 
-    RunOrchestrator()._finish_run(RUN_ID)
+    asyncio.run(RunOrchestrator()._finish_run(RUN_ID, snapshot([])))
 
     assert fakes.runs.status in ("cancelled", "failed")
     assert fakes.findings.rows == []
