@@ -6,7 +6,7 @@ LLM 없이 tests/fixtures/menu_cover.html 을 Playwright 로 띄워 DomDriver �
 import asyncio
 from pathlib import Path
 
-from uxight_agent.driver.base import Observation
+from uxight_agent.driver.base import ActionResult, Observation
 from uxight_agent.driver.dom_driver import DomDriver
 from uxight_agent.schemas import Action
 
@@ -108,3 +108,22 @@ def test_empty_veil_does_not_hide_elements() -> None:
             return await driver.observe()
 
     assert {"홈", "학사일정"} <= set(texts(asyncio.run(run())))
+
+
+def test_file_link_in_new_window_is_not_a_failure(fixture_server) -> None:
+    # 새 창으로 여는 파일 링크를 주 창에서 열면 Playwright 는 내려받기 오류를 낸다.
+    # 사람에게는 파일이 받아지는 정상 동작이다.
+    async def run() -> tuple[ActionResult, Observation]:
+        async with DomDriver() as driver:
+            url = f"{fixture_server}/download_link.html"
+            await driver.start(url)
+            first = await driver.observe()
+            result = await driver.act(click(first, "[신청서및안내]"))
+            return result, await driver.observe()
+
+    result, after = asyncio.run(run())
+
+    assert result.ok, result.error
+    assert result.downloaded
+    assert result.url_after.endswith("/download_link.html")
+    assert "본문 안내 글" in after.text

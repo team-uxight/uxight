@@ -1057,7 +1057,15 @@ class DomDriver(Driver):
                 # 새 창으로 열려던 허용 주소를 주 창에서 연다 (GACA-225).
                 # 사람은 새 탭에서 이어 본다. step 로그의 url_after 가 이 주소가 된다.
                 # 허용 밖으로 리다이렉트되면 아래 3단계가 되돌린다.
-                await page.goto(url, wait_until="domcontentloaded", timeout=NAVIGATION_TIMEOUT_MS)
+                try:
+                    await page.goto(
+                        url, wait_until="domcontentloaded", timeout=NAVIGATION_TIMEOUT_MS
+                    )
+                except PlaywrightError as e:
+                    # 파일 링크다. 사람에게는 파일이 받아지고 화면은 그대로다 (GACA-232).
+                    if "Download is starting" not in str(e):
+                        raise
+                    result = dataclasses.replace(result, downloaded=True)
         except Exception as e:
             first_line = str(e).splitlines()[0] if str(e) else ""
             result = ActionResult(ok=False, error=f"{type(e).__name__}: {first_line}")

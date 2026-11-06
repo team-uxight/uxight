@@ -101,7 +101,9 @@ def _history_text(history: list) -> str:
                 did += f" {action.element_id}번"
             if action.kind == "scroll":
                 did += f" {action.value}"
-        if step.result.ok:
+        if step.result.downloaded:
+            outcome = "파일을 내려받음 (화면은 그대로이고 파일 내용은 볼 수 없다)"
+        elif step.result.ok:
             outcome = "성공"
         elif step.result.late:
             # 페이지가 스스로 허용 밖으로 가 되돌린 차단이다 (GACA-224).
