@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>본문 뒤 배경</title>
+</head>
+<body style="margin: 0">
+  <!-- 화면을 덮는 고정 위치 배경 위에 가운데 칸만 놓은 페이지. 네 귀퉁이 점은 배경, 가운데 점은
+       그 형제 칸이지만 배경 아래에 깔린 것이 없어 레이어 팝업이 아니다 (GACA-229) -->
+  <div style="position: fixed; inset: 0; background: #dde"></div>
+  <header style="position: relative; height: 40px"><a href="home.html">머리 링크</a></header>
+  <main style="position: relative; width: 50%; margin: 0 auto; height: 80vh; background: #fff">
+    <p>가운데 글</p>
+    <a href="next.html">가운데 링크</a>
+  </main>
+</body>
+</html>

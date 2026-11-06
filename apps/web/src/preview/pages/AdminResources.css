@@ -1,0 +1,558 @@
+/* =========================================
+   UXight A2 - 정책·자원
+   ========================================= */
+
+.admin-resources,
+.admin-resources * {
+  box-sizing: border-box;
+}
+
+.admin-resources {
+  width: 100%;
+  min-width: 0;
+  padding-bottom: 45px;
+  color: #23213e;
+  font-family: "Noto Sans KR", "Pretendard", sans-serif;
+}
+
+/* 페이지 상단 */
+.admin-resources-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+
+  min-height: 65px;
+  margin: 0 0 35px;
+}
+
+.admin-resources-heading h1 {
+  margin: 0 0 7px;
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.8px;
+  color: #23213e;
+}
+
+.admin-resources-heading p {
+  margin: 0;
+  color: #9295a9;
+  font-size: 12px;
+}
+
+.admin-resources-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.admin-resources-header-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 40px;
+  padding: 0 17px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.admin-resources-btn-secondary {
+  border: 1px solid #e6e5f2;
+  color: #54536b;
+  background: #ffffff;
+}
+
+.admin-resources-btn-primary {
+  border: 1px solid #1f1d3d;
+  color: #ffffff;
+  background: #1f1d3d;
+  box-shadow: 0 5px 12px rgba(31, 29, 61, 0.16);
+}
+
+.admin-resources-btn-primary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* 2열 레이아웃 */
+.admin-resources-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1.17fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.admin-resources-column {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 15px;
+}
+
+/* 공통 카드 */
+.admin-resources-card {
+  min-width: 0;
+  padding: 20px 21px;
+
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  border-radius: 17px;
+
+  background: linear-gradient(
+    120deg,
+    rgba(255, 255, 255, 0.78),
+    rgba(255, 255, 255, 0.42)
+  );
+
+  box-shadow: 0 4px 20px rgba(31, 29, 61, 0.11);
+
+  backdrop-filter: blur(30px);
+  -webkit-backdrop-filter: blur(30px);
+}
+
+.admin-resources-card-heading {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  margin-bottom: 8px;
+}
+
+.admin-resources-card-heading h2 {
+  margin: 0 0 4px;
+  color: #23213e;
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: -0.35px;
+}
+
+.admin-resources-card-heading p {
+  margin: 0;
+  color: #9798ac;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* 카드 아이콘 */
+.admin-resources-card-icon {
+  display: flex;
+  flex: 0 0 37px;
+  align-items: center;
+  justify-content: center;
+  width: 37px;
+  height: 37px;
+  border-radius: 12px;
+}
+
+.admin-resources-card-icon.purple {
+  background: #f0edff;
+  color: #775cde;
+}
+
+.admin-resources-card-icon.mint {
+  background: #def9f4;
+  color: #16b9a7;
+}
+
+.admin-resources-card-icon.blue {
+  background: #eaf0ff;
+  color: #6576bf;
+}
+
+.admin-resources-card-icon.rose {
+  background: #fff0f3;
+  color: #dc5270;
+}
+
+.admin-resources-card-icon.gray {
+  background: #eff0f7;
+  color: #747591;
+}
+
+/* 역할별 모델과 예산 */
+.admin-resources-role-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+  padding: 7px 0 6px;
+}
+
+.admin-resources-role-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 11px 10px;
+  background: #fafaff;
+  border: 1px solid #edecf9;
+  border-radius: 12px;
+}
+
+.admin-resources-role-name {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 800;
+  color: #23213e;
+}
+
+.admin-resources-role-dot {
+  flex: 0 0 7px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.role-researcher .admin-resources-role-dot {
+  background: #8b74e9;
+}
+
+.role-maintainer .admin-resources-role-dot {
+  background: #15bcae;
+}
+
+.role-admin .admin-resources-role-dot {
+  background: #313257;
+}
+
+/* 입력 필드 공통 */
+.admin-resources-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.admin-resources-field > span,
+.admin-resources-field > label {
+  color: #73748d;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 15px;
+}
+
+.admin-resources-field input,
+.admin-resources-field select,
+.admin-resources-domain-input-row input {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+
+  border: 1px solid #e4e6f0;
+  border-radius: 9px;
+  outline: none;
+
+  background: #ffffff;
+  color: #41415f;
+  font-family: inherit;
+  font-size: 11px;
+}
+
+.admin-resources-field select {
+  padding-left: 12px;
+  padding-right: 20px;
+  cursor: pointer;
+}
+
+.admin-resources-field input:focus,
+.admin-resources-field select:focus,
+.admin-resources-domain-input-row input:focus {
+  border-color: #8b74e9;
+  box-shadow: 0 0 0 3px rgba(139, 116, 233, 0.1);
+}
+
+.admin-resources-divider {
+  width: 100%;
+  height: 1px;
+  margin: 1px 0 9px;
+  background: #f0eff7;
+}
+
+.admin-resources-field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.admin-resources-unit-field {
+  position: relative;
+  min-width: 0;
+}
+
+.admin-resources-unit-field input {
+  padding-right: 50px;
+}
+
+.admin-resources-unit-field > span {
+  position: absolute;
+  right: 11px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  color: #999aae;
+  font-size: 10px;
+}
+
+.admin-resources-footnote {
+  margin: 12px 0 0;
+  color: #9696a9;
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+/* 허용 도메인 */
+.admin-resources-domain-input-row {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+}
+
+.admin-resources-domain-input-row input {
+  flex: 1;
+}
+
+.admin-resources-domain-input-row > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  flex-shrink: 0;
+
+  height: 35px;
+  padding: 0 12px;
+  background: #1f1d3d;
+  border: none;
+  border-radius: 9px;
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.admin-resources-domains {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.admin-resources-domain-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 31px;
+  padding: 0 7px 0 9px;
+  border: 1px solid #e6e5f2;
+  border-radius: 9px;
+  background: #fafaff;
+  color: #53536b;
+  font-size: 10px;
+}
+
+.admin-resources-domain-chip button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 21px;
+  height: 19px;
+  border: none;
+  border-radius: 5px;
+  background: #f1f0f7;
+  color: #8c8a9c;
+  cursor: pointer;
+}
+
+/* 실행 제한 안내 */
+.admin-resources-info {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-top: 13px;
+  padding: 12px;
+  border: 1px solid #e8e8fa;
+  border-radius: 12px;
+  background: #f4f4ff;
+  color: #6b69a0;
+}
+
+.admin-resources-info svg {
+  flex-shrink: 0;
+}
+
+.admin-resources-info strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 11px;
+}
+
+.admin-resources-info p {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.65;
+}
+
+/* 긴급 운영 제어 */
+.admin-resources-emergency-text {
+  margin: 10px 0 12px;
+  color: #77788c;
+  font-size: 11px;
+  line-height: 1.8;
+}
+
+.admin-resources-emergency-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.admin-resources-emergency-actions strong {
+  color: #ce4466;
+  font-size: 12px;
+}
+
+.admin-resources-emergency-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  height: 43px;
+  padding: 0 18px;
+  border: 1px solid #df506c;
+  border-radius: 10px;
+  background: #d84867;
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+/* 알림 */
+.admin-resources-notice {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border: 1px solid #dad8ef;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #4d4973;
+  font-size: 12px;
+}
+
+.admin-resources-notice span {
+  flex: 1;
+}
+
+.admin-resources-notice button {
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+/* 중단 확인 팝업 */
+.admin-resources-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(20, 19, 42, 0.45);
+  backdrop-filter: blur(5px);
+}
+
+.admin-resources-dialog {
+  width: min(430px, 100%);
+  padding: 30px;
+  border-radius: 20px;
+  border: 1px solid #eeedf4;
+  background: #ffffff;
+  box-shadow: 0 5px 22px rgba(31, 29, 61, 0.22);
+}
+
+.admin-resources-dialog-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 13px;
+  background: #fff0f3;
+  color: #dc5270;
+}
+
+.admin-resources-dialog h2 {
+  font-size: 19px;
+  color: #24233f;
+}
+
+.admin-resources-dialog p {
+  font-size: 12px;
+  line-height: 1.8;
+  color: #77788c;
+}
+
+.admin-resources-dialog-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+  margin-top: 22px;
+}
+
+.admin-resources-dialog-buttons button {
+  padding: 10px 17px;
+  border: 1px solid #e6e5f2;
+  border-radius: 9px;
+  background: white;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.admin-resources-dialog-buttons button:last-child {
+  background: #d84867;
+  color: white;
+  border-color: #d84867;
+}
+
+/* 반응형 */
+@media (max-width: 1150px) {
+  .admin-resources-columns {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 650px) {
+  .admin-resources-heading {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .admin-resources-header-actions {
+    flex-wrap: wrap;
+  }
+
+  .admin-resources-role-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-resources-field-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-resources-card {
+    padding: 18px 15px;
+  }
+}

@@ -37,3 +37,13 @@ def test_sqlite_engine_has_no_timeouts() -> None:
     params = driver_connect_params("sqlite://")
 
     assert not TIMEOUTS.keys() & params.keys()
+
+
+def test_engine_checks_stale_connections() -> None:
+    # 10/30 dev 서버: agent 가 39시간 놀다 받은 첫 요청이 'MySQL server has gone away' 로 실패했다.
+    # MySQL 이 오래 쉰 연결을 끊으므로, 쓰기 전에 살아 있는지 보고(pre_ping)
+    # 1시간 넘은 연결은 새로 맺는다.
+    pool = create_db_engine("mysql+pymysql://u:p@127.0.0.1:3306/uxight").pool
+
+    assert pool._pre_ping is True
+    assert pool._recycle == 3600

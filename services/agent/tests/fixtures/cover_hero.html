@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>첫 화면 사진</title>
+</head>
+<body style="margin: 0">
+  <!-- 화면을 덮는 사진 위에 반투명 막과 글 상자를 겹친 첫 화면. 모양은 dim 과 형제 팝업이지만
+       머리 메뉴를 그대로 누를 수 있어 모달이 아니다 (GACA-229) -->
+  <header style="position: fixed; top: 0; left: 0; right: 0; height: 50px; z-index: 10">
+    <a href="menu.html">머리 메뉴</a>
+  </header>
+  <section style="position: relative; height: 100vh">
+    <div style="position: absolute; inset: 0; background: #357"></div>
+    <div style="position: absolute; inset: 0; background: rgba(0, 0, 0, 0.4)"></div>
+    <div style="position: absolute; left: 30%; top: 40%; width: 40%; height: 30%; color: #fff">
+      <h1>환영 글</h1>
+      <a href="start.html" style="color: #fff">시작하기</a>
+    </div>
+  </section>
+</body>
+</html>

@@ -51,6 +51,18 @@
         <p style="width: 300px; flex: none">숨은글 둘째 슬라이드</p>
       </div>
     </div>
+    <!-- 스크롤 상자 (GACA-228): 상자 안에서 지금 보이는 부분의 글만 본문이다 -->
+    <div style="height: 2px; overflow: auto">숨은글 스크롤 상자 auto</div>
+    <div style="height: 2px; overflow: scroll">숨은글 스크롤 상자 scroll</div>
+    <div style="height: 2px; overflow-y: auto"><p style="margin: 0">숨은글 스크롤 상자 문단</p></div>
+    <div style="height: 2px; overflow: hidden">숨은글 얇은 상자</div>
+    <div style="width: 2px; overflow: auto; white-space: nowrap">숨은글 좁은 상자</div>
+    <div style="height: 40px; overflow: auto">
+      <p style="margin: 0">상자 첫 줄</p>
+      <p style="margin: 100px 0 0">숨은글 상자 아래</p>
+    </div>
+    <!-- 글자 크기 기준보다 짧은 글 조각도 다 보이면 본문이다 -->
+    <div style="overflow: hidden">.</div>
     <canvas width="20" height="20">숨은글 canvas</canvas>
     <p style="filter: opacity(0)">숨은글 filter</p>
     <p style="position: fixed; top: 300vh">숨은글 fixed</p>
