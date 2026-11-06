@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>형제 dim 팝업</title>
+  <style>
+    .dim { display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); z-index: 100; }
+    .popup {
+      display: none; position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
+      width: 400px; padding: 20px; background: #fff; z-index: 101;
+    }
+    .page-dim { position: absolute; left: 0; top: 0; width: 100%; height: 2000px; }
+    .open .dim, .open .popup { display: block; }
+  </style>
+</head>
+<body>
+  <!-- 국내 사이트에 흔한 레이어 팝업: 화면을 덮는 dim 과 그 위 팝업이 형제다 (GACA-229).
+       dim 안에는 아무것도 없어서, 다섯 점을 모두 품는 층이 없다 -->
+  <nav><a href="home.html">홈</a> <a href="calendar.html">학사일정</a></nav>
+  <h1>수강신청 안내</h1>
+  <p>뒤 본문 글</p>
+  <p>
+    <button onclick="open_('body-level')">바로 열기</button>
+    <button onclick="open_('wrapped')">묶음 열기</button>
+    <button onclick="open_('page-long')">긴 dim 열기</button>
+    <button onclick="open_('long-popup')">긴 팝업 열기</button>
+    <button onclick="open_('outside-close')">밖 닫기 열기</button>
+    <button onclick="open_('empty-popup')">빈 팝업 열기</button>
+  </p>
+  <div style="height: 1500px"></div>
+
+  <div id="body-level" style="display: contents">
+    <div class="dim"></div>
+    <div class="popup" role="dialog">
+      <p>팝업 글</p>
+      <a href="rules.html">자세히 보기</a>
+      <button onclick="close_('body-level')">닫기</button>
+    </div>
+  </div>
+
+  <div id="wrapped">
+    <div class="dim"></div>
+    <div class="popup">
+      <p>묶음 팝업 글</p>
+      <button onclick="close_('wrapped')">닫기</button>
+    </div>
+  </div>
+
+  <div id="page-long">
+    <div class="dim page-dim"></div>
+    <div class="popup">
+      <p>긴 dim 팝업 글</p>
+      <button onclick="close_('page-long')">닫기</button>
+    </div>
+  </div>
+
+  <div id="long-popup">
+    <div class="dim"></div>
+    <div class="popup" style="height: 200px; overflow: auto"><div id="rows"></div></div>
+  </div>
+
+  <!-- 닫기 버튼이 팝업 밖에 있다. 누를 수 있는 것이 밖에 남아 모달로 보지 않는다 -->
+  <div id="outside-close">
+    <div class="dim"></div>
+    <div class="popup"><p>글만 있는 팝업</p></div>
+    <button class="popup" style="left: 80%; width: 60px; padding: 0" onclick="close_('outside-close')">밖 닫기</button>
+  </div>
+
+  <!-- 팝업 자리에 보이는 것이 없다 -->
+  <div id="empty-popup">
+    <div class="dim"></div>
+    <div class="popup"></div>
+  </div>
+
+  <script>
+    const rows = document.getElementById('rows');
+    for (let n = 1; n <= 40; n++) rows.insertAdjacentHTML('beforeend', `<p>${n}번째 줄</p>`);
+    const open_ = (id) => document.getElementById(id).classList.add('open');
+    const close_ = (id) => document.getElementById(id).classList.remove('open');
+  </script>
+</body>
+</html>

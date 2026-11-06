@@ -1,7 +1,7 @@
 # services/agent — UXight Agent (Python 3.12 · FastAPI · Playwright)
 
 역할: **실행 전부** — Persona Agent 루프 · 행동 로그 · Friction 진단 · 개선안 · 재실험. api 는 `POST /runs` 한 번만 부른다.
-LLM 은 OpenAI-compatible SDK + pydantic 만 (LangChain 없음, T15). LLM 이 낼 수 있는 행동은 `schemas.Action` 5종뿐 (D18).
+LLM 은 LangChain 없이 OpenAI-compatible SDK 와 pydantic 만 쓴다(결정 로그 T15). LLM 이 낼 수 있는 행동은 `schemas.Action` 5종뿐이다(결정 로그 D18).
 
 ```sh
 uv sync                      # .venv 생성 (dev 포함)
@@ -10,9 +10,9 @@ uv run uvicorn uxight_agent.main:app --reload   # http://localhost:8000/health
 uv run ruff check . && uv run pytest
 ```
 
-환경변수는 `.env.example`. 실행 로그(JSON)는 `data/` — 커밋하지 않는다.
+환경 변수는 `.env.example` 을 본다. 실행 로그(JSON)는 `data/` 에 쌓이고, 커밋하지 않는다.
 
-**LLM 호출은 `uxight_agent/llm.py` 의 `LLMClient.chat()` 으로만.** 호출마다 사용량(토큰 · 비용 · 시간 · 역할 · 실행 id)이 `data/llm-usage.jsonl` 에 한 줄씩 남는다 — 키 · 프롬프트 · 응답 본문은 남기지 않는다. 비용은:
+**LLM 은 `uxight_agent/llm.py` 의 `LLMClient.chat()` 으로만 부른다.** 부를 때마다 사용량(토큰 · 비용 · 시간 · 역할 · 실행 id)이 `data/llm-usage.jsonl` 에 한 줄씩 남는다. 키 · 프롬프트 · 응답 본문은 남기지 않는다. 비용은 아래 명령으로 본다.
 
 ```sh
 uv run python -m uxight_agent.usage_report                  # 전체, 역할별
@@ -43,10 +43,10 @@ uv run python -m uxight_agent.usage_report --log data/llm-usage.jsonl data/bench
   - 같은 화면은 요소 줄(step 로그의 `elements_hash`)과 지금 화면 안의 본문 글이 둘 다 같은 것이다. 펼침처럼 누른 뒤 본문 글만 바뀌어도 다른 화면이다.
   - 본문 글은 step 로그에 없다. 그래서 stuck 은 step 로그만으로 다시 셀 수 없다.
   - 관측 사이의 행동마다 세는지 정하고, 세지 않는 행동 뒤에는 처음부터 다시 센다.
-  - 브라우저에 보낸 click · back 은 센다. select 를 누른 것도 센다 — 이 드라이버에서는 select 를 눌러도 값이 바뀌지 않는다.
+  - 브라우저에 보낸 click · back 은 센다. select 를 누른 것도 센다. 이 드라이버에서는 select 를 눌러도 값이 바뀌지 않기 때문이다.
   - scroll 은 본문 글이 있으면 센다. 페이지 가운데에서는 본문 글이 바뀌어 같은 화면이 아니고, 페이지 끝에서 되풀이하면 같은 화면이다.
   - 본문 글이 비면(benchmark 의 본문 글 끔 변형 등) scroll 은 세지 않는다. 요소 줄에는 화면 아래 요소도 있어, scroll 이 화면을 바꿨는지 알 수 없다.
-  - 본문이 안쪽 스크롤 상자에 든 페이지(SPA 등)는 드라이버의 scroll(창 스크롤)로 움직이지 않는다. 그래서 scroll 두 번이면 stuck 이 될 수 있다 — 사이트의 UX 문제가 아니라 드라이버의 한계다.
+  - scroll 은 화면 가운데 요소에서 가장 가까운, 더 움직일 수 있는 스크롤 상자를 먼저 움직이고 없으면 창을 움직인다(GACA-228). 화면 가운데에서 휠을 굴린 것과 같다. 가로로만 넘치는 상자는 움직이지 않아, 넘친 칸의 글은 본문에 없다.
   - type 과 입력칸(input 의 텍스트 · 체크 계열, textarea) click 은 세지 않는다. 입력값 · 체크 상태는 요소 줄에도 본문 글에도 없어서, 세면 폼을 채우는 Persona 가 끝난다.
   - 가드 차단은 세지 않는다. 가드 끔(benchmark)에서 가드가 막았을 행동도 세지 않아, 가드 켬 · 끔에서 세는 규칙이 같다.
   - 행동을 얻지 못한 step 은 `fail` 규칙이 맡는다.
@@ -54,6 +54,24 @@ uv run python -m uxight_agent.usage_report --log data/llm-usage.jsonl data/bench
   - stuck 은 세 번째 행동을 보지 않으므로, 마지막 화면이 빠져나간 뒤의 화면일 수 있다(max_steps 와 같은 규칙).
 - 진행률(`runs.progress`)은 `done` · `max_steps` · `token_limit` · `stuck` 을 센다.
 - benchmark 의 `personas.jsonl` 에 있는 `outcome` 도 같은 값을 쓴다.
+
+## 관측 전 기다림 · 모달 (GACA-157)
+
+- 관측 전에 화면이 멎기를 기다린다. DOM · SoM 이 같은 기준이고, 최대 1.5초(`STILL_WAIT_MS`)다.
+  - 주 창 문서가 보낸 fetch · XHR 이 끝나기를 기다린다. 받아 온 글을 나중에 넣는 페이지가 많다. iframe 의 요청은 세지 않는다. iframe 안 글은 관측에 들지 않는다.
+  - 글이나 누를 것이 든 요소의 끝이 있는 애니메이션과 창의 부드러운 스크롤이 멎기를 기다린다. 처음엔 투명했다가 나타나는 글(결함 사본의 미끼 DST-ANIM)도 이것으로 첫 관측에 든다.
+  - type 행동 뒤에는 0.5초(`TYPE_SETTLE_MS`)를 더 기다린다. 입력하고 0.3초쯤 뒤에 찾는 검색의 요청이 그 사이 시작하고, 시작한 요청은 위처럼 기다린다. 11/05 에 재 보니 type 행동이 0.05초에서 0.56초로 늘었고, 다른 행동은 그대로다. 0.5초보다 늦게 시작하는 요청의 결과는 다음 관측에 들어온다(GACA-230).
+  - 상한을 넘기면 그대로 관측한다. 늦게 온 글은 다음 관측에 들어온다. 상한까지 끝나지 않은 요청은 버린다. 오래 열어 두는 요청(long poll) 하나로 관측마다 상한을 다 쓰지 않는다.
+  - 주 창에 새 문서가 들어오면 앞 문서의 요청은 잊는다. 같은 문서 안 주소 변경(pushState · 해시)에는 계속 기다린다.
+  - 허용 밖 페이지에서는 기다리지 않는다. 기다림 스크립트를 허용 밖 페이지에서 돌리지 않는다.
+  - 11/03 에 학교 사본 71쪽에서 재 보니 기다림은 0.6초 안팎이었다. 대부분 메뉴 링크의 글자색 전환(0.3~0.4초)이다.
+- 모달이 열려 있으면 그 안만 관측한다. 요소 줄 · 클릭이 걸린 칸 · 본문 글 모두 그렇다.
+  - 모달은 브라우저 모달 dialog(showModal), 또는 화면을 다 덮는 고정 위치 층이다. 층은 화면 가운데와 네 귀퉁이 근처 다섯 점의 맨 위 요소를 모두 품어야 한다. role · aria 표시가 없는 레이어 팝업도 잡는다.
+  - 화면을 덮는 dim 과 그 위 팝업이 형제인 레이어 팝업도 모달이다(GACA-229). 네 귀퉁이 점이 dim, 가운데 점이 형제 안이고, 팝업 밖에 화면 안에서 누를 수 있는 요소가 없어야 한다. 그래서 hero 의 반투명 막 · 로그인 화면은 모달이 아니다.
+  - 모달 dialog 가 여럿 열려 있으면 맨 위(화면 가운데 요소가 든 것)만 본다.
+  - 화면 일부만 가리는 팝업은 모달이 아니다. 보이는 글도 누를 것도 없는 막(투명 막, 스크린 리더용 숨김 글만 든 dim)도 모달이 아니다.
+  - 모달이 열려 있으면 scroll 은 창 대신 그 안의 스크롤 상자를 움직인다. 화면 가운데 요소에서 가장 가까운 상자다. 긴 모달의 아래쪽도 볼 수 있다.
+  - 팝업이 화면 가운데를 지나지 않거나 dim 의 형제가 아니면 모달로 잡지 못한다. 이때는 전처럼 뒤 요소도 관측에 든다.
 
 ## 성능 benchmark (GACA-179)
 
@@ -79,7 +97,7 @@ uv run python -m uxight_agent.bench ../../config/bench-school.json --out data/be
 | `sites[].answers` | 결함 사본의 정답 파일 |
 | `sites[].findings` | `{변형 이름: 진단 결과 파일}`. 진단 결과는 findings 표의 행을 담은 JSON 배열이다. 원본 사본이나 정답 파일이 있는 사이트에만 쓴다 |
 | `sites[].allowed_domains` | 회차의 허용 도메인과 같다. 시작 URL 의 호스트는 늘 허용한다. 하위 요청(글꼴 · 스크립트)도 이 목록으로 거른다 |
-| `variants` | 변형 이름 → 바꿀 값. `observation` 은 `dom` 또는 `som`, `body_text` 는 `false` 면 관측에서 본문 글을 뺀다(기본 `true`), `guard` 는 `on`(가드 켬, 기본) 또는 `off`(가드 끔 — 판단만 기록, 아래) |
+| `variants` | 변형 이름마다 바꿀 값. `observation` 은 `dom` 또는 `som` 이다. `body_text` 가 `false` 면 관측에서 본문 글을 뺀다(기본 `true`). `guard` 는 `on`(가드 켬, 기본) 또는 `off`(가드 끔, 판단만 기록 — 아래 설명)다 |
 | `variants` 의 자리만 있는 칸 | `diagnosis` 는 `single` 만 받는다. 다중 진단(GACA-181)이 생기면 값을 더한다 |
 | `repeat` · `concurrency` | 반복 수 · 동시에 도는 Persona 수 |
 | `max_steps` · `max_seconds` · `max_tokens` | 한도. 토큰 상한은 Persona 실행 하나마다 센다 |
@@ -105,13 +123,13 @@ uv run python -m uxight_agent.bench ../../config/bench-school.json --out data/be
   - 파괴적 행동 차단 · 링크 도메인 검사: 막을 행동도 실행하고, 막았을 결과를 남긴다.
   - 페이지 글 지시문 표시: 프롬프트에 `[[지시문 의심: …]]` 을 붙이지 않고, 붙였을 조각 수를 남긴다. 페이지가 쓴 `[[ ]]` 는 그때도 하나로 줄인다.
 - **가드 끔은 막을 행동을 실제로 실행한다.** 그래서 가드 끔 변형이 하나라도 있으면 모든 사이트가 `--serve` 로 띄운 사본이어야 하고, `allowed_domains` 는 비워야 한다. 아니면 브라우저를 띄우기 전에 멈춘다.
-- 드라이버의 요청 단계 차단은 주 창 · 새 창 이동만 끊는다. 실행된 클릭이 낸 하위 요청(fetch · 이미지 · beacon · ping) · iframe 이동 · WebSocket 은 그것만으로는 밖에 닿는다.
-  - 그래서 운영 Watcher 와 benchmark 의 모든 변형이 **허용 밖 하위 요청 차단**을 켠다(GACA-227). 두 조건이 같고, 운영과도 같다.
+- 운영 Watcher 와 benchmark 의 모든 변형은 **허용 밖 하위 요청 차단**을 켠다(GACA-227). 가드 켬 · 끔 두 조건이 같고, 운영과도 같다.
+  - 드라이버의 요청 단계 차단은 주 창 · 새 창 이동만 끊는다. 그래서 실행된 클릭이 낸 하위 요청(fetch · 이미지 · beacon · ping) · iframe 이동 · WebSocket 은 그것만으로는 허용 밖에 닿는다.
   - 허용 밖 하위 요청 차단은 두 겹이다. route 에서 허용 밖 하위 요청 · iframe 이동을 끊고, 허용 밖 WebSocket 은 가짜로 받는다.
   - route 를 거치지 않는 연결(worker · service worker 안의 요청, 떠날 때의 beacon · keepalive fetch, 추측 prefetch · prerender)은 브라우저 설정이 막는다. 허용 호스트:포트 말고는 모두 막힌 프록시로 보내고, WebRTC 의 UDP 와 QUIC 를 끄고, service worker 를 막는다.
   - 사본이 허용 밖에서 받는 글꼴 · 스크립트도 끊긴다. 학교 사본은 홈의 CDN 스크립트 1개가 끊기고, 홈과 Task 페이지 화면은 그대로였다(10/31). 그래도 이 차단을 켜기 전의 결과(GACA-179 benchmark)와는 바로 비교하지 않는다.
 - 새 창 규칙 · 늦은 이동 되돌리기 · 자동 요청의 파괴적 경로 검사와 한도는 두 조건 모두 그대로다.
-- `guard-log.jsonl` 한 줄: `run_id` · `persona_id` · `step`, `guard`(`domain` · `destructive` · `page_text`), `reason`, `action`(step 로그 모양), `destination`(계정 · 쿼리 뺀 목적지), `marks`(지시문 표시 조각 수).
+- `guard-log.jsonl` 한 줄에는 `run_id` · `persona_id` · `step`, `guard`(`domain` · `destructive` · `page_text`), `reason`, `action`(step 로그 모양), `destination`(계정 · 쿼리 뺀 목적지), `marks`(지시문 표시 조각 수)가 들어간다.
   - `reason`: 행동 가드는 가드 켬이었다면 step 로그 `result.error` 에 남았을 문구, 지시문 표시는 걸린 패턴 이름이다. 페이지 글 원문은 남기지 않는다.
   - http(s) 가 아닌 목적지는 `destination` · `reason` 모두 scheme 만 남긴다(`data:` · `javascript:` · `mailto:`). 그 주소에 페이지 글 · 코드 · 메일 주소가 그대로 있어서다.
 - 표의 가드 칸은 행의 합계다. 가드 `on` 은 실제로 막은 수 · 붙인 표시 수, `off` 는 막지 않고 기록한 수다.
@@ -119,12 +137,12 @@ uv run python -m uxight_agent.bench ../../config/bench-school.json --out data/be
   - 지시문 표시: 프롬프트 페이지 글의 표시 조각 수.
   - 요청 끊김: 드라이버가 요청 단계에서 끊은 허용 밖 이동 요청 수(주 창 · 새 창).
   - 하위 요청 끊김: 허용 밖 하위 요청 차단이 route 에서 끊은 수. 막힌 프록시가 막은 연결은 세지 못한다.
-  - CuP: 성공했고 행동 가드가 한 번도 걸리지 않은 실행의 비율. 지시문 표시는 넣지 않는다.
+  - CuP(Completion under Policy, ST-WebAgentBench 의 지표): 성공했고 행동 가드가 한 번도 걸리지 않은 실행의 비율이다. 지시문 표시는 넣지 않는다.
 - 가드 끔은 bench 에서만 쓴다. 운영 Watcher · 정책 · env 로는 켤 수 없다.
 
 **알아 둘 것**
 
-- `som` 변형은 지금 드라이버만 바뀐다(번호 박스 그림, 화면이 멎기를 기다림). Persona 프롬프트에 그림을 넣지 않으므로 모델이 받는 글은 `dom` 과 같다.
+- `som` 변형은 지금 드라이버만 바뀐다(번호 박스 그림). 화면이 멎기를 기다리는 것은 `dom` 도 같다(GACA-157). Persona 프롬프트에 그림을 넣지 않으므로 모델이 받는 글은 `dom` 과 같다.
 - 비교할 사이트는 같은 방식으로 띄운다. 학교 사본 홈은 스크립트가 메뉴 링크를 바꾼다. 그래서 첫 관측이 바뀌기 전인지 뒤인지가 로딩 속도에 따라 달라진다. 공개 주소와 `--serve` 를 섞으면 사이트 차이에 속도 차이가 섞인다.
 - `--serve` 는 서버 nginx 설정 중 두 가지만 따른다. `.do` 를 HTML 로 내고, POST 에도 같은 파일을 준다. 사본에 없는 경로는 404 다(서버는 안내 페이지).
 - 결함 사본과 정답 파일은 저장소에 넣지 않는다.

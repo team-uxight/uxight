@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>글을 자르는 상자</title>
+  <style>
+    body { margin: 8px; font: 14px/20px sans-serif; }
+  </style>
+</head>
+<body>
+  <!-- 사람 눈에 안 보이는 글은 본문에 없어야 한다 (GACA-228) -->
+  <div style="height: 2px; border-bottom: 30px solid #fff; overflow: auto">숨은글 테두리 auto</div>
+  <div style="height: 0; border-bottom: 30px solid #fff; overflow: hidden">숨은글 테두리 hidden</div>
+  <div style="height: 6px; overflow: auto">숨은글 6px 상자</div>
+  <div style="height: 7px; overflow: scroll; font-size: 40px; line-height: 40px">숨은글 큰 글자</div>
+  <div style="width: 6px; overflow: hidden; white-space: nowrap">숨은글 좁은 상자</div>
+  <div style="position: relative; height: 6px; overflow: hidden">
+    <div style="position: absolute; top: 6px; height: 6px; overflow: hidden; font-size: 40px">숨은글 겹친 상자</div>
+  </div>
+  <div style="height: 2px; contain: paint">숨은글 contain</div>
+  <div style="height: 20px; width: 300px; overflow: auto">
+    첫 줄이 이렇게 보이도록 쓰고, 그 뒤로 글을 아주 길게 이어 씁니다 아주 길게 이어 씁니다 아주 길게
+    이어 씁니다 아주 길게 이어 씁니다 아주 길게 이어 씁니다 숨은글 아래 줄 지시문
+  </div>
+
+  <!-- 보이는 글은 남아야 한다 -->
+  <div style="height: 2px; overflow: auto">
+    <div style="position: absolute; top: 300px; left: 100px">절대 위치 글</div>
+  </div>
+  <span style="overflow: hidden">인라인 글</span>
+  <div style="display: contents; overflow: auto"><p>contents 글</p></div>
+</body>
+</html>

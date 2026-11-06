@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>모달 레이어</title>
+</head>
+<body>
+  <!-- 결함 사본의 '필수 정보가 모달 뒤'(INT-H)와 같은 마크업 (deploy-vm 주입기의 MODAL_*).
+       화면을 덮는 고정 위치 막 안에 role=dialog 상자가 있고, 오른쪽 위 × 로만 닫힌다.
+       막은 overflow:auto 라 표가 길면 막 안에서 스크롤한다. 표는 스크립트가 40줄로 채운다 -->
+  <nav><a href="home.html">홈</a> <a href="calendar.html">학사일정</a> <a href="scholar.html">장학제도</a></nav>
+  <h1>졸업 요건</h1>
+  <p>학번별 졸업 이수학점은 아래 표를 본다.</p>
+  <p><a href="#this" class="link-btn2" onclick="this.parentNode.nextElementSibling.style.display='block';return false;"><span>자세히 보기</span></a></p>
+  <div style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;z-index:10000;overflow:auto;background:rgba(0,0,0,.5)">
+    <div role="dialog" style="position:relative;width:90%;max-width:900px;margin:5vh auto;padding:32px 20px 20px;background:#fff">
+      <button type="button" style="position:absolute;top:6px;right:8px;width:16px;height:16px;padding:0;border:0;background:none;color:#666;font-size:14px;line-height:16px;cursor:pointer" onclick="this.parentNode.parentNode.style.display='none'">×</button>
+      <p><a href="rules.html">학칙 보기</a></p>
+      <table id="credits"><tr><th>학번</th><th>졸업 이수학점</th></tr></table>
+    </div>
+  </div>
+  <p>문의: 학사지원팀</p>
+  <script>
+    const table = document.getElementById('credits');
+    for (let n = 1; n <= 40; n++) table.insertRow().innerHTML = `<td>${n}학번</td><td>${150 - n}</td>`;
+  </script>
+</body>
+</html>
