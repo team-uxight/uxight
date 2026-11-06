@@ -6,12 +6,14 @@ from dataclasses import dataclass
 from typing import TypeVar
 
 from ..db import settings
+from ..diagnose.findings import build_findings
 from ..driver.dom_driver import DomDriver
 from ..guard.domain import allowed_hosts
 from ..llm import LLMClient
 from ..persona.llm_decider import STEP_MAX_RETRIES, LLMDecider
 from ..persona.persona_agent import Decider, PersonaAgent
 from ..repositories.audit_log_repository import audit_log_repository
+from ..repositories.finding_repository import finding_repository
 from ..repositories.run_persona_repository import PersonaOutcome, run_persona_repository
 from ..repositories.run_repository import RunSnapshot, run_repository
 from ..usage_report import PriceTable, price_table
@@ -276,6 +278,14 @@ class RunOrchestrator:
             )
             run_repository.mark_failed(run_id, error=f"실패한 페르소나: {failed_text}")
         else:
+            # done 은 진단까지 끝난 뒤에 쓴다 — Spring 은 done 회차의 진단만 보여 준다.
+            # 진단을 못 만들면 done 으로 두지 않는다. 진단 0건이 '문제 없음'으로 보이기 때문이다.
+            try:
+                self._save_findings(run_id, statuses)
+            except Exception:
+                logger.exception("run=%s diagnosis failed", run_id)
+                run_repository.mark_failed(run_id, error="진단 실패")
+                return
             # 11/03 결정: URL 도달 여부와 종료 상태를 함께 사용한다.
             # 판정 가능한 종료 상태만 포함하고, URL 기록이 없으면 제외한다.
             # fail/cancelled/running은 성공률 분모에 포함하지 않는다.
@@ -289,6 +299,20 @@ class RunOrchestrator:
             success = sum(1 for status, reached in judged if status == "done" and reached is True)
             success_rate = round(success / len(judged) * 100, 2) if judged else 0.0
             run_repository.mark_done(run_id, success_rate=success_rate)
+
+    @staticmethod
+    def _save_findings(run_id: int, statuses: dict[int, str]) -> None:
+        """Persona 별 step 로그로 회차의 진단을 만들어 findings 에 넣는다 (GACA-165)."""
+        steps_by_persona = {
+            persona_id: step_log_writer.read_steps(run_id, persona_id) for persona_id in statuses
+        }
+        findings = build_findings(steps_by_persona, statuses)
+        finding_repository.insert_all(run_id, findings)
+        logger.info(
+            "run=%s findings saved: %s",
+            run_id,
+            [(f.taxonomy, f.severity) for f in findings],
+        )
 
     async def _run_single_persona(
         self,
@@ -343,6 +367,7 @@ class RunOrchestrator:
 
         # 종료 상태와 URL 도달 여부를 함께 저장한 뒤 진행률을 갱신한다.
         run_persona_repository.mark_finished(run_id, persona_id, outcome, url_reached=url_reached)
+        # 진단은 모든 Persona 가 끝난 뒤 회차 단위로 한다 (_finish_run → _save_findings).
         self._refresh_progress(run_id)
 
     @contextlib.asynccontextmanager

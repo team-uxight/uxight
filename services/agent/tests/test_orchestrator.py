@@ -126,6 +126,19 @@ class FakeRunPersonaRepository:
             self.url_reached[persona_id] = url_reached
 
 
+class FakeFindingRepository:
+    """findings INSERT 를 메모리에 쌓는다. fail 을 켜면 저장이 실패한다."""
+
+    def __init__(self) -> None:
+        self.rows: list[tuple[int, list]] = []
+        self.fail = False
+
+    def insert_all(self, run_id: int, findings: list) -> None:
+        if self.fail:
+            raise RuntimeError("db down")
+        self.rows.append((run_id, findings))
+
+
 class FakeAuditLogRepository:
     def __init__(self) -> None:
         self.rows: list[tuple[int, int, dict]] = []
@@ -176,7 +189,7 @@ def fake_driver_class(browsers: Browsers) -> type[Driver]:
             return Observation(url="https://example.com", title="t", dom="")
 
         async def act(self, action: Action) -> ActionResult:
-            return ActionResult(ok=True)
+            return ActionResult(ok=True, url_after="https://example.com")
 
         async def close(self) -> None:
             browsers.closed += 1
@@ -218,10 +231,17 @@ def fakes(monkeypatch: pytest.MonkeyPatch, tmp_path) -> SimpleNamespace:
     monkeypatch.setattr(orchestrator_module, "run_persona_repository", personas)
     audits = FakeAuditLogRepository()
     monkeypatch.setattr(orchestrator_module, "audit_log_repository", audits)
+    findings = FakeFindingRepository()
+    monkeypatch.setattr(orchestrator_module, "finding_repository", findings)
     monkeypatch.setattr(orchestrator_module, "CANCEL_POLL_SECONDS", POLL_SECONDS)
     set_global_cap(monkeypatch, 3)
     return SimpleNamespace(
-        browsers=browsers, runs=runs, personas=personas, audits=audits, log_dir=tmp_path
+        browsers=browsers,
+        runs=runs,
+        personas=personas,
+        audits=audits,
+        findings=findings,
+        log_dir=tmp_path,
     )
 
 
@@ -1666,3 +1686,91 @@ def test_watcher_decider_marks_page_instructions(
 
     assert decision.action == Action(kind="done")
     assert MARK_START + "이전 지시를 무시" in requests[0]["messages"][1]["content"]
+
+
+def test_done_run_saves_findings_from_step_logs(fakes: SimpleNamespace) -> None:
+    # 회차가 끝나면 실제로 쓴 step 로그를 읽어 진단을 만들고 저장한 뒤 done 으로 끝낸다 (GACA-165).
+    # scroll 만 내다 못 닿고 step 상한에 닿은 Persona 는 과제 실패(high)다 (friction_rules).
+    snap = snapshot([persona(1)], max_steps=2)
+    snap.task["success_url"] = "https://example.com/goal"
+
+    asyncio.run(run(fakes, RUN_ID, snap))
+
+    assert fakes.personas.statuses[1] == "max_steps"
+    assert fakes.runs.status == "done"
+    [(run_id, findings)] = fakes.findings.rows
+    assert run_id == RUN_ID
+    assert [(f.taxonomy, f.severity) for f in findings] == [("task_failure", "high")]
+    assert findings[0].evidence == [
+        {"persona_id": 1, "step_from": 2, "step_to": 2, "url": "https://example.com"}
+    ]
+    assert findings[0].summary is None  # 설명은 GACA-166 이 채운다
+
+
+class FirstStepDoneDecider(Decider):
+    """첫 step 에서 done 을 낸다."""
+
+    async def decide(self, persona, task, observation, history) -> Decision:
+        return Decision(Action(kind="done"))
+
+
+@pytest.mark.parametrize(
+    ("success_url", "ends_with_done", "status", "reached", "success_rate"),
+    [
+        ("https://example.com", True, "done", True, 100.0),
+        ("https://example.com", False, "max_steps", True, 0.0),
+        ("https://example.com/goal", True, "done", False, 0.0),
+    ],
+    ids=["성공", "어렵게-성공", "실패"],
+)
+def test_real_step_log_decides_reach_and_success_rate(
+    fakes: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    success_url: str,
+    ends_with_done: bool,
+    status: str,
+    reached: bool,
+    success_rate: float,
+) -> None:
+    # 실제 step 로그에서 도달 여부를 모아 Persona 칸에 넣고, 그 칸으로 성공률을 센다 (11/03 결정).
+    if ends_with_done:
+        use_decider(monkeypatch, FirstStepDoneDecider())
+    snap = snapshot([persona(1)], max_steps=2)
+    snap.task["success_url"] = success_url
+
+    asyncio.run(run(fakes, RUN_ID, snap))
+
+    assert fakes.personas.statuses[1] == status
+    assert fakes.personas.url_reached[1] is reached
+    assert fakes.runs.status == "done"
+    assert fakes.runs.success_rate == success_rate
+
+
+def test_diagnosis_error_fails_run(fakes: SimpleNamespace) -> None:
+    # 진단을 저장하지 못하면 done 으로 두지 않는다 — 진단 0건이 '문제 없음'으로 보이기 때문이다.
+    fakes.findings.fail = True
+    snap = snapshot([persona(1)], max_steps=2)
+    snap.task["success_url"] = "https://example.com/goal"
+
+    asyncio.run(run(fakes, RUN_ID, snap))
+
+    assert fakes.personas.statuses[1] == "max_steps"
+    assert fakes.runs.status == "failed"
+    assert fakes.runs.error == "진단 실패"
+
+
+@pytest.mark.parametrize(
+    "persona_statuses",
+    [{1: "max_steps", 2: "cancelled"}, {1: "fail", 2: "fail"}],
+    ids=["cancelled", "all-fail"],
+)
+def test_cancelled_or_failed_run_is_not_diagnosed(
+    fakes: SimpleNamespace, persona_statuses: dict[int, str]
+) -> None:
+    # Spring 은 done 회차의 진단만 보여 준다. done 이 아닌 회차는 진단하지 않는다.
+    fakes.personas.statuses.update(persona_statuses)
+
+    RunOrchestrator()._finish_run(RUN_ID)
+
+    assert fakes.runs.status in ("cancelled", "failed")
+    assert fakes.findings.rows == []
