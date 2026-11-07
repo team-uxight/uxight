@@ -15,20 +15,24 @@ class FakeLLM:
 
     async def chat(self, messages, **kwargs):
         self.messages = messages
-        content = json.dumps({
-            "options": [{
-                "option_no": 1,
-                "finding_ids": [1],
-                "page_url": "https://school.example.com/student",
-                "patch_kind": "relabel",
-                "patch": {
-                    "target": self.target,
-                    "new_text": "장학금 신청 안내",
-                },
-                "rationale": "장학금 메뉴의 이름이 불명확하다.",
-                "effect_metric": "step_count",
-            }]
-        })
+        content = json.dumps(
+            {
+                "options": [
+                    {
+                        "option_no": 1,
+                        "finding_ids": [1],
+                        "page_url": "https://school.example.com/student",
+                        "patch_kind": "relabel",
+                        "patch": {
+                            "target": self.target,
+                            "new_text": "장학금 신청 안내",
+                        },
+                        "rationale": "장학금 메뉴의 이름이 불명확하다.",
+                        "effect_metric": "step_count",
+                    }
+                ]
+            }
+        )
         return SimpleNamespace(
             choices=[
                 SimpleNamespace(
@@ -40,15 +44,15 @@ class FakeLLM:
 
 
 def findings():
-    return [{
-        "finding_id": 1,
-        "taxonomy": "navigation",
-        "severity": "medium",
-        "summary": "장학금 메뉴를 찾기 어렵다.",
-        "evidence": [{
-            "url": "https://school.example.com/student"
-        }],
-    }]
+    return [
+        {
+            "finding_id": 1,
+            "taxonomy": "navigation",
+            "severity": "medium",
+            "summary": "장학금 메뉴를 찾기 어렵다.",
+            "evidence": [{"url": "https://school.example.com/student"}],
+        }
+    ]
 
 
 async def run_case(target, should_fail):
@@ -91,10 +95,7 @@ async def run_case(target, should_fail):
                 assert len(result) == 1
 
             payload = json.loads(llm.messages[1]["content"])
-            selectors = {
-                item["selector"]
-                for item in payload["dom_candidates"]
-            }
+            selectors = {item["selector"] for item in payload["dom_candidates"]}
 
             assert "#scholarship" in selectors
             assert ".other" not in selectors

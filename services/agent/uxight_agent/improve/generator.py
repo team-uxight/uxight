@@ -94,9 +94,7 @@ def validate_references(
         target_page = _page_key(option.page_url)
 
         if target_page[0] not in ("http", "https") or not target_page[1]:
-            raise ValueError(
-                f"Option {option.option_no} has an invalid page_url"
-            )
+            raise ValueError(f"Option {option.option_no} has an invalid page_url")
 
         for finding_id in option.finding_ids:
             finding = finding_by_id.get(finding_id)
@@ -180,9 +178,7 @@ async def generate_improvements(
         current_page = _page_key(page.url)
         for option in validated.options:
             if current_page != _page_key(option.page_url):
-                raise ValueError(
-                    f"Option {option.option_no} targets a different page"
-                )
+                raise ValueError(f"Option {option.option_no} targets a different page")
 
             await validate_patch_target(
                 page,

@@ -35,24 +35,18 @@ def test_valid_improvement():
     ],
 )
 def test_all_four_patch_kinds(kind, patch):
-    result = ImprovementResponse.model_validate(
-        {"options": [option(kind=kind, patch=patch)]}
-    )
+    result = ImprovementResponse.model_validate({"options": [option(kind=kind, patch=patch)]})
     assert result.options[0].patch_kind == kind
 
 
 def test_reject_more_than_three_options():
     with pytest.raises(ValidationError):
-        ImprovementResponse.model_validate(
-            {"options": [option(i) for i in range(1, 5)]}
-        )
+        ImprovementResponse.model_validate({"options": [option(i) for i in range(1, 5)]})
 
 
 def test_reject_nonconsecutive_numbers():
     with pytest.raises(ValidationError):
-        ImprovementResponse.model_validate(
-            {"options": [option(1), option(3)]}
-        )
+        ImprovementResponse.model_validate({"options": [option(1), option(3)]})
 
 
 def test_reject_duplicate_finding_ids():
@@ -64,9 +58,7 @@ def test_reject_duplicate_finding_ids():
 
 def test_reject_invalid_patch():
     with pytest.raises(ValidationError):
-        ImprovementResponse.model_validate(
-            {"options": [option(patch={"target": "#a"})]}
-        )
+        ImprovementResponse.model_validate({"options": [option(patch={"target": "#a"})]})
 
 
 def test_reject_llm_generated_description():

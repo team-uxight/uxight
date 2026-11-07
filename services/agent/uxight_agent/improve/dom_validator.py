@@ -22,9 +22,7 @@ async def validate_patch_target(
     if "kind" in patch or "description" in patch:
         raise ValueError("patch must not contain kind or description")
 
-    validated = _PATCH_ADAPTER.validate_python(
-        {**patch, "kind": patch_kind}
-    )
+    validated = _PATCH_ADAPTER.validate_python({**patch, "kind": patch_kind})
 
     target = page.locator(validated.target)
 
@@ -52,9 +50,7 @@ async def validate_patch_target(
         raise ValueError("Target element has no readable text")
 
     if patch_kind == "relabel":
-        tag_name = await target.evaluate(
-            "element => element.tagName.toLowerCase()"
-        )
+        tag_name = await target.evaluate("element => element.tagName.toLowerCase()")
         if tag_name in ("input", "textarea", "select"):
             raise ValueError("Relabel does not support form controls")
 
@@ -81,6 +77,4 @@ async def validate_patch_target(
         )
 
         if invalid_move:
-            raise ValueError(
-                "Cannot move an element into itself or its descendants"
-            )
+            raise ValueError("Cannot move an element into itself or its descendants")

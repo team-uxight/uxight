@@ -30,14 +30,10 @@ class ImprovementRepository:
         rows = [
             {
                 "run_id": run_id,
-                "finding_ids": json.dumps(
-                    item["finding_ids"], ensure_ascii=False
-                ),
+                "finding_ids": json.dumps(item["finding_ids"], ensure_ascii=False),
                 "option_no": item["option_no"],
                 "patch_kind": item["patch_kind"],
-                "patch": json.dumps(
-                    item["patch"], ensure_ascii=False
-                ),
+                "patch": json.dumps(item["patch"], ensure_ascii=False),
                 "rationale": item["rationale"],
                 "expected_effect": item["expected_effect"],
                 "fix_cost": None,
@@ -47,17 +43,12 @@ class ImprovementRepository:
 
         with engine.begin() as conn:
             existing = conn.execute(
-                text(
-                    "SELECT COUNT(*) FROM improvements "
-                    "WHERE run_id = :run_id"
-                ),
+                text("SELECT COUNT(*) FROM improvements WHERE run_id = :run_id"),
                 {"run_id": run_id},
             ).scalar_one()
 
             if existing:
-                raise ValueError(
-                    f"Improvements already exist for run_id={run_id}"
-                )
+                raise ValueError(f"Improvements already exist for run_id={run_id}")
 
             conn.execute(
                 text(

@@ -35,9 +35,7 @@ class FakeLLM:
             choices=[
                 SimpleNamespace(
                     finish_reason="stop",
-                    message=SimpleNamespace(
-                        content=json.dumps(payload, ensure_ascii=False)
-                    ),
+                    message=SimpleNamespace(content=json.dumps(payload, ensure_ascii=False)),
                 )
             ]
         )
@@ -174,12 +172,11 @@ def test_orchestrator_saves_dom_validated_improvement(monkeypatch):
                 assert page.url == url
 
             monkeypatch.setattr(RunOrchestrator, "_open_driver", fake_open_driver)
-            monkeypatch.setattr(
-                RunOrchestrator, "_open_improvement_page", fake_open_page
-            )
+            monkeypatch.setattr(RunOrchestrator, "_open_improvement_page", fake_open_page)
 
             try:
                 from uxight_agent.repositories.run_repository import RunSnapshot
+
                 fields = RunSnapshot.__dataclass_fields__
                 values = {
                     name: (

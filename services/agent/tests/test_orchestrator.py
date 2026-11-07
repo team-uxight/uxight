@@ -1902,15 +1902,17 @@ def test_improve_mode_saves_improvements_before_done(
         events.append("save_improvements")
         fakes.improvements.insert_all(
             run_id,
-            [{
-                "option_no": 1,
-                "finding_ids": [1],
-                "patch_kind": "relabel",
-                "patch": {"target": "#menu", "new_text": "장학금"},
-                "rationale": "메뉴 이름을 명확하게 변경",
-                "expected_effect": "step_count",
-                "fix_cost": None,
-            }],
+            [
+                {
+                    "option_no": 1,
+                    "finding_ids": [1],
+                    "patch_kind": "relabel",
+                    "patch": {"target": "#menu", "new_text": "장학금"},
+                    "rationale": "메뉴 이름을 명확하게 변경",
+                    "expected_effect": "step_count",
+                    "fix_cost": None,
+                }
+            ],
         )
 
     monkeypatch.setattr(

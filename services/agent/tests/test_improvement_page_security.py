@@ -28,25 +28,17 @@ def test_allowed_evidence_page(hosts):
 
 def test_block_external_domain(hosts):
     with pytest.raises(ValueError, match="outside allowed domains"):
-        validate_improvement_page_url(
-            "https://external.example.com/student", hosts
-        )
+        validate_improvement_page_url("https://external.example.com/student", hosts)
 
 
 def test_block_different_port(hosts):
     with pytest.raises(ValueError, match="outside allowed domains"):
-        validate_improvement_page_url(
-            "https://school.example.com:8443/student", hosts
-        )
+        validate_improvement_page_url("https://school.example.com:8443/student", hosts)
 
 
 def test_block_javascript_url(hosts):
     with pytest.raises(ValueError, match="outside allowed domains"):
-        validate_improvement_page_url(
-            "javascript:alert(1)", hosts
-        )
-
-
+        validate_improvement_page_url("javascript:alert(1)", hosts)
 
 
 async def _test_open_allowed_improvement_page(hosts):
@@ -68,9 +60,7 @@ async def _test_reject_improvement_page_before_navigation(hosts):
     )
 
     with pytest.raises(ValueError, match="outside allowed domains"):
-        await RunOrchestrator._open_improvement_page(
-            driver, "https://external.example.com", hosts
-        )
+        await RunOrchestrator._open_improvement_page(driver, "https://external.example.com", hosts)
 
     driver.start.assert_not_awaited()
 
@@ -89,34 +79,46 @@ async def _test_reject_redirected_improvement_page(hosts):
 
 
 def test_open_allowed_improvement_page():
-    asyncio.run(_test_open_allowed_improvement_page(
-        allowed_hosts("https://school.example.com", ["school.example.com"])
-    ))
+    asyncio.run(
+        _test_open_allowed_improvement_page(
+            allowed_hosts("https://school.example.com", ["school.example.com"])
+        )
+    )
 
 
 def test_reject_improvement_page_before_navigation():
-    asyncio.run(_test_reject_improvement_page_before_navigation(
-        allowed_hosts("https://school.example.com", ["school.example.com"])
-    ))
+    asyncio.run(
+        _test_reject_improvement_page_before_navigation(
+            allowed_hosts("https://school.example.com", ["school.example.com"])
+        )
+    )
 
 
 def test_reject_redirected_improvement_page():
-    asyncio.run(_test_reject_redirected_improvement_page(
-        allowed_hosts("https://school.example.com", ["school.example.com"])
-    ))
+    asyncio.run(
+        _test_reject_redirected_improvement_page(
+            allowed_hosts("https://school.example.com", ["school.example.com"])
+        )
+    )
 
 
 def test_select_page_with_most_findings(hosts):
     from uxight_agent.watcher.run_orchestrator import select_improvement_evidence
 
     findings = [
-        {"finding_id": 1, "evidence": [
-            {"url": "https://school.example.com/a"},
-            {"url": "https://school.example.com/b"},
-        ]},
-        {"finding_id": 2, "evidence": [
-            {"url": "https://school.example.com/b"},
-        ]},
+        {
+            "finding_id": 1,
+            "evidence": [
+                {"url": "https://school.example.com/a"},
+                {"url": "https://school.example.com/b"},
+            ],
+        },
+        {
+            "finding_id": 2,
+            "evidence": [
+                {"url": "https://school.example.com/b"},
+            ],
+        },
     ]
 
     selected = select_improvement_evidence(findings, hosts)
@@ -130,9 +132,12 @@ def test_select_page_excludes_external_urls(hosts):
     from uxight_agent.watcher.run_orchestrator import select_improvement_evidence
 
     findings = [
-        {"finding_id": 1, "evidence": [
-            {"url": "https://external.example.com/a"},
-        ]},
+        {
+            "finding_id": 1,
+            "evidence": [
+                {"url": "https://external.example.com/a"},
+            ],
+        },
     ]
 
     assert select_improvement_evidence(findings, hosts) is None
@@ -142,16 +147,25 @@ def test_select_page_deduplicates_evidence_per_finding(hosts):
     from uxight_agent.watcher.run_orchestrator import select_improvement_evidence
 
     findings = [
-        {"finding_id": 1, "evidence": [
-            {"url": "https://school.example.com/a"},
-            {"url": "https://school.example.com/a"},
-        ]},
-        {"finding_id": 2, "evidence": [
-            {"url": "https://school.example.com/b"},
-        ]},
-        {"finding_id": 3, "evidence": [
-            {"url": "https://school.example.com/b"},
-        ]},
+        {
+            "finding_id": 1,
+            "evidence": [
+                {"url": "https://school.example.com/a"},
+                {"url": "https://school.example.com/a"},
+            ],
+        },
+        {
+            "finding_id": 2,
+            "evidence": [
+                {"url": "https://school.example.com/b"},
+            ],
+        },
+        {
+            "finding_id": 3,
+            "evidence": [
+                {"url": "https://school.example.com/b"},
+            ],
+        },
     ]
 
     selected = select_improvement_evidence(findings, hosts)

@@ -61,9 +61,7 @@ def test_reject_existing_improvements(monkeypatch):
     connection = fake_engine(monkeypatch, existing=3)
 
     with pytest.raises(ValueError, match="already exist"):
-        repository_module.ImprovementRepository().insert_all(
-            100, [make_improvement(1)]
-        )
+        repository_module.ImprovementRepository().insert_all(100, [make_improvement(1)])
 
     assert connection.execute.call_count == 1
 

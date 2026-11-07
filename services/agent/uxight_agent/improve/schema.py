@@ -32,9 +32,7 @@ class ImprovementOption(BaseModel):
         if "kind" in self.patch or "description" in self.patch:
             raise ValueError("kind and description are not LLM patch parameters")
 
-        _PATCH_ADAPTER.validate_python(
-            {**self.patch, "kind": self.patch_kind}
-        )
+        _PATCH_ADAPTER.validate_python({**self.patch, "kind": self.patch_kind})
         return self
 
 

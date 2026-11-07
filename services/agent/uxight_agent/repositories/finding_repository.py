@@ -31,18 +31,21 @@ class FindingRepository:
                 ],
             )
 
-
     def get_by_run(self, run_id: int) -> list[dict]:
         """회차에 저장된 Friction을 실제 finding_id와 함께 조회한다."""
         with engine.connect() as conn:
-            rows = conn.execute(
-                text(
-                    "SELECT finding_id, taxonomy, severity, evidence, summary "
-                    "FROM findings WHERE run_id = :run_id "
-                    "ORDER BY finding_id"
-                ),
-                {"run_id": run_id},
-            ).mappings().all()
+            rows = (
+                conn.execute(
+                    text(
+                        "SELECT finding_id, taxonomy, severity, evidence, summary "
+                        "FROM findings WHERE run_id = :run_id "
+                        "ORDER BY finding_id"
+                    ),
+                    {"run_id": run_id},
+                )
+                .mappings()
+                .all()
+            )
 
         return [
             {
