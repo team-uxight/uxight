@@ -5,6 +5,8 @@ import com.uxight.api.common.ErrorCode;
 import com.uxight.api.domain.audit.AuditLog;
 import com.uxight.api.domain.audit.AuditLogRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -16,14 +18,42 @@ public class UserService {
 
   static final String AUDIT_ACTION_ROLE_UPDATE = "user.role_update";
   static final String AUDIT_ACTION_ACTIVE_UPDATE = "user.active_update";
+  static final String AUDIT_ACTION_CREATE = "user.create";
 
   private final UserRepository userRepository;
   private final AuditLogRepository auditLogRepository;
+  private final PasswordEncoder passwordEncoder;
 
   @Autowired
-  public UserService(UserRepository userRepository, AuditLogRepository auditLogRepository) {
+  public UserService(UserRepository userRepository, AuditLogRepository auditLogRepository,
+      PasswordEncoder passwordEncoder) {
     this.userRepository = userRepository;
     this.auditLogRepository = auditLogRepository;
+    this.passwordEncoder = passwordEncoder;
+  }
+
+  /**
+   * 관리자 · 메인테이너가 리서처 계정을 만든다. 이메일 가입과 같은 활성 리서처(local)이고, 비밀번호는 서버가 무작위로 만들어
+   * 해시만 저장한다 — 원문은 돌려주는 값에만 있다. 같은 이메일(Google 가입 포함)이 있으면 409 AUT-ERR-007.
+   * 감사 로그(user.create)를 같은 트랜잭션에 남기고, 비밀번호는 싣지 않는다.
+   */
+  @Transactional
+  public CreatedUser createResearcher(Long actorId, String email, String name) {
+    if (userRepository.findByEmail(email).isPresent()) {
+      throw new ApiException(ErrorCode.EMAIL_DUPLICATED);
+    }
+
+    String initialPassword = InitialPassword.generate();
+    User user;
+    try {
+      user = userRepository.save(User.signUp(email, passwordEncoder.encode(initialPassword), name));
+    } catch (DataIntegrityViolationException e) {
+      // 조회 뒤 같은 이메일이 먼저 가입한 경우 — uk_users_email 이 최종 판정이다.
+      throw new ApiException(ErrorCode.EMAIL_DUPLICATED);
+    }
+    auditLogRepository.save(AuditLog.byUser(actorId, AUDIT_ACTION_CREATE, "user:" + user.getId(),
+        Map.of("email", email, "name", name, "role", user.getRole().name())));
+    return new CreatedUser(user, initialPassword);
   }
 
   /**

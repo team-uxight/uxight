@@ -43,6 +43,8 @@ public class User {
   @Column(name = "is_active")
   private boolean active;
 
+  private LocalDateTime lastLoginAt;   // 로그인한 적 없으면 null
+
   // 두 시각은 DB 기본값(CURRENT_TIMESTAMP · ON UPDATE)이 채운다. JPA 가 null 로 덮지 않게 쓰기에서 뺀다.
   @Column(insertable = false, updatable = false)
   private LocalDateTime createdAt;
@@ -82,6 +84,11 @@ public class User {
    */
   public void changeActive(boolean active) {
     this.active = active;
+  }
+
+  /** 로그인 성공 기록. 이메일 · Google 로그인이 토큰을 발급할 때 부른다 — access 토큰 재발급은 로그인이 아니다. */
+  public void recordLogin() {
+    this.lastLoginAt = LocalDateTime.now();
   }
 
   /** 이메일 로그인 비밀번호 확인. Google 로만 가입해 비밀번호가 없는 계정은 항상 false. */

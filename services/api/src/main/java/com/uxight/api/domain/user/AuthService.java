@@ -91,6 +91,7 @@ public class AuthService {
       throw new ApiException(ErrorCode.ACCOUNT_DISABLED);
     }
 
+    user.recordLogin();
     String rawRefreshToken = RefreshToken.newRawToken();
     refreshTokenRepository.save(RefreshToken.issue(user, rawRefreshToken, refreshTokenTtl));
     return new LoginTokens(jwtProvider.createAccessToken(user.getId()), rawRefreshToken);
