@@ -202,12 +202,18 @@ async def generate_improvements(
     task_goal: str,
     run_id: int | None = None,
     page: Any | None = None,
+    hosts: frozenset[str] | None = None,
 ) -> list[dict[str, Any]]:
     """개선안을 생성하고 검증한다. 실패하면 잘못된 패치를 저장하지 않는다."""
     if not findings:
         return []
 
-    dom_candidates = await collect_dom_candidates(page) if page is not None else None
+    if page is None:
+        dom_candidates = None
+    elif hosts is None:
+        dom_candidates = await collect_dom_candidates(page)
+    else:
+        dom_candidates = await collect_dom_candidates(page, hosts=hosts)
     if dom_candidates is not None:
         dom_candidates = [
             {
