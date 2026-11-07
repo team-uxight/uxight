@@ -111,7 +111,6 @@ def validate_references(
                 )
 
 
-
 async def filter_improvement_options(
     data: dict[str, Any],
     findings: list[dict[str, Any]],
@@ -127,14 +126,10 @@ async def filter_improvement_options(
         logger.warning("Improvement response contains more than 3 options")
         raw_options = raw_options[:3]
 
-    finding_by_id = {
-        finding["finding_id"]: finding for finding in findings
-    }
+    finding_by_id = {finding["finding_id"]: finding for finding in findings}
     known_ids = set(finding_by_id)
     allowed_selectors = (
-        {item["selector"] for item in dom_candidates}
-        if dom_candidates is not None
-        else None
+        {item["selector"] for item in dom_candidates} if dom_candidates is not None else None
     )
     accepted = []
 
@@ -144,9 +139,7 @@ async def filter_improvement_options(
                 raise ValueError("Option must be a JSON object")
 
             # 원래 번호가 잘못되어도 응답 배열의 추천 순서를 유지한다.
-            option = ImprovementOption.model_validate(
-                {**raw, "option_no": index}
-            )
+            option = ImprovementOption.model_validate({**raw, "option_no": index})
 
             for finding_id in option.finding_ids:
                 if finding_id not in known_ids:
@@ -167,21 +160,12 @@ async def filter_improvement_options(
 
                 for field in ("target", "destination"):
                     selector = option.patch.get(field)
-                    if (
-                        selector is not None
-                        and selector not in allowed_selectors
-                    ):
-                        raise ValueError(
-                            f"Unknown DOM selector: {selector}"
-                        )
+                    if selector is not None and selector not in allowed_selectors:
+                        raise ValueError(f"Unknown DOM selector: {selector}")
 
-                await validate_patch_target(
-                    page, option.patch_kind, option.patch
-                )
+                await validate_patch_target(page, option.patch_kind, option.patch)
 
-            accepted.append(
-                option.model_copy(update={"option_no": len(accepted) + 1})
-            )
+            accepted.append(option.model_copy(update={"option_no": len(accepted) + 1}))
 
         except (ValidationError, ValueError) as exc:
             logger.warning(
@@ -272,7 +256,6 @@ async def generate_improvements(
             "No valid improvement options remain for run_id=%s",
             run_id,
         )
-
 
     return [
         {

@@ -343,8 +343,7 @@ class RunOrchestrator:
                     # 개선안은 진단 이후의 선택적 결과다.
                     # 생성에 실패해도 저장된 진단을 보존하고 회차를 done으로 마감한다.
                     logger.exception(
-                        "run=%s improvement generation failed; "
-                        "finishing without improvements",
+                        "run=%s improvement generation failed; finishing without improvements",
                         run_id,
                     )
             # 11/03 결정: URL 도달 여부와 종료 상태를 함께 사용한다.
