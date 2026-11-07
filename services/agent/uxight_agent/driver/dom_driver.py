@@ -1328,6 +1328,11 @@ class DomDriver(Driver):
             await handle.fill(action.value, timeout=ACTION_TIMEOUT_MS)
         return ActionResult(ok=True)
 
+    @property
+    def page(self) -> Page:
+        """현재 Playwright 페이지. DOM 검증용이며 호출자는 페이지를 변경하지 않는다."""
+        return self._require_page()
+
     def _require_page(self) -> Page:
         if self._page is None:
             raise RuntimeError("start()가 호출되지 않았습니다")

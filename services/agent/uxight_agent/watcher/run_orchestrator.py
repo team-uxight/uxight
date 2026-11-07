@@ -10,12 +10,14 @@ from ..diagnose.findings import build_findings
 from ..diagnose.summary import MAX_RETRIES as SUMMARY_MAX_RETRIES
 from ..diagnose.summary import build_facts, summarize
 from ..driver.dom_driver import DomDriver
-from ..guard.domain import allowed_hosts
+from ..guard.domain import allowed_hosts, is_allowed
+from ..improve.generator import generate_improvements
 from ..llm import LLMClient
 from ..persona.llm_decider import STEP_MAX_RETRIES, LLMDecider
 from ..persona.persona_agent import Decider, PersonaAgent
 from ..repositories.audit_log_repository import audit_log_repository
 from ..repositories.finding_repository import finding_repository
+from ..repositories.improvement_repository import improvement_repository
 from ..repositories.run_persona_repository import PersonaOutcome, run_persona_repository
 from ..repositories.run_repository import RunSnapshot, run_repository
 from ..usage_report import PriceTable, price_table
@@ -83,6 +85,43 @@ def make_summary_llm() -> LLMClient | None:
     None 이면 설명은 규칙 문장이다. 테스트는 이 함수를 바꿔 끼운다.
     """
     return LLMClient(max_retries=SUMMARY_MAX_RETRIES)
+
+
+def validate_improvement_page_url(
+    url: str,
+    hosts: frozenset[str],
+) -> str:
+    """개선안 DOM 검증 전에 근거 페이지가 허용 도메인인지 확인한다."""
+    if not is_allowed(url, hosts):
+        raise ValueError("Improvement evidence page is outside allowed domains")
+    return url
+
+
+def select_improvement_evidence(
+    findings: list[dict],
+    hosts: frozenset[str],
+) -> tuple[str, list[dict]] | None:
+    """허용된 근거 페이지 하나와 해당 페이지의 Finding을 선택한다."""
+    pages: dict[str, list[dict]] = {}
+
+    for finding in findings:
+        seen: set[str] = set()
+        for evidence in finding.get("evidence", []):
+            url = evidence.get("url")
+            if not isinstance(url, str) or not url or url in seen:
+                continue
+            seen.add(url)
+
+            if is_allowed(url, hosts):
+                pages.setdefault(url, []).append(finding)
+
+    if not pages:
+        return None
+
+    # 가장 많은 Finding을 뒷받침하는 페이지를 우선 선택한다.
+    # 동률이면 처음 등장한 근거 URL을 선택한다.
+    selected_url = max(pages, key=lambda url: len(pages[url]))
+    return selected_url, pages[selected_url]
 
 
 @dataclass
@@ -296,6 +335,14 @@ class RunOrchestrator:
                 logger.exception("run=%s diagnosis failed", run_id)
                 run_repository.mark_failed(run_id, error="진단 실패")
                 return
+
+            if snapshot.mode in ("improve", "loop"):
+                try:
+                    await self._save_improvements(run_id, snapshot)
+                except Exception:
+                    logger.exception("run=%s improvement generation failed", run_id)
+                    run_repository.mark_failed(run_id, error="개선안 생성 실패")
+                    return
             # 11/03 결정: URL 도달 여부와 종료 상태를 함께 사용한다.
             # 판정 가능한 종료 상태만 포함하고, URL 기록이 없으면 제외한다.
             # fail/cancelled/running은 성공률 분모에 포함하지 않는다.
@@ -341,6 +388,43 @@ class RunOrchestrator:
             "run=%s findings saved: %s",
             run_id,
             [(f.taxonomy, f.severity) for f in findings],
+        )
+
+    async def _save_improvements(
+        self,
+        run_id: int,
+        snapshot: RunSnapshot,
+    ) -> None:
+        """GACA-168: 진단 근거 페이지에서 개선안을 생성·검증하고 저장한다."""
+        findings = finding_repository.get_by_run(run_id)
+        if not findings:
+            logger.info("run=%s no findings; skipping improvements", run_id)
+            return
+
+        hosts = allowed_hosts(snapshot.target_url, snapshot.allowed_domains)
+        selected = select_improvement_evidence(findings, hosts)
+        if selected is None:
+            logger.info("run=%s no allowed evidence page; skipping improvements", run_id)
+            return
+
+        page_url, page_findings = selected
+
+        async with self._open_driver(run_id, 0, hosts) as driver:
+            await self._open_improvement_page(driver, page_url, hosts)
+            improvements = await generate_improvements(
+                llm=llm_client(),
+                findings=page_findings,
+                previous_patches=[],
+                task_goal=snapshot.task.get("goal") or "",
+                run_id=run_id,
+                page=driver.page,
+            )
+
+        improvement_repository.insert_all(run_id, improvements)
+        logger.info(
+            "run=%s improvements saved: %s",
+            run_id,
+            len(improvements),
         )
 
     async def _run_single_persona(
@@ -414,6 +498,17 @@ class RunOrchestrator:
             finally:
                 if acquired:
                     persona_slots.release()
+
+    @staticmethod
+    async def _open_improvement_page(
+        driver: DomDriver,
+        url: str,
+        hosts: frozenset[str],
+    ) -> None:
+        """허용된 근거 페이지에 접속하고 최종 URL을 다시 검증한다."""
+        validate_improvement_page_url(url, hosts)
+        await driver.start(url)
+        validate_improvement_page_url(driver.page.url, hosts)
 
     @contextlib.asynccontextmanager
     async def _open_driver(
