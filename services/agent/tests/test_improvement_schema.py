@@ -12,7 +12,6 @@ def option(number=1, kind="relabel", patch=None):
     return {
         "option_no": number,
         "finding_ids": [10],
-        "page_url": "https://school.example.com/student",
         "patch_kind": kind,
         "patch": patch,
         "rationale": "메뉴 이름이 불명확해 탐색 과정에서 혼란이 발생했다.",

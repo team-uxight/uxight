@@ -18,7 +18,6 @@ class ImprovementOption(BaseModel):
 
     option_no: int = Field(ge=1, le=3)
     finding_ids: list[int] = Field(min_length=1)
-    page_url: str = Field(min_length=1)
     patch_kind: Literal["relabel", "move", "highlight", "help_text"]
     patch: dict
     rationale: str = Field(min_length=1)

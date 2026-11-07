@@ -44,7 +44,6 @@ def make_option(number, finding_ids=None):
     return {
         "option_no": number,
         "finding_ids": finding_ids or [10],
-        "page_url": "https://school.example.com/student",
         "patch_kind": "relabel",
         "patch": {
             "target": f"#scholarship-{number}",
@@ -97,14 +96,22 @@ def test_generate_three_options():
     assert llm.calls[0][1]["role"] == "improvement_generation"
 
 
-def test_reject_unknown_finding():
-    llm = FakeLLM(json.dumps({"options": [make_option(1, [999])]}))
+def test_discard_unknown_finding_and_keep_valid_options():
+    options = [
+        make_option(1, [999]),
+        make_option(2, [10]),
+        make_option(3, [11]),
+    ]
+    llm = FakeLLM(json.dumps({"options": options}))
 
-    with pytest.raises(ValueError, match="Unknown finding_id"):
-        generate(llm)
+    result = generate(llm)
+
+    assert len(result) == 2
+    assert [item["option_no"] for item in result] == [1, 2]
+    assert [item["finding_ids"] for item in result] == [[10], [11]]
 
 
-def test_reject_multiple_evidence_pages():
+def test_accept_multiple_evidence_pages_without_llm_page_url():
     findings = [
         FINDINGS[0],
         {
@@ -121,8 +128,12 @@ def test_reject_multiple_evidence_pages():
     ]
     llm = FakeLLM(json.dumps({"options": [make_option(1, [10, 11])]}))
 
-    with pytest.raises(ValueError, match="page_url is not supported"):
-        generate(llm, findings)
+    result = generate(llm, findings)
+
+    # page=None인 단위 테스트에서는 페이지 선택 및 DOM 검증을 수행하지 않는다.
+    assert len(result) == 1
+    assert result[0]["finding_ids"] == [10, 11]
+    assert result[0]["patch"]["page_url"] is None
 
 
 def test_reject_invalid_json():
@@ -149,28 +160,27 @@ def test_no_findings_skips_llm():
     assert llm.calls == []
 
 
-def test_accept_multiple_evidence_pages_when_selected_page_is_supported():
-    findings = [
+def test_llm_prompt_does_not_request_page_url():
+    llm = FakeLLM(json.dumps({"options": [make_option(1)]}))
+
+    generate(llm)
+
+    system_prompt = llm.calls[0][0][0]["content"]
+    assert "page_url" not in system_prompt
+
+
+def test_invalid_option_is_discarded_without_losing_valid_option():
+    options = [
+        make_option(1),
         {
-            **FINDINGS[0],
-            "evidence": [
-                *FINDINGS[0]["evidence"],
-                {
-                    "persona_id": 1,
-                    "step_from": 6,
-                    "step_to": 8,
-                    "url": "https://school.example.com/scholarship",
-                },
-            ],
-        }
+            **make_option(2),
+            "patch": {"target": "#invalid"},
+            "patch_kind": "relabel",
+        },
     ]
+    llm = FakeLLM(json.dumps({"options": options}))
 
-    option = make_option(1)
-    option["page_url"] = "https://school.example.com/scholarship"
-
-    llm = FakeLLM(json.dumps({"options": [option]}))
-    result = generate(llm, findings)
+    result = generate(llm)
 
     assert len(result) == 1
-    assert result[0]["finding_ids"] == [10]
-    assert result[0]["patch_kind"] == "relabel"
+    assert result[0]["option_no"] == 1

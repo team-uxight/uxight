@@ -4,7 +4,6 @@ import asyncio
 import json
 from types import SimpleNamespace
 
-import pytest
 from playwright.async_api import async_playwright
 
 from uxight_agent.improve.generator import generate_improvements
@@ -20,7 +19,6 @@ class FakeLLM:
                 {
                     "option_no": 1,
                     "finding_ids": [10],
-                    "page_url": "https://school.example.com/student",
                     "patch_kind": "relabel",
                     "patch": {
                         "target": self.target,
@@ -80,13 +78,14 @@ async def run_case(target, evidence_url, expected_error=None):
                     page=page,
                 )
 
+            result = await generate()
+
             if expected_error:
-                with pytest.raises(ValueError, match=expected_error):
-                    await generate()
+                assert result == []
             else:
-                result = await generate()
                 assert len(result) == 1
                 assert result[0]["patch"]["target"] == "#scholarship"
+                assert result[0]["patch"]["page_url"] == "https://school.example.com/student"
 
             assert await page.content() == before
         finally:
@@ -112,12 +111,11 @@ def test_reject_missing_selector():
     )
 
 
-def test_reject_different_page():
+def test_accept_finding_with_multiple_evidence_pages():
     asyncio.run(
         run_case(
             "#scholarship",
-            "https://school.example.com/another",
-            "page_url is not supported",
+            "https://school.example.com/student",
         )
     )
 
@@ -200,6 +198,7 @@ def test_orchestrator_saves_dom_validated_improvement(monkeypatch):
                 assert saved[0][0] == 1
                 assert len(saved[0][1]) == 1
                 assert saved[0][1][0]["patch"]["target"] == "#scholarship"
+                assert saved[0][1][0]["patch"]["page_url"] == url
             finally:
                 await browser.close()
 

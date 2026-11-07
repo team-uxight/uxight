@@ -2,7 +2,6 @@ import asyncio
 import json
 from types import SimpleNamespace
 
-import pytest
 from playwright.async_api import async_playwright
 
 from uxight_agent.improve.generator import generate_improvements
@@ -21,7 +20,6 @@ class FakeLLM:
                     {
                         "option_no": 1,
                         "finding_ids": [1],
-                        "page_url": "https://school.example.com/student",
                         "patch_kind": "relabel",
                         "patch": {
                             "target": self.target,
@@ -88,8 +86,8 @@ async def run_case(target, should_fail):
                 )
 
             if should_fail:
-                with pytest.raises(ValueError, match="unknown DOM selector"):
-                    await generate()
+                result = await generate()
+                assert result == []
             else:
                 result = await generate()
                 assert len(result) == 1

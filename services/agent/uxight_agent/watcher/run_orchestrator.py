@@ -340,9 +340,13 @@ class RunOrchestrator:
                 try:
                     await self._save_improvements(run_id, snapshot)
                 except Exception:
-                    logger.exception("run=%s improvement generation failed", run_id)
-                    run_repository.mark_failed(run_id, error="개선안 생성 실패")
-                    return
+                    # 개선안은 진단 이후의 선택적 결과다.
+                    # 생성에 실패해도 저장된 진단을 보존하고 회차를 done으로 마감한다.
+                    logger.exception(
+                        "run=%s improvement generation failed; "
+                        "finishing without improvements",
+                        run_id,
+                    )
             # 11/03 결정: URL 도달 여부와 종료 상태를 함께 사용한다.
             # 판정 가능한 종료 상태만 포함하고, URL 기록이 없으면 제외한다.
             # fail/cancelled/running은 성공률 분모에 포함하지 않는다.
@@ -411,14 +415,30 @@ class RunOrchestrator:
 
         async with self._open_driver(run_id, 0, hosts) as driver:
             await self._open_improvement_page(driver, page_url, hosts)
-            improvements = await generate_improvements(
-                llm=llm_client(),
-                findings=page_findings,
-                previous_patches=[],
-                task_goal=snapshot.task.get("goal") or "",
-                run_id=run_id,
-                page=driver.page,
+            improvements = []
+            for attempt in range(2):
+                improvements = await generate_improvements(
+                    llm=llm_client(),
+                    findings=page_findings,
+                    previous_patches=[],
+                    task_goal=snapshot.task.get("goal") or "",
+                    run_id=run_id,
+                    page=driver.page,
+                )
+                if improvements:
+                    break
+                logger.warning(
+                    "run=%s no valid improvements on attempt %s/2",
+                    run_id,
+                    attempt + 1,
+                )
+
+        if not improvements:
+            logger.info(
+                "run=%s no applicable improvements after retry; skipping save",
+                run_id,
             )
+            return
 
         improvement_repository.insert_all(run_id, improvements)
         logger.info(

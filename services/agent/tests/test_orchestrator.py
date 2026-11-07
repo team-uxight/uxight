@@ -1938,12 +1938,13 @@ def test_improve_mode_saves_improvements_before_done(
 
 
 @pytest.mark.parametrize("mode", ["improve", "loop"])
-def test_improvement_failure_does_not_mark_run_done(
+def test_improvement_failure_still_marks_run_done(
     fakes: SimpleNamespace,
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
     mode: str,
 ) -> None:
-    """GACA-168: 개선안 생성 실패 시 완료 처리하지 않는다."""
+    """GACA-168: 개선안 생성 실패 시에도 진단을 보존하고 done으로 종료한다."""
     from dataclasses import replace
 
     fakes.personas.statuses[1] = "done"
@@ -1961,9 +1962,10 @@ def test_improvement_failure_does_not_mark_run_done(
     snap = replace(snapshot([]), mode=mode)
     asyncio.run(RunOrchestrator()._finish_run(RUN_ID, snap))
 
-    assert fakes.runs.status == "failed"
-    assert fakes.runs.error == "개선안 생성 실패"
+    assert fakes.runs.status == "done"
+    assert fakes.runs.error is None
     assert fakes.improvements.rows == []
+    assert "improvement generation failed" in caplog.text
 
 
 @pytest.mark.parametrize("mode", ["improve", "loop"])
