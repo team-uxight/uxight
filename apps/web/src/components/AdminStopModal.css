@@ -1,0 +1,269 @@
+/* ==========================================
+   UXight - 전체 실험 중단 2단계 팝업
+   Figma 591:43 / 590:450
+   ========================================== */
+
+.admin-stop-overlay,
+.admin-stop-overlay * {
+  box-sizing: border-box;
+}
+
+.admin-stop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  padding: 20px;
+
+  background: rgba(20, 19, 42, 0.44);
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+}
+
+/* 팝업 본체 */
+.admin-stop-modal {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 9px;
+
+  width: 462px;
+  max-width: 100%;
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
+
+  padding: 28px;
+
+  background: #ffffff;
+  border-radius: 22px;
+
+  box-shadow: 0 4px 10px rgba(31, 29, 61, 0.29);
+
+  font-family: "Pretendard", "Noto Sans KR", sans-serif;
+}
+
+/* 경고 아이콘 */
+.admin-stop-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 50px;
+  height: 50px;
+  flex-shrink: 0;
+
+  border-radius: 14px;
+
+  background: #fff0f2;
+  color: #df4560;
+}
+
+/* 제목 */
+.admin-stop-modal h2 {
+  width: 100%;
+  margin: 0;
+  padding: 12px 0 3px;
+
+  color: #23213e;
+  font-size: 21px;
+  font-weight: 700;
+  line-height: 25px;
+}
+
+/* 1단계 / 2단계 */
+.admin-stop-steps {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  width: 100%;
+}
+
+.admin-stop-steps span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  min-height: 27px;
+  padding: 0 10px;
+
+  border-radius: 20px;
+
+  background: #f1f1f7;
+  color: #89899e;
+
+  font-size: 10px;
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.admin-stop-steps span.active {
+  background: #fff0f2;
+  color: #c54364;
+}
+
+/* 설명 */
+.admin-stop-description {
+  width: 100%;
+  margin: 0;
+  padding-top: 3px;
+
+  color: #808095;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 23.4px;
+  word-break: keep-all;
+}
+
+/* 위험 안내 박스 */
+.admin-stop-risk {
+  width: 100%;
+  min-height: 120px;
+
+  padding: 19px 16px 14px;
+
+  background: #fff8f9;
+  border: 1px solid #ffe0e6;
+  border-radius: 12px;
+
+  color: #ad5266;
+}
+
+.admin-stop-risk strong {
+  display: block;
+  margin-bottom: 5px;
+
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 20.4px;
+}
+
+.admin-stop-risk p {
+  margin: 0;
+
+  color: #ad5266;
+  font-size: 12px;
+  line-height: 20.4px;
+  word-break: keep-all;
+}
+
+/* 2단계 경고 박스 */
+.admin-stop-risk.final {
+  min-height: 71px;
+  padding: 14px 16px;
+}
+
+/* 최종 확인 체크 */
+.admin-stop-check {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+
+  width: 100%;
+  min-height: 27px;
+  padding: 8px 4px 0;
+
+  cursor: pointer;
+}
+
+.admin-stop-check input {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+
+  accent-color: #d94768;
+  cursor: pointer;
+}
+
+.admin-stop-check span {
+  color: #686879;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+/* 하단 버튼 */
+.admin-stop-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 9px;
+
+  width: 100%;
+  padding-top: 10px;
+}
+
+.admin-stop-actions button {
+  min-height: 45px;
+  padding: 0 18px;
+
+  border-radius: 20px;
+
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    opacity 0.15s ease;
+}
+
+/* 취소 / 이전 */
+.admin-stop-cancel {
+  background: #ffffff;
+  border: 1px solid #e3e3ee;
+  color: #696783;
+}
+
+.admin-stop-cancel:hover {
+  background: #f7f7fb;
+}
+
+/* 다음 / 모든 실험 중단 */
+.admin-stop-danger {
+  border: 1px solid #e54d69;
+  background: #e54d69;
+  color: #ffffff;
+}
+
+.admin-stop-danger:hover:not(:disabled) {
+  background: #cd3f5b;
+}
+
+.admin-stop-danger:disabled {
+  background: #efb3bf;
+  border-color: #efb3bf;
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.admin-stop-actions button:focus-visible,
+.admin-stop-check input:focus-visible {
+  outline: 3px solid rgba(229, 77, 105, 0.3);
+  outline-offset: 3px;
+}
+
+/* 작은 화면 */
+@media (max-width: 480px) {
+  .admin-stop-overlay {
+    padding: 14px;
+  }
+
+  .admin-stop-modal {
+    padding: 23px 20px;
+  }
+
+  .admin-stop-modal h2 {
+    font-size: 19px;
+  }
+
+  .admin-stop-actions button {
+    padding: 0 12px;
+    font-size: 12px;
+  }
+}

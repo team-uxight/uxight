@@ -240,3 +240,37 @@ def test_last_screen_after_step_limit_is_saved_and_masked(ran) -> None:
             return (await pixel_colors(driver._browser, final, [point]))[0]
 
     assert asyncio.run(input_color()) == [int(MASK_COLOR[i : i + 2], 16) for i in (1, 3, 5)]
+
+
+def test_read_steps_returns_saved_records(tmp_path: Path) -> None:
+    """저장된 JSONL 행동 로그를 순서대로 읽는다."""
+    writer = StepLogWriter(str(tmp_path))
+    writer.prepare(101, 2)
+
+    records = [
+        {"step": 1, "url": "https://example.com"},
+        {"step": 2, "url": "https://example.com/page"},
+    ]
+    for record in records:
+        writer.append(101, 2, record)
+
+    assert writer.read_steps(101, 2) == records
+
+
+def test_read_steps_returns_empty_for_missing_file(tmp_path: Path) -> None:
+    """로그 파일이 없는 Persona는 빈 목록을 반환한다."""
+    writer = StepLogWriter(str(tmp_path))
+
+    assert writer.read_steps(101, 2) == []
+
+
+def test_read_steps_raises_for_invalid_json(tmp_path: Path) -> None:
+    """잘못된 JSONL을 정상 로그로 취급하지 않는다."""
+    writer = StepLogWriter(str(tmp_path))
+    writer.prepare(101, 2)
+
+    path = tmp_path / writer.relative_path(101, 2)
+    path.write_text('{"step": invalid}\n', encoding="utf-8")
+
+    with pytest.raises(json.JSONDecodeError):
+        writer.read_steps(101, 2)

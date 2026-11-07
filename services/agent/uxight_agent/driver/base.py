@@ -13,6 +13,8 @@ class ActionResult:
     late 는 늦은 이동을 되돌린 DOMAIN_BLOCKED 다 — 관측 전이나 행동 전에 페이지가 스스로
     허용 밖으로 갔고, 이 step 의 행동이 간 것이 아니다 (GACA-224).
     프롬프트의 '지난 행동' 문구만 다르게 하고 로그에는 쓰지 않는다.
+    downloaded 는 새 창으로 여는 파일 링크를 눌러 내려받기가 시작된 것이다 (GACA-232). 사람에게는
+    파일이 받아지고 화면은 그대로다. 실패가 아니다. late 처럼 프롬프트 문구만 다르다.
     """
 
     ok: bool
@@ -21,6 +23,7 @@ class ActionResult:
     url_after: str | None = None  # 행동 뒤 페이지 주소. 모르면 None (로그엔 행동 전 주소)
     destination: str | None = None  # DOMAIN_BLOCKED 일 때 막은 목적지 (계정 · 쿼리 뺌, 200자 안)
     late: bool = False
+    downloaded: bool = False
 
 
 @dataclass(frozen=True)

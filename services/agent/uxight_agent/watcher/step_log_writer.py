@@ -45,5 +45,35 @@ class StepLogWriter:
         with open(self._root / self.relative_path(run_id, persona_id), "a", encoding="utf-8") as f:
             f.write(line + "\n")
 
+    def read_steps(self, run_id: int, persona_id: int) -> list[dict]:
+        """Persona의 JSONL 행동 로그를 읽어 Step 목록으로 반환한다."""
+        path = self._root / self.relative_path(run_id, persona_id)
+
+        if not path.exists():
+            return []
+
+        with path.open(encoding="utf-8") as f:
+            return [json.loads(line) for line in f if line.strip()]
+
+    def get_url_reached(self, run_id: int, persona_id: int) -> bool | None:
+        """모든 Step의 URL 도달 기록을 집계한다. 유효한 기록이 없으면 None."""
+        path = self._root / self.relative_path(run_id, persona_id)
+        if not path.is_file():
+            return None
+
+        observed = False
+        with path.open("r", encoding="utf-8") as file:
+            for line in file:
+                if not line.strip():
+                    continue
+                record = json.loads(line)
+                reached = record.get("task", {}).get("url_reached")
+                if reached is True:
+                    return True
+                if reached is False:
+                    observed = True
+
+        return False if observed else None
+
 
 step_log_writer = StepLogWriter(settings.log_dir)

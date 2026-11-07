@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>메뉴에 가려지는 요소</title>
+<style>
+  body { margin: 0; font: 16px sans-serif; }
+  header { position: relative; height: 40px; background: #eee; }
+  #mega { display: none; position: absolute; top: 40px; left: 0; right: 0; height: 240px; background: #fff; z-index: 10; }
+  header.on #mega { display: block; }
+  #full { display: none; position: absolute; top: 40px; left: 0; right: 0; height: 3000px; background: #fff; z-index: 20; }
+  header.all #full { display: block; }
+  #pin { display: none; position: fixed; top: 40px; left: 0; right: 0; bottom: 0; background: #fff; z-index: 30; }
+  header.pin #pin { display: block; }
+  main { padding: 20px; }
+  .tall { height: 1400px; }
+  .field { position: relative; width: 240px; }
+  .field label { position: absolute; left: 0; right: 0; top: 0; height: 30px; background: #fff; }
+  .field input { display: block; width: 240px; height: 30px; }
+  .narrow { width: 120px; }
+</style>
+</head>
+<body>
+<header id="top">
+  <button onclick="document.getElementById('top').classList.toggle('on')">대학생활</button>
+  <div id="mega"><a href="#menu">장학공지</a></div>
+  <button onclick="document.getElementById('top').classList.toggle('all')">전체메뉴</button>
+  <div id="full"><a href="#all">전체 메뉴 링크</a></div>
+  <button onclick="document.getElementById('top').classList.toggle('pin')">고정메뉴</button>
+  <div id="pin"><a href="#pin">고정 메뉴 링크</a></div>
+</header>
+<main>
+  <button>가려지는 버튼</button>
+  <a href="#covered">가려지는 링크</a>
+  <div style="margin-top: 260px" class="narrow"><a href="#wrap">여러 줄로 접히는 아주 긴 링크 글자입니다 여기까지</a></div>
+  <div class="field" style="margin-top: 20px">
+    <label for="name">이름</label>
+    <input id="name" name="name">
+  </div>
+  <p>본문 글</p>
+  <div class="tall"></div>
+  <a href="#low">아래쪽 링크</a>
+</main>
+<footer><a href="#foot">바닥 링크</a></footer>
+</body>
+</html>

@@ -46,10 +46,11 @@ class RunRepository:
                 {"run_id": run_id},
             )
 
-    def mark_done(self, run_id: int, success_rate: float) -> None:
+    def mark_done(self, run_id: int, success_rate: float | None) -> None:
         # runs.status='done' UPDATE와 run_metrics INSERT는 한 트랜잭션으로 묶는다.
         # 상태가 실제로 바뀐 경우에만 INSERT해서 회차 당 1행을 보장한다.
-        # Walking Skeleton에서는 avg_*, tokens, cost_usd를 채우지 않는다(NULL).
+        # Persona별 실행 기록에서 회차 지표를 확정한다.
+        # NULL 측정값은 임의로 0으로 바꾸지 않는다.
         with engine.begin() as conn:
             result = conn.execute(
                 text(
@@ -61,8 +62,19 @@ class RunRepository:
             if result.rowcount == 1:
                 conn.execute(
                     text(
-                        "INSERT INTO run_metrics (run_id, success_rate) "
-                        "VALUES (:run_id, :success_rate)"
+                        "INSERT INTO run_metrics "
+                        "(run_id, success_rate, avg_steps, avg_backtracks, "
+                        "avg_seconds, tokens, cost_usd) "
+                        "SELECT :run_id, :success_rate, "
+                        "AVG(steps), AVG(backtracks), "
+                        "AVG(CASE WHEN started_at IS NOT NULL "
+                        "AND finished_at IS NOT NULL "
+                        "THEN TIMESTAMPDIFF(MICROSECOND, started_at, finished_at) "
+                        "/ 1000000.0 END), "
+                        "SUM(tokens), "
+                        "CASE WHEN COUNT(tokens) = COUNT(cost_usd) "
+                        "THEN SUM(cost_usd) ELSE NULL END "
+                        "FROM run_personas WHERE run_id = :run_id"
                     ),
                     {"run_id": run_id, "success_rate": success_rate},
                 )

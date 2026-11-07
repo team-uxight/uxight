@@ -2518,7 +2518,13 @@ components:
           type: [number, "null"]
           minimum: 0
           maximum: 100
-          description: 성공 Persona 비율. 성공(성공 URL에 닿고 done으로 끝남) ÷ 판정한 Persona(성공 · 어렵게 성공 · 실패). fail · cancelled로 끝났거나 url_reached가 null인 Persona는 판정하지 않는다. 판정한 Persona가 없으면 null. 0 이상 100 이하
+          description: >-
+            11/03 결정 기준. 판정 가능한 Persona 중 종료 상태가 done이고
+            성공 URL에 도달한 Persona의 비율(%).
+            분모에는 종료 상태가 done, max_steps, stuck, timeout, token_limit 중
+            하나이고 URL 도달 여부가 기록된 Persona만 포함한다.
+            fail, cancelled, running 및 URL 도달 기록이 없는 Persona는 제외한다.
+            판정 가능한 Persona가 0명이면 null이다.
         avgSteps:
           type: [number, "null"]
           description: 평균 step 수
@@ -2853,7 +2859,7 @@ components:
           $ref: "#/components/schemas/Taxonomy"
         severity:
           type: string
-          description: 심각도. 값과 산정 기준은 미정이다(GACA-68).
+          description: 심각도. high · medium · low 중 하나다. 회차 × 유형마다 한 건이며, 그 유형에 걸린 Persona 가운데 가장 높은 값이다(GACA-68 판정 규칙).
         summary:
           type: [string, "null"]
           description: 진단 요약
@@ -2923,7 +2929,7 @@ components:
           $ref: "#/components/schemas/Taxonomy"
         severity:
           type: string
-          description: 심각도. 값과 산정 기준은 미정이다(GACA-68).
+          description: 심각도. high · medium · low 중 하나다. 회차 × 유형마다 한 건이며, 그 유형에 걸린 Persona 가운데 가장 높은 값이다(GACA-68 판정 규칙).
         summary:
           type: [string, "null"]
           description: 진단 요약

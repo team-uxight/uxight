@@ -36,6 +36,18 @@ class RunPersonaRepository:
                 ],
             )
 
+    def mark_started(self, run_id: int, persona_id: int) -> None:
+        """실행 슬롯을 확보한 시점부터 Persona 실행 시간을 측정한다."""
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "UPDATE run_personas SET started_at = NOW() "
+                    "WHERE run_id = :run_id AND persona_id = :persona_id "
+                    "AND status = 'running'"
+                ),
+                {"run_id": run_id, "persona_id": persona_id},
+            )
+
     def get_statuses(self, run_id: int) -> dict[int, str]:
         # 회차에 속한 페르소나별 상태 (persona_id → status).
         with engine.begin() as conn:
@@ -44,6 +56,21 @@ class RunPersonaRepository:
                 {"run_id": run_id},
             )
             return {persona_id: status for persona_id, status in rows}
+
+    def get_outcomes(self, run_id: int) -> dict[int, tuple[str, bool | None]]:
+        """Persona별 종료 상태와 성공 URL 도달 여부를 함께 조회한다."""
+        with engine.begin() as conn:
+            rows = conn.execute(
+                text(
+                    "SELECT persona_id, status, url_reached "
+                    "FROM run_personas WHERE run_id = :run_id"
+                ),
+                {"run_id": run_id},
+            )
+            return {
+                persona_id: (status, None if url_reached is None else bool(url_reached))
+                for persona_id, status, url_reached in rows
+            }
 
     def increment_steps(
         self, run_id: int, persona_id: int, tokens: int = 0, cost_usd: float | None = None
@@ -75,16 +102,28 @@ class RunPersonaRepository:
                 params,
             )
 
-    def mark_finished(self, run_id: int, persona_id: int, status: PersonaOutcome) -> None:
-        # running 인 행만 종료 상태로 바꾼다 — 이미 끝난 페르소나를 덮어쓰지 않는다.
-        # url_reached(보조 판정)는 아직 채우지 않는다 (NULL).
+    def mark_finished(
+        self,
+        run_id: int,
+        persona_id: int,
+        status: PersonaOutcome,
+        url_reached: bool | None = None,
+    ) -> None:
+        # 이미 종료된 Persona는 덮어쓰지 않는다.
+        # URL 도달 여부는 전체 Step 로그를 기준으로 집계한 값이다.
         with engine.begin() as conn:
             conn.execute(
                 text(
-                    "UPDATE run_personas SET status = :status, finished_at = NOW() "
+                    "UPDATE run_personas "
+                    "SET status = :status, url_reached = :url_reached, finished_at = NOW() "
                     "WHERE run_id = :run_id AND persona_id = :persona_id AND status = 'running'"
                 ),
-                {"run_id": run_id, "persona_id": persona_id, "status": status},
+                {
+                    "run_id": run_id,
+                    "persona_id": persona_id,
+                    "status": status,
+                    "url_reached": url_reached,
+                },
             )
 
 

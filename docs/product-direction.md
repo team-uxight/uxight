@@ -1,6 +1,6 @@
 # UXight 방향성 · 기능 범위 (v1, 2026-09-06)
 
-> **2026-09-14 개정 (D14 · D15):** 모바일 앱은 범위에서 제거했다. 이 문서의 "앱 = 호출기", Phase 2 앱 드라이버, Expo 관련 서술은 폐기. 웹은 **운영자(admin) / 리서처(user)** 두 역할로 나뉜다. 상세는 `decisions.md` D14~D16, 덱 v3 슬라이드 06·11·12. 본문은 S1 요구분석에서 정리한다.
+> **2026-09-14 개정 (D14 · D15):** 모바일 앱은 범위에서 제거했다. 이 문서의 "앱 = 호출기", Phase 2 앱 드라이버, Expo 관련 서술은 폐기. 웹은 **운영자(admin) / 리서처(user)** 두 역할로 나뉜다(10/22 갱신: 운영자는 admin · maintainer 둘로 나뉘고, 역할을 주는 것은 admin 만 한다). 상세는 `decisions.md` D14~D16, 덱 v3 슬라이드 06·11·12. 본문은 S1 요구분석에서 정리한다.
 
 PM 확정본. 제안서(W03) 슬라이드 분배와 S1 요구분석의 입력이다.
 화면 단위 스펙·데이터·API 는 여기 없다 — S1(09/14~27)에서 이 문서를 기준으로 만든다.
@@ -32,7 +32,7 @@ PM 확정본. 제안서(W03) 슬라이드 분배와 S1 요구분석의 입력이
 | Persona | 3종: Novice / Expert / Mobile-viewport (Playwright 디바이스 에뮬레이션) |
 | 탐색 | Task 기반. UXAgent 방식의 브라우저 조작(click / type / scroll / back) |
 | 진단 | **UX Friction Taxonomy 7종** — Navigation Confusion · Discoverability · Interaction Failure · Information Overload · Misleading Label · Task Failure · Excessive Steps. 각 진단에 행동 근거 + 심각도 |
-| 개선안 | 3안 + 근거 + 예상 영향 / 수정 비용 |
+| 개선안 | 회차마다 최대 3안 + 근거 + 예상 효과. 나은 순서로 번호를 매겨 앞 번호를 추천한다 (10/24 — 예상 효과는 나아질 지표 하나만 쓰고, 숫자는 재실험이 잰다. 수정 비용 · After 미리보기는 이번 학기에 뺀다) |
 | 적용 | **DOM 패치 4종만**: ① 라벨 변경 ② 요소 이동 ③ 요소 강조 ④ 도움말 삽입 |
 | 승인 | 모바일 앱에서 알림 → 상세 → 승인/반려 (Human-in-the-loop) |
 | 재실험 | 승인 즉시 같은 Persona 재투입. Before/After 지표: 성공률 · 행동 수 · 백트래킹 |
@@ -70,7 +70,6 @@ DOM 패치를 4종으로 제한하는 이유: 이 4종은 사이트 구조와 �
 [앱] 알림 → 개선안 상세 → 승인
   → 자동 DOM 패치 → 재실험
 [웹] Before / After 대시보드
-  → 실사용자 결과 입력 → AI 예측과 비교
 ```
 
 ## 5. 아키텍처 원칙 — Driver 추상화
@@ -92,7 +91,7 @@ Friction 진단은 **행동 기반**(왕복 · 반복 · 실패 · 경로 길이
 | --- | --- |
 | **AI 모듈 (c)** | Persona Agent (UXAgent 기반) · Friction Detector (규칙 + LLM) · Diagnosis Agent · Improvement Agent (구조화 출력) |
 | **백엔드** | Driver 추상화 · 실행 오케스트레이션 · 로그 저장 · API · 지표 계산 |
-| **관리자 웹 (b)** | 프로젝트·Task·Persona 설정 / 실행 모니터 / 진단 리스트 / 개선안 상세 / Before-After / 실험 이력 / 실사용자 결과 입력 |
+| **관리자 웹 (b)** | 프로젝트·Task·Persona 설정 / 실행 모니터 / 진단 리스트 / 개선안 상세 / Before-After / 실험 이력 |
 | **모바일 앱 (a)** | 알림 · 개선안 상세 · 승인/반려. 3화면. Flutter, **APK 빌드까지** |
 | **DOM 패처** | 개선안 4종 → 페이지 주입. **가장 위험한 조각.** 두 명이 본다 |
 | **인프라 · 실험** | GitHub org / CI / 배포 · 실사용자 실험 설계 · LLM 비용 관리 |

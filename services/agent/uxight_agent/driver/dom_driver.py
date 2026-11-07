@@ -67,6 +67,9 @@ SCREENSHOT_TIMEOUT_MS = 5_000
 STILL_WAIT_MS = 1_500
 # 기다리는 사이 페이지 요청이 끝났는지 보는 간격.
 REQUEST_POLL_MS = 50
+# type 행동 뒤에 더 기다리는 시간 (GACA-230). 입력하고 0.3초쯤 뒤에 찾는 검색(디바운스)은 type 직후
+# 아직 요청을 시작하지 않았다. 사람도 입력하고 잠깐 결과를 본다. 다른 행동 뒤에는 기다리지 않는다.
+TYPE_SETTLE_MS = 500
 # 끝나기를 기다릴 요청. 페이지 스크립트가 글을 받아 오는 요청이다.
 # 이미지 · 글꼴 같은 다른 요청은 기다리지 않는다.
 WAITED_REQUEST_TYPES = frozenset({"fetch", "xhr"})
@@ -114,6 +117,13 @@ async ({ maxMs, selector }) => {
 #   안에 보이는 글도 누를 것도 없는 막(메뉴 바깥 클릭을 받는 투명 막, 스크린 리더용 숨김 글만
 #   든 dim 등)도 모달이 아니다 — 그 안만 보면 관측이 빈다. 그때는 더 바깥 층을 찾는다.
 #   보이는 것: 투명하지 않고 화면 안에서 4×4px 이상이며, 자기 글이 있거나 누를 수 있는 요소.
+# - 아니면 dim 의 형제 팝업 (GACA-229). 화면을 덮는 dim 과 그 위에 뜬 팝업이 형제인 레이어 팝업이다.
+#   네 귀퉁이 점이 고정 · 절대 위치 dim 에 들고, 가운데 점이 그 형제 안이면 형제를 모달로 본다.
+#   아래 셋은 레이어 팝업이 아니다.
+#   dim 안에 보이는 것이 있다 — 메뉴가 든 앱 화면 틀이다.
+#   팝업 밖에 화면 안에서 실제로 누를 수 있는 요소가 있다 — 덮인 페이지가 아니다. 본문 뒤 배경 ·
+#   hero 의 반투명 막 · 로그인 화면이 그렇고, 팝업 밖 닫기 버튼 · 나란히 뜬 팝업도 여기서 남는다.
+#   형제가 화면을 다 덮는다 — 페이지 전체를 싼 상자다.
 _MODAL_LAYER_JS = """
 () => {
   // 화면 크기 (스크롤바 뺌). 쿼크 모드에서는 html 이 문서 크기라 창 크기를 쓴다.
@@ -138,12 +148,32 @@ _MODAL_LAYER_JS = """
       && (el.matches(actionable) || Array.from(el.childNodes)
         .some((node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim()));
   };
+  const covers = (el) => {
+    const r = el.getBoundingClientRect();
+    return r.left <= 0 && r.top <= 0 && r.right >= width && r.bottom >= height;
+  };
+  const hasShown = (el) => [el, ...el.querySelectorAll('*')].some(shown);
   for (let el = hits[0]; el && el !== document.body; el = el.parentElement) {
     if (getComputedStyle(el).position !== 'fixed') continue;
     if (!hits.every((hit) => el.contains(hit))) continue;
-    const r = el.getBoundingClientRect();
-    if (r.left > 0 || r.top > 0 || r.right < width || r.bottom < height) continue;
-    if (Array.from(el.querySelectorAll('*')).some(shown)) return el;
+    if (covers(el) && Array.from(el.querySelectorAll('*')).some(shown)) return el;
+  }
+  const [center, ...corners] = hits;
+  for (let dim = corners[0]; dim && dim !== document.body; dim = dim.parentElement) {
+    if (!/fixed|absolute/.test(getComputedStyle(dim).position)) continue;
+    if (!corners.every((hit) => dim.contains(hit))) continue;
+    if (!covers(dim) || hasShown(dim)) continue;
+    let popup = center;
+    while (popup && popup.parentElement !== dim.parentElement) popup = popup.parentElement;
+    if (!popup || covers(popup) || !hasShown(popup)) continue;
+    const reachable = (el) => {
+      const r = el.getBoundingClientRect();
+      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return hit !== null && el.contains(hit);
+    };
+    const outside = Array.from(document.querySelectorAll(actionable))
+      .some((el) => !popup.contains(el) && shown(el) && reachable(el));
+    if (!outside) return popup;
   }
   return null;
 }
@@ -156,22 +186,25 @@ _MODAL_LAYER_JS = """
 # 없으면 층 안에서 문서 순서로 첫 스크롤 상자다. 메뉴와 본문이 따로 스크롤하는 앱 화면에서도
 # 본문이 움직인다.
 # 상자는 바로 움직인다(instant). 창 스크롤처럼 부드러운 스크롤을 기다리지 않아도 된다.
+# 모달이 없어도 화면 가운데 요소에서 위로 가장 가까운, 더 움직일 수 있는 스크롤 상자를 먼저 움직인다
+# (GACA-228). 화면 가운데에서 휠을 굴린 것과 같다. 상자 끝에 닿으면 창이 움직인다. 본문 글은
+# 상자 안에서 지금 보이는 글만 담으므로, 이게 없으면 상자 아래쪽 글을 끝내 못 읽는다.
 _SCROLL_JS = """
 (direction) => {
   const layer = (__MODAL_LAYER__)();
   const scrollable = (el) => /auto|scroll/.test(getComputedStyle(el).overflowY)
     && el.scrollHeight > el.clientHeight;
+  const moves = (el) => scrollable(el) && (direction > 0
+    ? el.scrollTop + el.clientHeight < el.scrollHeight - 1 : el.scrollTop > 0);
   let box = null;
-  if (layer) {
-    for (let el = document.elementFromPoint(innerWidth / 2, innerHeight / 2);
-      el && layer.contains(el); el = el.parentElement) {
-      if (scrollable(el)) {
-        box = el;
-        break;
-      }
+  for (let el = document.elementFromPoint(innerWidth / 2, innerHeight / 2);
+    el && el !== document.body && (!layer || layer.contains(el)); el = el.parentElement) {
+    if (layer ? scrollable(el) : moves(el)) {
+      box = el;
+      break;
     }
-    box ??= [layer, ...layer.querySelectorAll('*')].find(scrollable);
   }
+  if (layer) box ??= [layer, ...layer.querySelectorAll('*')].find(scrollable);
   if (box) box.scrollBy({ top: direction * box.clientHeight, behavior: 'instant' });
   else scrollBy(0, direction * innerHeight);
 }
@@ -269,9 +302,98 @@ _COLLECT_ELEMENTS_JS = """
     return text;
   };
 
+  const alphaOf = (color) => { // 계산된 색('rgba(0, 0, 0, 0.5)' · 'oklch(0 0 0 / 50%)')의 투명도
+    const inner = color.slice(color.indexOf('(') + 1, color.lastIndexOf(')'));
+    const alpha = inner.includes('/') ? inner.split('/')[1] : inner.split(',')[3];
+    return alpha === undefined ? 1 : parseFloat(alpha) / (alpha.trim().endsWith('%') ? 100 : 1);
+  };
+
+  // 다른 요소에 가려 지금 누를 수 없는 요소 (GACA-232). 열린 메뉴 뒤 버튼이 그렇다 — 사람도 메뉴를
+  // 닫아야 누른다. 관측에 남기면 모델이 누르고 시간 초과를 기다린다.
+  // clickBlock 은 'behind'(가려 안 보인다 — 번호도 글도 뺀다), 'dead'(보이지만 눌리지 않는다 —
+  // 번호만 뺀다), null(남긴다) 을 돌려준다.
+  // - Playwright 의 click 은 요소의 첫 상자 가운데를 누르므로 같은 점을 본다.
+  // - 글 · 그림 · 불투명 배경이 그 점에서 위를 덮을 때만 가린 것이다. 투명 막 · 글 없는 dim 은
+  //   사람 눈에 뒤가 보이고, 뒤를 다 빼면 관측이 빈다. 그 뒤 요소는 눌러 보면 시간 초과가 난다.
+  // - 입력칸은 fill 로 쓰므로 자기 칸 크기 안의 글(띄운 라벨 · 안내 글)은 가린 것이 아니다.
+  // - 스크롤 상자 밖으로 밀린 요소는 화면 밖처럼 남긴다. 상자를 움직이면 보인다.
+  // - 고정 · sticky 층은 스크롤로 비켜나면 남긴다. Playwright 도 스크롤을 바꿔 가며 다시 누른다.
+  // - 화면 밖 요소는 스크롤하면 보이므로 남긴다. 단 층 하나가 그 세로줄을 위아래로 다 덮으면 어디로
+  //   스크롤해도 그 뒤다. 학교 사본의 메뉴는 화면보다 크고, 스크롤하면 고정 위치로 따라온다.
+  //   본문처럼 비켜나는 층과 가르려고, 흐름 밖(absolute · fixed)이고 아래에 다른 내용이 깔린 층만
+  //   센다. 머리글 띠는 세로줄 일부만 덮으므로 위쪽 30% 아래 점만 본다.
+  const paints = (node) => {
+    if (!node.checkVisibility({ opacityProperty: true, visibilityProperty: true })) return false;
+    if (/^(img|video|canvas|svg|iframe|object|embed)$/.test(node.localName)) return true;
+    const style = getComputedStyle(node);
+    if (alphaOf(style.backgroundColor) >= 0.9) return true;
+    // 배경 그림은 투명도를 모른다. 화면을 다 덮는 층의 그림은 dim 일 수 있어 세지 않는다.
+    const r = node.getBoundingClientRect();
+    const screen = r.left <= 0 && r.top <= 0 && r.right >= innerWidth && r.bottom >= innerHeight;
+    if (style.backgroundImage !== 'none' && !screen) return true;
+    return alphaOf(style.color) >= minOpacity && Array.from(node.childNodes)
+      .some((child) => child.nodeType === Node.TEXT_NODE && child.textContent.trim());
+  };
+  const paintersOver = (stack, el) => {
+    const end = stack.findIndex((node) => el.contains(node) || node.contains(el));
+    return stack.slice(0, end < 0 ? stack.length : end).filter(paints);
+  };
+  const pinned = (node) => {
+    for (let up = node; up; up = up.parentElement) {
+      if (/fixed|sticky/.test(getComputedStyle(up).position)) return true;
+    }
+    return false;
+  };
+  const floatingCover = (x, y, el) => { // 그 점에서 el 쪽 위에 뜬 층. 없으면 null
+    const stack = document.elementsFromPoint(x, y);
+    if (!stack.length || el.contains(stack[0]) || stack[0].contains(el)) return null;
+    let cover = stack[0]; // el 을 품지 않는 가장 바깥 조상
+    let floating = false;
+    for (let node = cover; node && !node.contains(el); node = node.parentElement) {
+      cover = node;
+      floating ||= /absolute|fixed/.test(getComputedStyle(node).position);
+    }
+    const under = stack.some((node) => !cover.contains(node) && !node.contains(cover));
+    return floating && under && paintersOver(stack, el).length ? cover : null;
+  };
+  const tallCover = (x, el) => {
+    const covers = [0.3, 0.5, 0.7, 0.9].map((rate) => floatingCover(x, innerHeight * rate, el));
+    return covers[0] !== null && covers.every((cover) => cover === covers[0]);
+  };
+  const outsideScrollBox = (el, x, y) => {
+    for (let up = el.parentElement; up && up !== document.body; up = up.parentElement) {
+      const style = getComputedStyle(up);
+      if (!/auto|scroll/.test(`${style.overflowX} ${style.overflowY}`)) continue;
+      const r = up.getBoundingClientRect();
+      if (x < r.left || x >= r.right - 1 || y < r.top || y >= r.bottom - 1) return true;
+    }
+    return false;
+  };
+  const clickBlock = (el) => {
+    const box = Array.from(el.getClientRects()).find((r) => r.width * r.height > 0.99);
+    if (!box) return null;
+    const x = box.left + box.width / 2;
+    const y = box.top + box.height / 2;
+    if (x < 0 || x >= innerWidth || outsideScrollBox(el, x, y)) return null;
+    if (y < 0 || y >= innerHeight) return tallCover(x, el) ? 'behind' : null;
+    const stack = document.elementsFromPoint(x, y);
+    const hit = stack[0];
+    if (!hit || el.contains(hit) || hit.closest('label')?.control === el) return null;
+    const field = el.matches('input, textarea, select');
+    if (hit.contains(el)) return field ? null : 'dead';
+    const wider = (node) => {
+      const r = node.getBoundingClientRect();
+      return r.width > box.width + 1 || r.height > box.height + 1;
+    };
+    const painters = paintersOver(stack, el).filter((node) => !field || wider(node));
+    if (!painters.length) return null;
+    return painters.every(pinned) && !tallCover(x, el) ? null : 'behind';
+  };
+
   const selector = 'a[href], button, input:not([type=hidden]), select, textarea, '
     + '[role=button], [role=link]';
   const items = [];
+  const behind = new Set(); // 가려서 뺀 요소. 안의 글도 본문 글에 넣지 않는다
   let nextId = 1;
   for (const el of document.querySelectorAll(selector)) {
     if (layer && !layer.contains(el)) continue;
@@ -284,6 +406,11 @@ _COLLECT_ELEMENTS_JS = """
       ? Array.from(el.labels).find((l) => visibleText(l).trim())
       : undefined;
     if (el.disabled || (visibility === 'hidden' && !label)) {
+      continue;
+    }
+    const block = clickBlock(label ?? el);
+    if (block) {
+      if (block === 'behind') behind.add(label ?? el);
       continue;
     }
     (label ?? el).setAttribute(idAttr, String(nextId));
@@ -339,7 +466,7 @@ _COLLECT_ELEMENTS_JS = """
   //   거의 다 링크라 이것으로 빠진다. textarea 글은 입력값이라 뺀다.
   // - 보이는지는 요소 글보다 까다롭게 본다. 아래를 모두 지켜야 한다.
   //   1) 감싼 요소가 보인다(visibilityOf).
-  //   2) 글 조각의 사각형(Range)이 화면 안이고, overflow hidden · clip 조상의 상자와 겹친다.
+  //   2) 글 조각의 사각형(Range)이 화면 안이고, 글을 자르는 조상의 상자와 읽을 만큼 겹친다.
   //   3) 글자색이 투명하지 않다.
   //   그래서 text-indent 로 밀어낸 글 · 접힌 상자 · 캐러셀의 다른 슬라이드 · canvas 대체 글이
   //   빠진다. 요소 줄은 이 기준을 쓰지 않는다 — text-indent 로 숨긴 아이콘 버튼 이름
@@ -350,11 +477,6 @@ _COLLECT_ELEMENTS_JS = """
   //   요소 줄과 같은 번호만 쓰므로, 화면 밖 · 숨김처럼 번호가 없는 요소는 붙지 않는다.
   // - 공백을 뺀 글자 수가 maxTextLength 를 넘으면 그만 모은다. 넘게 모아야 Python 이 잘린 것을 알고
   //   … 을 붙인다. 공백 정리와 자르기는 Python 이 한다 (_body_text).
-  const alphaOf = (color) => { // 계산된 색('rgba(0, 0, 0, 0.5)' · 'oklch(0 0 0 / 50%)')의 투명도
-    const inner = color.slice(color.indexOf('(') + 1, color.lastIndexOf(')'));
-    const alpha = inner.includes('/') ? inner.split('/')[1] : inner.split(',')[3];
-    return alpha === undefined ? 1 : parseFloat(alpha) / (alpha.trim().endsWith('%') ? 100 : 1);
-  };
   // clip-path: inset(위 오른쪽 아래 왼쪽) 이 남기는 상자. 값은 px 또는 %, round 는 보지 않는다.
   // 읽지 못하는 값(calc 등)이면 NaN 상자가 되어 어떤 글과도 겹치지 않는다.
   const insetBox = (el, clipPath) => {
@@ -367,10 +489,19 @@ _COLLECT_ELEMENTS_JS = """
       top: r.top + size(top, r.height), bottom: r.bottom - size(bottom, r.height),
     };
   };
+  const innerBox = (el) => {
+    const r = el.getBoundingClientRect();
+    const left = r.left + el.clientLeft;
+    const top = r.top + el.clientTop;
+    return { left, top, right: left + el.clientWidth, bottom: top + el.clientHeight };
+  };
   // 글 조각을 감싼 요소마다 한 번만 잰다 — 같은 요소 안의 글 조각마다 조상을 다시 오르지 않게.
   // - shown: 보이는가
-  // - clips: 글을 자르는 overflow hidden · clip 조상의 상자와 clip-path: inset() 이 남기는 상자
-  //   (GACA-225). inset(50%) 처럼 다 가리면 빈 상자다. 다른 모양(polygon 등)은 보지 않는다.
+  // - clips: 글을 자르는 조상의 안쪽 상자와 clip-path: inset() 이 남기는 상자 (GACA-225).
+  //   overflow 가 hidden · clip 이면 잘리고, auto · scroll 이면 상자 안에서 지금 보이는 부분만
+  //   보인다 (GACA-228). contain: paint 도 자른다. 글은 테두리 안쪽에서 잘리고, 인라인 요소에는
+  //   overflow 가 듣지 않는다. 절대 위치 요소는 기준 조상까지의 상자에 잘리지 않는다.
+  //   inset(50%) 처럼 다 가리면 빈 상자다. 다른 모양(polygon 등)은 보지 않는다.
   // - block · cell: 줄 나눔용
   const boxes = new Map();
   const boxOf = (node) => {
@@ -381,13 +512,16 @@ _COLLECT_ELEMENTS_JS = """
     while (getComputedStyle(el).display === 'contents') el = el.parentElement;
     const style = getComputedStyle(el);
     const clips = [];
+    let base = null; // 절대 위치 요소의 기준 조상. 여기까지의 상자는 건너뛴다
     for (let up = el; up && up !== document.body; up = up.parentElement) {
+      if (up === base) base = null;
       const upStyle = getComputedStyle(up);
-      if (/hidden|clip/.test(`${upStyle.overflowX} ${upStyle.overflowY}`)) {
-        clips.push(up.getBoundingClientRect());
-      }
+      const cuts = /hidden|clip|auto|scroll/.test(`${upStyle.overflowX} ${upStyle.overflowY}`)
+        || /paint|strict|content/.test(upStyle.contain);
+      if (!base && cuts && !/^(inline|contents)$/.test(upStyle.display)) clips.push(innerBox(up));
       if (upStyle.clipPath.startsWith('inset(')) clips.push(insetBox(up, upStyle.clipPath));
       if (upStyle.position === 'fixed') break; // 고정 위치 요소는 그 위 조상의 상자에 잘리지 않는다
+      if (!base && upStyle.position === 'absolute') base = up.offsetParent;
     }
     const block = blockOf(node);
     box = {
@@ -402,9 +536,39 @@ _COLLECT_ELEMENTS_JS = """
   };
   const inView = (r) => r.width > 0 && r.height > 0
     && r.top < innerHeight && r.bottom > 0 && r.left < innerWidth && r.right > 0;
-  // 겹친 넓이가 있어야 겹친다 — 빈 상자(다 가린 clip-path)와는 겹치지 않는다.
-  const overlaps = (r, clip) => Math.min(r.right, clip.right) > Math.max(r.left, clip.left)
-    && Math.min(r.bottom, clip.bottom) > Math.max(r.top, clip.top);
+  // 글 사각형이 자르는 상자들이 함께 남기는 곳과 읽을 만큼 겹치는가. 상자마다 따로 재면 두 상자가
+  // 서로 다른 곳을 남겨 아무것도 안 보이는 글이 통과한다.
+  // 읽을 만큼은 글 높이의 절반이다. 높이 2px 상자는 글 윗부분이 조금 걸려도 못 읽는다.
+  // 가로는 글자 하나 폭쯤이고, 그보다 짧은 글 조각('.')은 다 겹치면 된다.
+  // 겹친 길이가 없으면 빠진다(빈 상자 · 다 가린 clip-path · 읽지 못한 NaN 상자).
+  const seen = (r, clips) => {
+    const left = Math.max(r.left, ...clips.map((clip) => clip.left));
+    const right = Math.min(r.right, ...clips.map((clip) => clip.right));
+    const top = Math.max(r.top, ...clips.map((clip) => clip.top));
+    const bottom = Math.min(r.bottom, ...clips.map((clip) => clip.bottom));
+    return right > left && bottom - top >= r.height / 2
+      && right - left >= Math.min(r.width, r.height / 2);
+  };
+  // 글 조각에서 지금 보이는 글자만 남긴다. 한 글 조각이 여러 줄이면 첫 줄만 보여도 아래 줄이 함께
+  // 들어가므로, 상자에 잘리는 글 조각은 글자마다 잰다.
+  const shownPart = (node, clips) => {
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    const whole = Array.from(range.getClientRects()).every((r) => clips.every((clip) => (
+      r.left >= clip.left - 1 && r.right <= clip.right + 1
+      && r.top >= clip.top - 1 && r.bottom <= clip.bottom + 1)));
+    if (whole) return node.textContent;
+    let kept = '';
+    let start = 0;
+    for (const char of node.textContent) {
+      range.setStart(node, start);
+      range.setEnd(node, start + char.length);
+      start += char.length;
+      if (/\\s/.test(char)) kept += ' ';
+      else if (Array.from(range.getClientRects()).some((r) => seen(r, clips))) kept += char;
+    }
+    return kept;
+  };
 
   // 클릭이 걸린 칸 (GACA-225): 링크 · 버튼 · 입력칸이 아닌데 손가락 커서(cursor: pointer)인 요소.
   // 사이트 스크립트가 클릭을 받는다 — 학교 사본 졸업 페이지의 학번 칸은 누르면 새 창을 연다.
@@ -429,8 +593,8 @@ _COLLECT_ELEMENTS_JS = """
       const box = boxOf(node);
       const shown = box.shown && Array.from(range.getClientRects()).some((r) => r.width > 0
         && r.height > 0 && r.right > 0 && r.left < innerWidth && r.bottom + scrollY > 0
-        && box.clips.every((clip) => overlaps(r, clip)));
-      if (shown) text += ` ${node.textContent}`;
+        && seen(r, box.clips));
+      if (shown) text += ` ${shownPart(node, box.clips)}`;
     }
     return text;
   };
@@ -443,6 +607,11 @@ _COLLECT_ELEMENTS_JS = """
     }
     const text = shownText(el).trim().replace(/\\s+/g, ' ');
     if (!text || text.length > maxValueLength) continue;
+    const block = clickBlock(el);
+    if (block) {
+      if (block === 'behind') behind.add(el);
+      continue;
+    }
     el.setAttribute(idAttr, String(nextId));
     items.push({
       id: nextId,
@@ -496,7 +665,7 @@ _COLLECT_ELEMENTS_JS = """
       root,
       NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT,
       (node) => (node.nodeType === Node.ELEMENT_NODE
-        && (node.hasAttribute(idAttr) || node.localName === 'textarea')
+        && (node.hasAttribute(idAttr) || behind.has(node) || node.localName === 'textarea')
         ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
     );
     const range = document.createRange();
@@ -517,7 +686,9 @@ _COLLECT_ELEMENTS_JS = """
       const rects = Array.from(range.getClientRects()).filter(inView);
       if (!rects.length) continue; // 화면 밖이거나 그려지지 않은 글 (canvas 대체 글 등)
       const box = boxOf(node);
-      if (!box.shown || !rects.some((r) => box.clips.every((clip) => overlaps(r, clip)))) continue;
+      if (!box.shown || !rects.some((r) => seen(r, box.clips))) continue;
+      const part = shownPart(node, box.clips).replace(/\\s+/g, ' ');
+      if (!part.trim()) continue;
       if (box.block !== lastBlock) {
         const unit = box.cell ?? box.block;
         if (unit !== lastUnit) text += takeIds(lastUnit);
@@ -528,8 +699,8 @@ _COLLECT_ELEMENTS_JS = """
             ? ` | ${skippedCells(row, lastCell.cellIndex + 1, box.cell.cellIndex)}`
             : `\\n${row ? skippedCells(row, 0, box.cell.cellIndex) : ''}`;
       }
-      text += piece;
-      size += piece.replaceAll(' ', '').length;
+      text += part;
+      size += part.replaceAll(' ', '').length;
       lastBlock = box.block;
       lastCell = box.cell;
     }
@@ -943,10 +1114,22 @@ class DomDriver(Driver):
                 # 새 창으로 열려던 허용 주소를 주 창에서 연다 (GACA-225).
                 # 사람은 새 탭에서 이어 본다. step 로그의 url_after 가 이 주소가 된다.
                 # 허용 밖으로 리다이렉트되면 아래 3단계가 되돌린다.
-                await page.goto(url, wait_until="domcontentloaded", timeout=NAVIGATION_TIMEOUT_MS)
+                try:
+                    await page.goto(
+                        url, wait_until="domcontentloaded", timeout=NAVIGATION_TIMEOUT_MS
+                    )
+                except PlaywrightError as e:
+                    # 파일 링크다. 사람에게는 파일이 받아지고 화면은 그대로다 (GACA-232).
+                    if "Download is starting" not in str(e):
+                        raise
+                    result = dataclasses.replace(result, downloaded=True)
         except Exception as e:
             first_line = str(e).splitlines()[0] if str(e) else ""
             result = ActionResult(ok=False, error=f"{type(e).__name__}: {first_line}")
+        if action.kind == "type" and result.ok:
+            # 이 사이 시작한 요청은 관측 전 기다림(_wait_still)이 마저 기다린다. 새 창을 따라갈지 본
+            # 뒤에 기다린다 — 입력 뒤 타이머가 연 창은 행동이 연 창이 아니다.
+            await asyncio.sleep(TYPE_SETTLE_MS / 1000)
         # 요청을 끊지 못한 이동(리다이렉트 등)으로 허용 밖에 와 있으면 행동 전 주소로 되돌린다
         # (guard.domain 3단계). 행동 전 주소가 파괴적 경로면 다시 GET 하지 않고
         # 마지막으로 기억한 주소로 되돌린다 (GACA-224).
