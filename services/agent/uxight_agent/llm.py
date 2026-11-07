@@ -1,4 +1,6 @@
-"""LLM 호출은 전부 `LLMClient.chat()` 한 곳을 거친다 (GACA-106). 호출마다 사용량을 한 줄씩 남긴다.
+"""LLM 호출은 전부 `LLMClient` 를 거친다 (GACA-106). 호출마다 사용량을 한 줄씩 남긴다.
+
+- 보통은 `chat()` 이다. 2000 토큰보다 긴 답은 `chat_stream()` 으로 받는다(GACA-181 단일 진단).
 
 - 주소 · 키 · 모델은 env 로만: LLM_BASE_URL · LLM_API_KEY · LLM_MODEL.
   제공자를 바꿀 땐 env 만 바꾼다.
@@ -63,7 +65,10 @@ def record_usage(
 
 
 class LLMClient:
-    """`chat()` 하나. `response_format` 을 주면 구조화 출력(parse), 없으면 일반 응답."""
+    """`chat()` 과 `chat_stream()`.
+
+    chat 은 `response_format` 을 주면 구조화 출력(parse), 없으면 일반 응답이다.
+    """
 
     def __init__(
         self, client: Any | None = None, model: str | None = None, max_retries: int = 2
@@ -122,7 +127,7 @@ class LLMClient:
         사용량은 마지막 조각에 온다(stream_options include_usage, MLAPI 에서 확인했다). 그 조각이
         없으면 토큰이 0 으로 남는다. 답이 도중에 끊기면 쓴 토큰을 알 수 없어 실패로만 남긴다.
         스트림은 끝까지 읽지 않고 빠져도(시간 초과 · 오류) 닫는다.
-        finish_reason 이 한 번도 오지 않은 답은 choices 가 빈 답으로 돌려준다.
+        finish_reason 이 한 번도 오지 않고 끝난 스트림은 IncompleteStream 을 낸다. 호출 실패로 본다.
         """
         start = time.monotonic()
         meta = {"role": role, "model": self.model, "run_id": run_id, "persona_id": persona_id}
@@ -141,17 +146,25 @@ class LLMClient:
                 async with stream:
                     async for chunk in stream:
                         usage = chunk.usage or usage
-                        for choice in chunk.choices:
+                        for choice in chunk.choices or []:
                             texts.append((choice.delta.content if choice.delta else None) or "")
                             finish_reason = choice.finish_reason or finish_reason
         except Exception as e:
             record_usage(None, latency_ms=_ms(start), error=type(e).__name__, **meta)
             raise
+        if finish_reason is None:
+            error = IncompleteStream.__name__
+            record_usage(SimpleNamespace(usage=usage), latency_ms=_ms(start), error=error, **meta)
+            raise IncompleteStream("stream ended without finish_reason")
         message = SimpleNamespace(content="".join(texts))
         choice = SimpleNamespace(finish_reason=finish_reason, message=message)
-        response = SimpleNamespace(usage=usage, choices=[choice] if finish_reason else [])
+        response = SimpleNamespace(usage=usage, choices=[choice])
         record_usage(response, latency_ms=_ms(start), **meta)
         return response
+
+
+class IncompleteStream(Exception):
+    """스트리밍 답이 끝 표시(finish_reason) 없이 끝났다. 도중에 끊긴 것이라 호출 실패로 본다."""
 
 
 def _ms(start: float) -> int:

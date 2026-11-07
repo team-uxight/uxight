@@ -6,7 +6,7 @@ import pytest
 from conftest import NO_CHOICES
 
 from uxight_agent import usage_report
-from uxight_agent.llm import LLMClient, record_usage
+from uxight_agent.llm import IncompleteStream, LLMClient, record_usage
 
 
 def _resp(inp: int = 100, out: int = 50, reasoning: int = 30) -> SimpleNamespace:
@@ -334,12 +334,55 @@ def test_chat_stream_timeout_covers_the_whole_answer_and_closes_the_stream(log) 
     assert row["error"] == "TimeoutError"
 
 
-def test_chat_stream_without_finish_reason_has_no_choices(scripted_llm) -> None:
-    # 조각이 다 와도 끝난 이유가 없으면 끝난 답이 아니다. 진단자는 이것을 no_choices 로 본다.
+def test_chat_stream_without_finish_reason_is_a_failed_call(scripted_llm, tmp_path) -> None:
+    # 조각이 다 와도 끝난 이유가 없으면 도중에 끊긴 답이다. 사용량 줄에도 실패로 남긴다.
     llm, _ = scripted_llm(NO_CHOICES)
 
+    with pytest.raises(IncompleteStream):
+        asyncio.run(
+            llm.chat_stream([{"role": "user", "content": "x"}], role="r", max_tokens=10, timeout=5)
+        )
+
+    (row,) = _rows(tmp_path / "llm-usage.jsonl")
+    assert (row["error"], row["input_tokens"]) == ("IncompleteStream", 11)
+
+
+class _ListStream:
+    """정해 둔 조각을 차례로 보내는 스트림."""
+
+    def __init__(self, chunks: list) -> None:
+        self._chunks = list(chunks)
+
+    async def __aenter__(self) -> "_ListStream":
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+    def __aiter__(self) -> "_ListStream":
+        return self
+
+    async def __anext__(self) -> SimpleNamespace:
+        if not self._chunks:
+            raise StopAsyncIteration
+        return self._chunks.pop(0)
+
+
+def test_chat_stream_takes_a_chunk_whose_choices_is_null(log) -> None:
+    # 사용량 조각에 choices 가 [] 가 아니라 null 로 오는 제공자도 있다.
+    delta = SimpleNamespace(content="답")
+    chunks = [
+        SimpleNamespace(usage=None, choices=[SimpleNamespace(delta=delta, finish_reason="stop")]),
+        SimpleNamespace(usage=None, choices=None),
+    ]
+
+    class Completions:
+        async def create(self, **kw: object) -> _ListStream:
+            return _ListStream(chunks)
+
+    client = SimpleNamespace(chat=SimpleNamespace(completions=Completions()))
     response = asyncio.run(
-        llm.chat_stream([{"role": "user", "content": "x"}], role="r", max_tokens=10, timeout=5)
+        LLMClient(client=client, model="m").chat_stream([], role="r", max_tokens=10, timeout=5)
     )
 
-    assert response.choices == []
+    assert response.choices[0].message.content == "답"

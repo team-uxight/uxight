@@ -212,31 +212,46 @@ def test_second_bad_report_closes_only_that_persona(scripted_llm, root: Path) ->
     assert len(reasons) == 2 and all(r.startswith("schema:") for r in reasons)
 
 
-def test_second_bad_report_closes_the_whole_run_in_single(scripted_llm, root: Path) -> None:
-    llm, requests = scripted_llm(None, None)
+@pytest.mark.parametrize(("mode", "calls"), [("single", 2), ("multi", 8)])
+def test_second_failed_call_closes_the_assigned_personas(
+    scripted_llm, root: Path, mode: str, calls: int
+) -> None:
+    llm, requests = scripted_llm(answer=lambda body: None)
 
-    result = run(llm, root, "single")
+    result = run(llm, root, mode)
 
-    assert len(requests) == 2
+    assert len(requests) == calls  # 배정마다 두 번
     assert (result.findings, result.closed_personas) == ([], [1, 2, 3, 4])
-    assert messages(root)[-1]["error"] == "llm_failed: InternalServerError"
+    errors = {m["error"] for m in messages(root) if m.get("error")}
+    assert errors == {"llm_failed: InternalServerError"}
 
 
+@pytest.mark.parametrize("mode", ["single", "multi"])
 @pytest.mark.parametrize(
-    ("reply", "reason"),
+    ("reply", "reasons"),
     [
-        (NO_CHOICES, "no_choices"),
-        (('{"rule_checks": [', "length"), "finish_reason: length"),
-        (("", "content_filter"), "finish_reason: content_filter"),
+        # 단일은 스트리밍이라 끝 표시가 없는 답은 호출 실패다.
+        # 다중의 일반 답은 choices 가 빈 답이다.
+        (NO_CHOICES, {"single": "llm_failed: IncompleteStream", "multi": "no_choices"}),
+        (
+            ('{"rule_checks": [', "length"),
+            dict.fromkeys(("single", "multi"), "finish_reason: length"),
+        ),
+        (
+            ("", "content_filter"),
+            dict.fromkeys(("single", "multi"), "finish_reason: content_filter"),
+        ),
     ],
 )
-def test_unusable_replies_are_bad_reports(scripted_llm, root: Path, reply, reason: str) -> None:
-    llm, _ = scripted_llm(reply, reply)
+def test_unusable_replies_are_bad_reports(
+    scripted_llm, root: Path, mode: str, reply, reasons: dict
+) -> None:
+    llm, _ = scripted_llm(answer=lambda body: reply)
 
-    result = run(llm, root, "single")
+    result = run(llm, root, mode)
 
     assert result.closed_personas == [1, 2, 3, 4]
-    assert messages(root)[1]["error"] == reason
+    assert {m["error"] for m in messages(root) if m.get("error")} == {reasons[mode]}
 
 
 def new_finding(*evidence: dict, taxonomy: str = "navigation_confusion") -> dict:
@@ -400,12 +415,13 @@ def test_truncated_replies_are_counted(scripted_llm, root: Path) -> None:
 
 
 def test_reply_without_a_message_is_a_bad_report(root: Path) -> None:
+    # 일반 답(다중)에서만 생긴다. 스트리밍 답은 받은 글로 message 를 늘 만든다.
     class NoMessage:
-        async def chat_stream(self, messages: list[dict], **kwargs) -> SimpleNamespace:
+        async def chat(self, messages: list[dict], **kwargs) -> SimpleNamespace:
             choice = SimpleNamespace(finish_reason="stop", message=None)
             return SimpleNamespace(choices=[choice])
 
-    result = run(NoMessage(), root, "single")
+    result = run(NoMessage(), root, "multi")
 
     assert result.closed_personas == [1, 2, 3, 4]
     assert messages(root)[-1]["error"].startswith("schema:")

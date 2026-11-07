@@ -12,7 +12,7 @@ uv run ruff check . && uv run pytest
 
 환경 변수는 `.env.example` 을 본다. 실행 로그(JSON)는 `data/` 에 쌓이고, 커밋하지 않는다.
 
-**LLM 은 `uxight_agent/llm.py` 의 `LLMClient.chat()` 으로만 부른다.** 부를 때마다 사용량(토큰 · 비용 · 시간 · 역할 · 실행 id)이 `data/llm-usage.jsonl` 에 한 줄씩 남는다. 키 · 프롬프트 · 응답 본문은 남기지 않는다. 비용은 아래 명령으로 본다.
+**LLM 은 `uxight_agent/llm.py` 의 `LLMClient` 로만 부른다(`chat()`, 2000 토큰보다 긴 답은 `chat_stream()`).** 부를 때마다 사용량(토큰 · 비용 · 시간 · 역할 · 실행 id)이 `data/llm-usage.jsonl` 에 한 줄씩 남는다. 키 · 프롬프트 · 응답 본문은 남기지 않는다. 비용은 아래 명령으로 본다.
 
 ```sh
 uv run python -m uxight_agent.usage_report                  # 전체, 역할별
@@ -201,5 +201,6 @@ uv run python -m uxight_agent.bench_diagnose ../../config/bench-school.json \
 - 유형이 붙을 수 없는 Persona 의 근거도 버린다. 과제 실패는 한 번도 못 닿은 Persona 에만, 과도한 단계는 닿은 Persona 에만 붙는다.
 - 새로 더한 진단의 심각도는 `friction_rules.rule_severity` 가 근거 Persona 마다 매긴 값 가운데 가장 높은 값이다.
 - 다중 진단자의 출력 한도는 2000토큰이다. MLAPI 프록시가 스트리밍 아닌 답을 2000 까지만 받아서다. 단일은 회차 전체를 한 답에 써야 해서 스트리밍으로 받고 한도가 8000토큰이다.
-  - 단일로 Persona 25명을 돌리면 보고가 이 한도를 넘을 수 있다. 잘린 답은 다시 배정되고, 또 잘리면 회차 전체가 진단 없이 마감된다.
+  - Persona 가 많은 회차를 단일로 돌리면 보고가 한도를 넘을 수 있다. 잘린 답은 다시 배정되고, 또 잘리면 회차 전체가 진단 없이 마감된다.
   - 단일이 내용이 아니라 한도 때문에 진 경우는 `summary.md` 의 잘린 답 칸으로 가려낸다.
+  - 잘린 답 칸에는 출력 한도에 걸린 답만 든다. 답 전체의 시간 상한(120초)에 걸리거나 도중에 끊긴 답은 `llm_failed` 로 남고, 호출 실패로 본다.
