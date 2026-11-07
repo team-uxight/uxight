@@ -7,7 +7,6 @@ from playwright.async_api import async_playwright
 
 from uxight_agent.improve.dom_validator import validate_patch_target
 
-
 HTML = """
 <html>
 <body>

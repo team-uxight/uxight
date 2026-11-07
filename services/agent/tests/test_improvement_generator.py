@@ -8,7 +8,6 @@ import pytest
 
 from uxight_agent.improve.generator import generate_improvements
 
-
 FINDINGS = [
     {
         "finding_id": 10,
