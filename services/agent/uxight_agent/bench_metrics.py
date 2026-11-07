@@ -72,6 +72,7 @@ CSV_FIELDS = [
     "observation",
     "body_text",
     "guard",
+    "prompt_rules",
     "diagnosis",
     "site",
     "runs",
