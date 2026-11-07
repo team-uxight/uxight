@@ -255,9 +255,10 @@ def test_highlight_description_truncates_long_text():
                 assert description.endswith("요소 강조 (outline)")
 
                 assert await page.locator("#long-menu").text_content() == original_text
-                assert await page.locator("#long-menu").evaluate(
-                    "(el) => el.style.outlineStyle"
-                ) == "solid"
+                assert (
+                    await page.locator("#long-menu").evaluate("(el) => el.style.outlineStyle")
+                    == "solid"
+                )
             finally:
                 await browser.close()
 
