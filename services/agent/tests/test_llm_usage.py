@@ -3,6 +3,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from conftest import NO_CHOICES
 
 from uxight_agent import usage_report
 from uxight_agent.llm import LLMClient, record_usage
@@ -293,17 +294,34 @@ def test_chat_stream_failure_is_recorded_and_raised(scripted_llm, tmp_path) -> N
     assert row["error"] == "InternalServerError"
 
 
-def test_chat_stream_timeout_covers_the_whole_answer(log) -> None:
-    # SDK 의 timeout 은 조각 사이만 잰다. 조각이 이어져 와도 답 전체가 상한을 넘으면 멈춘다.
-    async def slow_chunks():
-        chunk = SimpleNamespace(usage=None, choices=[])
-        while True:
-            await asyncio.sleep(0.01)
-            yield chunk
+class _SlowStream:
+    """조각을 끝없이 천천히 보내는 스트림. 닫혔는지 기억한다."""
+
+    def __init__(self) -> None:
+        self.closed = False
+
+    async def __aenter__(self) -> "_SlowStream":
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        self.closed = True
+
+    def __aiter__(self) -> "_SlowStream":
+        return self
+
+    async def __anext__(self) -> SimpleNamespace:
+        await asyncio.sleep(0.01)
+        return SimpleNamespace(usage=None, choices=[])
+
+
+def test_chat_stream_timeout_covers_the_whole_answer_and_closes_the_stream(log) -> None:
+    # SDK 의 timeout 은 조각 사이만 잰다. 조각이 이어져 와도 답 전체가 상한을 넘으면 멈추고,
+    # 끝까지 읽지 않은 스트림도 닫는다.
+    stream = _SlowStream()
 
     class Completions:
-        async def create(self, **kw: object):
-            return slow_chunks()
+        async def create(self, **kw: object) -> _SlowStream:
+            return stream
 
     client = SimpleNamespace(chat=SimpleNamespace(completions=Completions()))
     llm = LLMClient(client=client, model="m")
@@ -311,5 +329,17 @@ def test_chat_stream_timeout_covers_the_whole_answer(log) -> None:
     with pytest.raises(TimeoutError):
         asyncio.run(llm.chat_stream([], role="r", max_tokens=10, timeout=0.05))
 
+    assert stream.closed
     (row,) = _rows(log)
     assert row["error"] == "TimeoutError"
+
+
+def test_chat_stream_without_finish_reason_has_no_choices(scripted_llm) -> None:
+    # 조각이 다 와도 끝난 이유가 없으면 끝난 답이 아니다. 진단자는 이것을 no_choices 로 본다.
+    llm, _ = scripted_llm(NO_CHOICES)
+
+    response = asyncio.run(
+        llm.chat_stream([{"role": "user", "content": "x"}], role="r", max_tokens=10, timeout=5)
+    )
+
+    assert response.choices == []

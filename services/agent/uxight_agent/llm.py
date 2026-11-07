@@ -119,7 +119,10 @@ class LLMClient:
 
         MLAPI 프록시는 스트리밍 아닌 답의 한도를 2000 까지만 받는다. 그보다 긴 답에 쓴다.
         timeout 은 답 전체의 상한(초)이다. SDK 의 timeout 은 조각 사이의 시간만 재서 따로 건다.
-        사용량은 마지막 조각에 온다. 답이 도중에 끊기면 쓴 토큰을 알 수 없어 실패로만 남긴다.
+        사용량은 마지막 조각에 온다(stream_options include_usage, MLAPI 에서 확인했다). 그 조각이
+        없으면 토큰이 0 으로 남는다. 답이 도중에 끊기면 쓴 토큰을 알 수 없어 실패로만 남긴다.
+        스트림은 끝까지 읽지 않고 빠져도(시간 초과 · 오류) 닫는다.
+        finish_reason 이 한 번도 오지 않은 답은 choices 가 빈 답으로 돌려준다.
         """
         start = time.monotonic()
         meta = {"role": role, "model": self.model, "run_id": run_id, "persona_id": persona_id}
@@ -135,11 +138,12 @@ class LLMClient:
                     stream_options={"include_usage": True},
                     timeout=timeout,
                 )
-                async for chunk in stream:
-                    usage = chunk.usage or usage
-                    for choice in chunk.choices:
-                        texts.append(choice.delta.content or "")
-                        finish_reason = choice.finish_reason or finish_reason
+                async with stream:
+                    async for chunk in stream:
+                        usage = chunk.usage or usage
+                        for choice in chunk.choices:
+                            texts.append((choice.delta.content if choice.delta else None) or "")
+                            finish_reason = choice.finish_reason or finish_reason
         except Exception as e:
             record_usage(None, latency_ms=_ms(start), error=type(e).__name__, **meta)
             raise
