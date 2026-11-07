@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
+import java.time.LocalDateTime;
 
 @Service
 public class AuthService {
@@ -93,6 +94,8 @@ public class AuthService {
       throw new ApiException(ErrorCode.ACCOUNT_DISABLED);
     }
 
+    // 마지막 로그인 기록. access 토큰 재발급(refresh)은 로그인이 아니라 여기서만 쓴다
+    userRepository.updateLastLoginAt(user.getId(), LocalDateTime.now());
     String rawRefreshToken = RefreshToken.newRawToken();
     refreshTokenRepository.save(RefreshToken.issue(user, rawRefreshToken, refreshTokenTtl));
     return new LoginTokens(jwtProvider.createAccessToken(user.getId()), rawRefreshToken);

@@ -43,6 +43,11 @@ public class User {
   @Column(name = "is_active")
   private boolean active;
 
+  // 로그인한 적 없으면 null. UserRepository.updateLastLoginAt 만 쓴다 — Google 로그인은 트랜잭션 밖이라 엔티티 변경이
+  // 저장되지 않고, 다른 변경(역할 · 활성)이 읽어 둔 옛 값으로 덮지 않게 쓰기에서 뺀다.
+  @Column(insertable = false, updatable = false)
+  private LocalDateTime lastLoginAt;
+
   // 두 시각은 DB 기본값(CURRENT_TIMESTAMP · ON UPDATE)이 채운다. JPA 가 null 로 덮지 않게 쓰기에서 뺀다.
   @Column(insertable = false, updatable = false)
   private LocalDateTime createdAt;
