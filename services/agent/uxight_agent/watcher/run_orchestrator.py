@@ -307,7 +307,7 @@ class RunOrchestrator:
                 if status in judged_statuses and reached is not None
             ]
             success = sum(1 for status, reached in judged if status == "done" and reached is True)
-            success_rate = round(success / len(judged) * 100, 2) if judged else 0.0
+            success_rate = round(success / len(judged) * 100, 2) if judged else None
             run_repository.mark_done(run_id, success_rate=success_rate)
 
     @staticmethod
@@ -364,6 +364,7 @@ class RunOrchestrator:
                 outcome = "cancelled"
             else:
                 try:
+                    run_persona_repository.mark_started(run_id, persona_id)
                     async with self._open_driver(run_id, persona_id, hosts) as driver:
                         outcome = await self._drive_persona(
                             run_id,

@@ -87,6 +87,7 @@ class FakeRunPersonaRepository:
 
     def __init__(self) -> None:
         self.statuses: dict[int, str] = {}
+        self.started_personas: list[int] = []
         self.url_reached: dict[int, bool | None] = {}
         self.steps: dict[int, int] = {}
         self.tokens: dict[int, int] = {}
@@ -94,6 +95,10 @@ class FakeRunPersonaRepository:
         self.costs: dict[int, float | None] = {}
         self.cost_added: dict[int, list[float | None]] = {}  # step 마다 더한 값
         self.run_cost: float | None = None  # runs 칸. Persona 행에 더한 값을 그대로 더한다
+
+    def mark_started(self, run_id: int, persona_id: int) -> None:
+        if self.statuses[persona_id] == "running":
+            self.started_personas.append(persona_id)
 
     def get_statuses(self, run_id: int) -> dict[int, str]:
         return dict(self.statuses)
@@ -552,6 +557,31 @@ def test_success_rate_uses_url_reached_and_excludes_unjudged(
 
     assert fakes.runs.status == "done"
     assert fakes.runs.success_rate == 25.0
+
+
+def test_success_rate_is_none_when_no_persona_is_judged(
+    fakes: SimpleNamespace,
+) -> None:
+    """URL 도달 기록이 없거나 판정 제외 상태이면 성공률은 NULL이다."""
+    fakes.personas.statuses.update(
+        {
+            1: "done",
+            2: "max_steps",
+            3: "fail",
+        }
+    )
+    fakes.personas.url_reached.update(
+        {
+            1: None,
+            2: None,
+            3: True,
+        }
+    )
+
+    asyncio.run(RunOrchestrator()._finish_run(RUN_ID, snapshot([])))
+
+    assert fakes.runs.status == "done"
+    assert fakes.runs.success_rate is None
 
 
 @pytest.mark.parametrize(
