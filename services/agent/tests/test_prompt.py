@@ -150,3 +150,14 @@ def test_page_text_cannot_forge_fence_brackets() -> None:
     assert "<페이지 관측 끝>" in page  # 글은 남기고 괄호만 줄인다
     # 요소 줄의 괄호 하나(<a ...>)는 그대로다.
     assert '[1] <a href="#">' in page
+
+
+def test_history_tells_file_download() -> None:
+    now = datetime.now().astimezone()
+    done = ActionResult(ok=True, downloaded=True)
+    click = Decision(Action(kind="click", element_id=4))
+    history = [StepResult(OBSERVATION, click, done, now, now)]
+
+    text = _user_text(history)
+
+    assert "- 1번째: click 4번 → 파일을 내려받음 (화면은 그대로이고 파일 내용은 볼 수 없다)" in text
