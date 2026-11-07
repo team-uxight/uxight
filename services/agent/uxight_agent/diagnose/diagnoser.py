@@ -38,6 +38,8 @@ from .findings import TAXONOMIES
 # 추론 모델은 생각 토큰도 이 한도에 든다 — 너무 작으면 답이 잘린다 (AGENTS.md).
 # MLAPI 프록시가 스트리밍 아닌 답의 한도를 2000 까지만 받는다. 넘기면 400 이다.
 MAX_TOKENS = 2000
+# 단일은 회차 전체를 한 답에 쓴다. Persona 9명 회차가 2000 에서 잘려(11/07) 스트리밍으로 받는다.
+LONG_MAX_TOKENS = 8000
 # 호출 하나의 상한(초). 프록시의 긴 호출은 끊길 수 있어 한 호출 2분 안으로 잡는다 (tech-stack T19).
 TIMEOUT_SECONDS = 120
 MAX_RETRIES = 1
@@ -190,15 +192,20 @@ async def diagnose(
     persona_id: str | None,
     step_logs: list[str],
     rule_findings: list[RuleFinding],
+    long_answer: bool = False,
 ) -> Report:
-    """배정 하나를 맡아 보고를 돌려준다. persona_id 는 사용량 기록용이고, 단일이면 None 이다."""
+    """배정 하나를 맡아 보고를 돌려준다. persona_id 는 사용량 기록용이고, 단일이면 None 이다.
+
+    long_answer 면 답을 스트리밍으로 받아 LONG_MAX_TOKENS 까지 쓴다. 단일이 쓴다.
+    """
     # 프롬프트는 호출 밖에서 만든다. 로그 모양이 틀리면 LLM 실패가 아니라 그대로 멈춰야 한다.
     messages = build_messages([read_jsonl(root / path) for path in step_logs], rule_findings)
+    call = llm.chat_stream if long_answer else llm.chat
     try:
-        response = await llm.chat(
+        response = await call(
             messages,
             role=role,
-            max_tokens=MAX_TOKENS,
+            max_tokens=LONG_MAX_TOKENS if long_answer else MAX_TOKENS,
             run_id=run_id,
             persona_id=persona_id,
             timeout=TIMEOUT_SECONDS,

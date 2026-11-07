@@ -207,7 +207,14 @@ async def _assign(
         assign_id = messages.write("assign", "master", name, content, reply_to=bad_report)
         try:
             report = await diagnose(
-                llm, root, run_id, f"diagnoser_{mode}", persona_id, step_logs, mine
+                llm,
+                root,
+                run_id,
+                f"diagnoser_{mode}",
+                persona_id,
+                step_logs,
+                mine,
+                long_answer=mode == "single",
             )
         except BadReport as e:
             truncated += isinstance(e, TruncatedReport)

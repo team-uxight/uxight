@@ -17,6 +17,8 @@ from conftest import FIXTURES, NO_CHOICES
 
 from uxight_agent.diagnose.assign import diagnose_run
 from uxight_agent.diagnose.diagnoser import (
+    LONG_MAX_TOKENS,
+    MAX_TOKENS,
     SYSTEM_PROMPT,
     BadReport,
     Report,
@@ -65,6 +67,25 @@ def run(llm, root: Path, mode: str, **kwargs):
 def messages(root: Path) -> list[dict]:
     lines = (root / "9001" / "messages.jsonl").read_text(encoding="utf-8").splitlines()
     return [json.loads(line) for line in lines]
+
+
+def test_only_single_streams_a_longer_answer(scripted_llm, root: Path, tmp_path: Path) -> None:
+    # 단일은 회차 전체를 한 답에 쓰려고 스트리밍으로 받고, 다중의 호출은 그대로다.
+    llm, requests = scripted_llm(answer=report)
+    other = tmp_path / "other"
+    shutil.copytree(root, other)
+
+    run(llm, root, "multi")
+    multi = list(requests)
+    requests.clear()
+    run(llm, other, "single")
+
+    assert all("stream" not in body and "stream_options" not in body for body in multi)
+    assert {body["max_completion_tokens"] for body in multi} == {MAX_TOKENS}
+    (single,) = requests
+    assert single["stream"] is True
+    assert single["stream_options"] == {"include_usage": True}
+    assert single["max_completion_tokens"] == LONG_MAX_TOKENS > MAX_TOKENS
 
 
 def test_multi_assigns_one_diagnoser_per_judged_persona(scripted_llm, root: Path) -> None:
@@ -191,31 +212,46 @@ def test_second_bad_report_closes_only_that_persona(scripted_llm, root: Path) ->
     assert len(reasons) == 2 and all(r.startswith("schema:") for r in reasons)
 
 
-def test_second_bad_report_closes_the_whole_run_in_single(scripted_llm, root: Path) -> None:
-    llm, requests = scripted_llm(None, None)
+@pytest.mark.parametrize(("mode", "calls"), [("single", 2), ("multi", 8)])
+def test_second_failed_call_closes_the_assigned_personas(
+    scripted_llm, root: Path, mode: str, calls: int
+) -> None:
+    llm, requests = scripted_llm(answer=lambda body: None)
 
-    result = run(llm, root, "single")
+    result = run(llm, root, mode)
 
-    assert len(requests) == 2
+    assert len(requests) == calls  # 배정마다 두 번
     assert (result.findings, result.closed_personas) == ([], [1, 2, 3, 4])
-    assert messages(root)[-1]["error"] == "llm_failed: InternalServerError"
+    errors = {m["error"] for m in messages(root) if m.get("error")}
+    assert errors == {"llm_failed: InternalServerError"}
 
 
+@pytest.mark.parametrize("mode", ["single", "multi"])
 @pytest.mark.parametrize(
-    ("reply", "reason"),
+    ("reply", "reasons"),
     [
-        (NO_CHOICES, "no_choices"),
-        (('{"rule_checks": [', "length"), "finish_reason: length"),
-        (("", "content_filter"), "finish_reason: content_filter"),
+        # 단일은 스트리밍이라 끝 표시가 없는 답은 호출 실패다.
+        # 다중의 일반 답은 choices 가 빈 답이다.
+        (NO_CHOICES, {"single": "llm_failed: IncompleteStream", "multi": "no_choices"}),
+        (
+            ('{"rule_checks": [', "length"),
+            dict.fromkeys(("single", "multi"), "finish_reason: length"),
+        ),
+        (
+            ("", "content_filter"),
+            dict.fromkeys(("single", "multi"), "finish_reason: content_filter"),
+        ),
     ],
 )
-def test_unusable_replies_are_bad_reports(scripted_llm, root: Path, reply, reason: str) -> None:
-    llm, _ = scripted_llm(reply, reply)
+def test_unusable_replies_are_bad_reports(
+    scripted_llm, root: Path, mode: str, reply, reasons: dict
+) -> None:
+    llm, _ = scripted_llm(answer=lambda body: reply)
 
-    result = run(llm, root, "single")
+    result = run(llm, root, mode)
 
     assert result.closed_personas == [1, 2, 3, 4]
-    assert messages(root)[1]["error"] == reason
+    assert {m["error"] for m in messages(root) if m.get("error")} == {reasons[mode]}
 
 
 def new_finding(*evidence: dict, taxonomy: str = "navigation_confusion") -> dict:
@@ -379,12 +415,13 @@ def test_truncated_replies_are_counted(scripted_llm, root: Path) -> None:
 
 
 def test_reply_without_a_message_is_a_bad_report(root: Path) -> None:
+    # 일반 답(다중)에서만 생긴다. 스트리밍 답은 받은 글로 message 를 늘 만든다.
     class NoMessage:
         async def chat(self, messages: list[dict], **kwargs) -> SimpleNamespace:
             choice = SimpleNamespace(finish_reason="stop", message=None)
             return SimpleNamespace(choices=[choice])
 
-    result = run(NoMessage(), root, "single")
+    result = run(NoMessage(), root, "multi")
 
     assert result.closed_personas == [1, 2, 3, 4]
     assert messages(root)[-1]["error"].startswith("schema:")

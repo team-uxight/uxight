@@ -3,9 +3,10 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from conftest import NO_CHOICES
 
 from uxight_agent import usage_report
-from uxight_agent.llm import LLMClient, record_usage
+from uxight_agent.llm import IncompleteStream, LLMClient, record_usage
 
 
 def _resp(inp: int = 100, out: int = 50, reasoning: int = 30) -> SimpleNamespace:
@@ -254,3 +255,134 @@ def test_slack_text_warns_over_threshold(log) -> None:
     report = usage_report.render(summary, "role", "t")
     assert ":warning:" in usage_report.slack_text(summary, report, alert_usd=1.0)
     assert ":warning:" not in usage_report.slack_text(summary, report, alert_usd=5.0)
+
+
+def test_chat_stream_gives_the_shape_of_chat_and_records_usage(scripted_llm, tmp_path) -> None:
+    llm, requests = scripted_llm("긴 답입니다")
+
+    response = asyncio.run(
+        llm.chat_stream([{"role": "user", "content": "x"}], role="r", max_tokens=8000, timeout=5)
+    )
+
+    assert response.choices[0].message.content == "긴 답입니다"
+    assert response.choices[0].finish_reason == "stop"
+    assert requests[0]["stream"] is True
+    assert requests[0]["max_completion_tokens"] == 8000
+    (row,) = _rows(tmp_path / "llm-usage.jsonl")
+    assert (row["input_tokens"], row["output_tokens"], row["error"]) == (11, 7, None)
+
+
+def test_chat_stream_keeps_finish_reason_length(scripted_llm) -> None:
+    llm, _ = scripted_llm(("잘린 답", "length"))
+
+    response = asyncio.run(
+        llm.chat_stream([{"role": "user", "content": "x"}], role="r", max_tokens=10, timeout=5)
+    )
+
+    assert response.choices[0].finish_reason == "length"
+
+
+def test_chat_stream_failure_is_recorded_and_raised(scripted_llm, tmp_path) -> None:
+    llm, _ = scripted_llm(None)
+
+    with pytest.raises(Exception, match="boom"):
+        asyncio.run(
+            llm.chat_stream([{"role": "user", "content": "x"}], role="r", max_tokens=10, timeout=5)
+        )
+
+    (row,) = _rows(tmp_path / "llm-usage.jsonl")
+    assert row["error"] == "InternalServerError"
+
+
+class _SlowStream:
+    """조각을 끝없이 천천히 보내는 스트림. 닫혔는지 기억한다."""
+
+    def __init__(self) -> None:
+        self.closed = False
+
+    async def __aenter__(self) -> "_SlowStream":
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        self.closed = True
+
+    def __aiter__(self) -> "_SlowStream":
+        return self
+
+    async def __anext__(self) -> SimpleNamespace:
+        await asyncio.sleep(0.01)
+        return SimpleNamespace(usage=None, choices=[])
+
+
+def test_chat_stream_timeout_covers_the_whole_answer_and_closes_the_stream(log) -> None:
+    # SDK 의 timeout 은 조각 사이만 잰다. 조각이 이어져 와도 답 전체가 상한을 넘으면 멈추고,
+    # 끝까지 읽지 않은 스트림도 닫는다.
+    stream = _SlowStream()
+
+    class Completions:
+        async def create(self, **kw: object) -> _SlowStream:
+            return stream
+
+    client = SimpleNamespace(chat=SimpleNamespace(completions=Completions()))
+    llm = LLMClient(client=client, model="m")
+
+    with pytest.raises(TimeoutError):
+        asyncio.run(llm.chat_stream([], role="r", max_tokens=10, timeout=0.05))
+
+    assert stream.closed
+    (row,) = _rows(log)
+    assert row["error"] == "TimeoutError"
+
+
+def test_chat_stream_without_finish_reason_is_a_failed_call(scripted_llm, tmp_path) -> None:
+    # 조각이 다 와도 끝난 이유가 없으면 도중에 끊긴 답이다. 사용량 줄에도 실패로 남긴다.
+    llm, _ = scripted_llm(NO_CHOICES)
+
+    with pytest.raises(IncompleteStream):
+        asyncio.run(
+            llm.chat_stream([{"role": "user", "content": "x"}], role="r", max_tokens=10, timeout=5)
+        )
+
+    (row,) = _rows(tmp_path / "llm-usage.jsonl")
+    assert (row["error"], row["input_tokens"]) == ("IncompleteStream", 11)
+
+
+class _ListStream:
+    """정해 둔 조각을 차례로 보내는 스트림."""
+
+    def __init__(self, chunks: list) -> None:
+        self._chunks = list(chunks)
+
+    async def __aenter__(self) -> "_ListStream":
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+    def __aiter__(self) -> "_ListStream":
+        return self
+
+    async def __anext__(self) -> SimpleNamespace:
+        if not self._chunks:
+            raise StopAsyncIteration
+        return self._chunks.pop(0)
+
+
+def test_chat_stream_takes_a_chunk_whose_choices_is_null(log) -> None:
+    # 사용량 조각에 choices 가 [] 가 아니라 null 로 오는 제공자도 있다.
+    delta = SimpleNamespace(content="답")
+    chunks = [
+        SimpleNamespace(usage=None, choices=[SimpleNamespace(delta=delta, finish_reason="stop")]),
+        SimpleNamespace(usage=None, choices=None),
+    ]
+
+    class Completions:
+        async def create(self, **kw: object) -> _ListStream:
+            return _ListStream(chunks)
+
+    client = SimpleNamespace(chat=SimpleNamespace(completions=Completions()))
+    response = asyncio.run(
+        LLMClient(client=client, model="m").chat_stream([], role="r", max_tokens=10, timeout=5)
+    )
+
+    assert response.choices[0].message.content == "답"

@@ -15,6 +15,26 @@ from uxight_agent.llm import LLMClient
 NO_CHOICES = "<no choices>"
 
 
+def _sse(content: str | None, finish: str) -> bytes:
+    """스트리밍 답. 글은 두 조각으로 나눠 보내고, 사용량은 choices 가 빈 마지막 조각에 온다.
+
+    content 가 None 이면 choices 가 있는 조각이 하나도 없는 답이다.
+    """
+    base = {"id": "c", "object": "chat.completion.chunk", "created": 0, "model": "test-model"}
+    chunks = []
+    if content is not None:
+        half = len(content) // 2
+        chunks = [
+            {**base, "choices": [{"index": 0, "delta": {"content": part}, "finish_reason": None}]}
+            for part in (content[:half], content[half:])
+        ]
+        chunks.append({**base, "choices": [{"index": 0, "delta": {}, "finish_reason": finish}]})
+    usage = {"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18}
+    chunks.append({**base, "choices": [], "usage": usage})
+    lines = [f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n" for chunk in chunks]
+    return "".join([*lines, "data: [DONE]\n\n"]).encode()
+
+
 @pytest.fixture
 def scripted_llm(tmp_path, monkeypatch):
     """정해 둔 답을 차례로 내는 LLMClient 를 만든다. 네트워크 없이 진짜 openai SDK 를 거친다.
@@ -36,6 +56,12 @@ def scripted_llm(tmp_path, monkeypatch):
             if reply is None:
                 return httpx.Response(500, json={"error": {"message": "boom"}})
             content, finish = reply if isinstance(reply, tuple) else (reply, "stop")
+            if requests[-1].get("stream"):
+                return httpx.Response(
+                    200,
+                    headers={"content-type": "text/event-stream"},
+                    content=_sse(None if reply == NO_CHOICES else content, finish),
+                )
             choice = {
                 "index": 0,
                 "finish_reason": finish,
