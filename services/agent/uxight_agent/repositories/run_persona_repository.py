@@ -36,6 +36,18 @@ class RunPersonaRepository:
                 ],
             )
 
+    def mark_started(self, run_id: int, persona_id: int) -> None:
+        """실행 슬롯을 확보한 시점부터 Persona 실행 시간을 측정한다."""
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "UPDATE run_personas SET started_at = NOW() "
+                    "WHERE run_id = :run_id AND persona_id = :persona_id "
+                    "AND status = 'running'"
+                ),
+                {"run_id": run_id, "persona_id": persona_id},
+            )
+
     def get_statuses(self, run_id: int) -> dict[int, str]:
         # 회차에 속한 페르소나별 상태 (persona_id → status).
         with engine.begin() as conn:

@@ -46,7 +46,7 @@ class RunRepository:
                 {"run_id": run_id},
             )
 
-    def mark_done(self, run_id: int, success_rate: float) -> None:
+    def mark_done(self, run_id: int, success_rate: float | None) -> None:
         # runs.status='done' UPDATE와 run_metrics INSERT는 한 트랜잭션으로 묶는다.
         # 상태가 실제로 바뀐 경우에만 INSERT해서 회차 당 1행을 보장한다.
         # Persona별 실행 기록에서 회차 지표를 확정한다.
@@ -72,7 +72,7 @@ class RunRepository:
                         "THEN TIMESTAMPDIFF(MICROSECOND, started_at, finished_at) "
                         "/ 1000000.0 END), "
                         "SUM(tokens), "
-                        "CASE WHEN COUNT(*) = COUNT(cost_usd) "
+                        "CASE WHEN COUNT(tokens) = COUNT(cost_usd) "
                         "THEN SUM(cost_usd) ELSE NULL END "
                         "FROM run_personas WHERE run_id = :run_id"
                     ),

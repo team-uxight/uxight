@@ -9,7 +9,9 @@ import pytest
 from sqlalchemy import Engine, event, text
 
 from uxight_agent.db import create_db_engine
+from uxight_agent.repositories import run_persona_repository as persona_module
 from uxight_agent.repositories import run_repository as repository_module
+from uxight_agent.repositories.run_persona_repository import RunPersonaRepository
 from uxight_agent.repositories.run_repository import RunRepository
 
 NOW = "2026-10-21 12:00:00"
@@ -192,3 +194,73 @@ def test_mark_done_aggregates_persona_metrics(
     assert missing_cost[1] == pytest.approx(6.0)
     assert missing_cost[2] == 120
     assert missing_cost[3] is None
+
+    # 0-step Persona는 토큰과 비용이 모두 NULL이어도
+    # 실제 비용이 측정된 다른 Persona의 합계를 무효화하지 않는다.
+    with engine.begin() as conn:
+        conn.execute(text("INSERT INTO runs (run_id, status) VALUES (4, 'running')"))
+        conn.execute(
+            text(
+                "INSERT INTO run_personas VALUES "
+                "(4, 0, NULL, NULL, NULL, "
+                "'2026-10-21 12:00:00', '2026-10-21 12:00:00'), "
+                "(4, 5, NULL, 100, 0.25, "
+                "'2026-10-21 12:00:00', '2026-10-21 12:00:05')"
+            )
+        )
+
+    repository.mark_done(4, success_rate=None)
+
+    with engine.begin() as conn:
+        zero_step = conn.execute(
+            text("SELECT success_rate, tokens, cost_usd FROM run_metrics WHERE run_id = 4")
+        ).one()
+
+    assert zero_step[0] is None
+    assert zero_step[1] == 100
+    assert zero_step[2] == pytest.approx(0.25)
+
+
+def test_mark_started_updates_only_running_persona(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """슬롯 확보 시 실행 시작 시각을 갱신하고 대기·종료 Persona는 유지한다."""
+    engine = sqlite_engine(tmp_path)
+
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE run_personas ("
+                "run_id INTEGER, persona_id INTEGER, status TEXT, started_at TEXT)"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO run_personas VALUES "
+                "(1, 1, 'running', '2026-10-21 11:00:00'), "
+                "(1, 2, 'running', '2026-10-21 11:00:00'), "
+                "(1, 3, 'done', '2026-10-21 11:00:00')"
+            )
+        )
+
+    monkeypatch.setattr(persona_module, "engine", engine)
+    repository = RunPersonaRepository()
+
+    # Persona 1만 슬롯을 확보했다고 가정한다.
+    repository.mark_started(1, 1)
+    # 이미 종료된 Persona는 시작 시각을 덮어쓰지 않는다.
+    repository.mark_started(1, 3)
+
+    with engine.begin() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT persona_id, started_at FROM run_personas "
+                "WHERE run_id = 1 ORDER BY persona_id"
+            )
+        ).all()
+
+    assert [tuple(row) for row in rows] == [
+        (1, NOW),
+        (2, "2026-10-21 11:00:00"),
+        (3, "2026-10-21 11:00:00"),
+    ]
