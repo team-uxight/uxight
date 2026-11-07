@@ -1991,3 +1991,93 @@ def test_no_findings_skips_improvement_generation(
     assert fakes.runs.status == "done"
     assert fakes.improvements.rows == []
     assert fakes.browsers.started == 0
+
+
+def test_improvement_timeout_preserves_diagnosis_and_marks_done(
+    fakes: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """GACA-169: 개선안 단계 시간 초과에도 진단을 보존하고 done으로 종료한다."""
+    from dataclasses import replace
+
+    fakes.personas.statuses[1] = "done"
+    fakes.personas.url_reached[1] = True
+
+    events = []
+    was_cancelled = []
+
+    async def fake_save_findings(run_id, statuses, snap):
+        assert run_id == RUN_ID
+        events.append("diagnosis_saved")
+
+    async def slow_improvements(self, run_id, snap):
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            was_cancelled.append(True)
+            raise
+
+    monkeypatch.setattr(
+        RunOrchestrator,
+        "_save_findings",
+        staticmethod(fake_save_findings),
+    )
+    monkeypatch.setattr(
+        RunOrchestrator,
+        "_save_improvements",
+        slow_improvements,
+    )
+    monkeypatch.setattr(
+        orchestrator_module,
+        "IMPROVEMENT_TIMEOUT_SECONDS",
+        0.01,
+    )
+
+    snap = replace(snapshot([]), mode="improve")
+    asyncio.run(RunOrchestrator()._finish_run(RUN_ID, snap))
+
+    assert events == ["diagnosis_saved"]
+    assert was_cancelled == [True]
+    assert fakes.runs.status == "done"
+    assert fakes.runs.error is None
+    assert fakes.improvements.rows == []
+
+
+def test_heartbeat_continues_during_run_finalization(
+    fakes: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """GACA-169: Persona 종료 이후 진단·개선안 단계에서도 heartbeat를 유지한다."""
+    from dataclasses import replace
+
+    monkeypatch.setattr(orchestrator_module, "CANCEL_POLL_SECONDS", 0.01)
+
+    heartbeat_counts = []
+
+    async def fake_finish_run(self, run_id, snap):
+        # Persona 실행이 끝난 뒤에도 감시 태스크가 동작할 시간을 준다.
+        before = fakes.runs.heartbeats
+        await asyncio.sleep(0.05)
+        after = fakes.runs.heartbeats
+        heartbeat_counts.append((before, after))
+
+        fakes.runs.mark_done(run_id, success_rate=None)
+
+    monkeypatch.setattr(
+        RunOrchestrator,
+        "_finish_run",
+        fake_finish_run,
+    )
+
+    snap = replace(snapshot([persona(1)]), mode="improve")
+
+    orchestrator = RunOrchestrator()
+    asyncio.run(run(fakes, RUN_ID, snap, orchestrator))
+
+    assert len(heartbeat_counts) == 1
+
+    before, after = heartbeat_counts[0]
+    assert after > before, "Persona 종료 후 _finish_run 실행 중 heartbeat가 갱신되지 않았습니다."
+
+    assert fakes.runs.status == "done"
+    assert RUN_ID not in orchestrator._run_tokens

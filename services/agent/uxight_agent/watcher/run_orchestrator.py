@@ -12,6 +12,7 @@ from ..diagnose.summary import build_facts, summarize
 from ..driver.dom_driver import DomDriver
 from ..guard.domain import allowed_hosts, is_allowed
 from ..improve.generator import generate_improvements
+from ..improve.patch_validator import validate_patch_application
 from ..llm import LLMClient
 from ..persona.llm_decider import STEP_MAX_RETRIES, LLMDecider
 from ..persona.persona_agent import Decider, PersonaAgent
@@ -45,6 +46,9 @@ CANCEL_POLL_SECONDS = 2
 # step 상한 20 — agent-safety §2 한도 · decisions T5. 시간 상한 10분 — architecture §3.3.
 DEFAULT_MAX_STEPS = 20
 DEFAULT_MAX_SECONDS = 600
+
+# 개선안 생성 및 시험 적용 전체 시간 상한(초).
+IMPROVEMENT_TIMEOUT_SECONDS = 120
 
 # 브라우저 닫기 상한(초). 시간 상한 밖이라 따로 둔다.
 # 닫기가 멈춰도 취소 요청 후 10초 안에 종료를 기록한다 — 감시 2초 + 닫기 5초 < 10초.
@@ -265,23 +269,26 @@ class RunOrchestrator:
                 ),
                 return_exceptions=True,
             )
+
+            unfinished = []
+            for persona, result in zip(personas, results, strict=True):
+                if isinstance(result, BaseException):
+                    logger.error(
+                        "run=%s persona=%s 종료 처리 실패",
+                        run_id,
+                        persona["persona_id"],
+                        exc_info=result,
+                    )
+                    unfinished.append(persona["persona_id"])
+            if unfinished:
+                # 종료 처리(DB 기록)가 실패한 페르소나는 running 으로 남아 있을 수 있다.
+                raise RuntimeError(f"persona finish failed: {unfinished}")
+            await self._finish_run(run_id, snapshot)
+
         finally:
             watcher.cancel()
+            await asyncio.gather(watcher, return_exceptions=True)
             self._run_tokens.pop(run_id, None)
-        unfinished = []
-        for persona, result in zip(personas, results, strict=True):
-            if isinstance(result, BaseException):
-                logger.error(
-                    "run=%s persona=%s 종료 처리 실패",
-                    run_id,
-                    persona["persona_id"],
-                    exc_info=result,
-                )
-                unfinished.append(persona["persona_id"])
-        if unfinished:
-            # 종료 처리(DB 기록)가 실패한 페르소나는 running 으로 남아 있을 수 있다.
-            raise RuntimeError(f"persona finish failed: {unfinished}")
-        await self._finish_run(run_id, snapshot)
 
     def _fail_run(self, run_id: int, error: str) -> None:
         # running 으로 남은 페르소나를 fail 로 정리한 뒤 회차를 failed 로 마감한다.
@@ -338,7 +345,8 @@ class RunOrchestrator:
 
             if snapshot.mode in ("improve", "loop"):
                 try:
-                    await self._save_improvements(run_id, snapshot)
+                    async with asyncio.timeout(IMPROVEMENT_TIMEOUT_SECONDS):
+                        await self._save_improvements(run_id, snapshot)
                 except Exception:
                     # 개선안은 진단 이후의 선택적 결과다.
                     # 생성에 실패해도 저장된 진단을 보존하고 회차를 done으로 마감한다.
@@ -416,18 +424,58 @@ class RunOrchestrator:
             await self._open_improvement_page(driver, page_url, hosts)
             improvements = []
             for attempt in range(2):
-                improvements = await generate_improvements(
+                generated = await generate_improvements(
                     llm=llm_client(),
                     findings=page_findings,
                     previous_patches=[],
                     task_goal=snapshot.task.get("goal") or "",
                     run_id=run_id,
                     page=driver.page,
+                    hosts=hosts,
                 )
+
+                validated = []
+                for option in generated:
+                    patch = option["patch"]
+                    patch_payload = {
+                        key: value for key, value in patch.items() if key != "page_url"
+                    }
+
+                    try:
+                        async with self._open_driver(run_id, 0, hosts) as trial_driver:
+                            await self._open_improvement_page(trial_driver, page_url, hosts)
+                            success, reason = await validate_patch_application(
+                                trial_driver.page,
+                                option["patch_kind"],
+                                patch_payload,
+                            )
+                        if not success:
+                            logger.warning(
+                                "run=%s trial patch rejected: %s",
+                                run_id,
+                                reason,
+                            )
+                            continue
+                    except Exception:
+                        logger.exception(
+                            "run=%s trial patch raised an error",
+                            run_id,
+                        )
+                        continue
+
+                    validated.append(
+                        {
+                            **option,
+                            "option_no": len(validated) + 1,
+                        }
+                    )
+
+                improvements = validated
                 if improvements:
                     break
+
                 logger.warning(
-                    "run=%s no valid improvements on attempt %s/2",
+                    "run=%s no applicable improvements on attempt %s/2",
                     run_id,
                     attempt + 1,
                 )
