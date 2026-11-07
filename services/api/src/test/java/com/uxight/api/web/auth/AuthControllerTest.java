@@ -34,6 +34,7 @@ import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.Optional;
 
@@ -285,6 +286,7 @@ class AuthControllerTest {
           "SELECT user_id FROM users WHERE google_sub = 'google-sub-approval' AND is_active = false", Long.class);
       Long adminId = jdbcTemplate.queryForObject(
           "SELECT user_id FROM users WHERE email = 'approval-admin@uxight.com'", Long.class);
+      assertThat(lastLoginAtOf(userId)).isNull();   // 막힌 로그인은 기록하지 않는다
 
       mvc.perform(patch("/api/admin/users/{userId}/active", userId)
               .header(HttpHeaders.AUTHORIZATION, "Bearer " + jwtProvider.createAccessToken(adminId))
@@ -299,6 +301,8 @@ class AuthControllerTest {
               "refreshToken=[0-9a-f]{64}; Path=/api/auth; Max-Age=1209600; Expires=.+; Secure; HttpOnly; SameSite=Strict")));
       assertThat(jdbcTemplate.queryForObject(
           "SELECT COUNT(*) FROM users WHERE google_sub = 'google-sub-approval'", Integer.class)).isEqualTo(1);
+      // Google 로그인은 트랜잭션 밖이라, 마지막 로그인이 실제로 커밋됐는지 여기서 본다 (GACA-207)
+      assertThat(lastLoginAtOf(userId)).isNotNull();
     } finally {
       String users = "SELECT user_id FROM users WHERE google_sub = 'google-sub-approval' "
           + "OR email = 'approval-admin@uxight.com'";
@@ -367,6 +371,10 @@ class AuthControllerTest {
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("GLB-ERR-002"))
         .andExpect(jsonPath("$.fieldErrors[0].field").value("idToken"));
+  }
+
+  private LocalDateTime lastLoginAtOf(Long userId) {
+    return jdbcTemplate.queryForObject("SELECT last_login_at FROM users WHERE user_id = ?", LocalDateTime.class, userId);
   }
 
   private void givenGoogleAccount(String sub, String email) {
