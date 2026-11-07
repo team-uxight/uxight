@@ -87,7 +87,8 @@ paths:
       operationId: loginWithGoogle
       summary: Google 회원가입 및 로그인
       description: |-
-        프론트엔드가 Google에서 받은 ID 토큰을 보낸다. 처음 보는 Google 계정이면 가입 후 로그인 처리한다.
+        프론트엔드가 Google에서 받은 ID 토큰을 보낸다. 처음 보는 Google 계정이면 비활성 리서처로 가입시키고 401(AUT-ERR-005)로 답한다.
+        운영자가 계정 관리에서 그 계정을 활성화한 뒤부터 로그인된다.
         같은 이메일로 이메일 가입한 계정이 있으면 연결하지 않고 409로 거절한다. 이메일 가입은 인증 메일이 없어 이메일 소유를 확인하지 않기 때문이다.
       security: []
       requestBody:
@@ -111,7 +112,7 @@ paths:
         "401":
           description: |-
             - AUT-ERR-003: ID 토큰 검증 실패
-            - AUT-ERR-005: 비활성 계정
+            - AUT-ERR-005: 비활성 계정. 처음 가입한 Google 계정도 운영자가 활성화하기 전까지 이 오류가 난다
           content:
             application/json:
               schema:

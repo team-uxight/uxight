@@ -7,6 +7,7 @@ import static org.hamcrest.Matchers.matchesPattern;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -14,6 +15,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.uxight.api.domain.user.GoogleAccount;
 import com.uxight.api.domain.user.GoogleIdTokenVerifier;
+import com.uxight.api.domain.user.JwtProvider;
 import com.uxight.api.domain.user.RefreshToken;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.Test;
@@ -29,6 +31,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Map;
@@ -53,6 +56,9 @@ class AuthControllerTest {
 
   @Autowired
   private PasswordEncoder passwordEncoder;
+
+  @Autowired
+  private JwtProvider jwtProvider;
 
   @MockitoBean
   private GoogleIdTokenVerifier googleIdTokenVerifier;
@@ -240,14 +246,13 @@ class AuthControllerTest {
   }
 
   @Test
-  void google_newAccount_signsUpResearcherWithoutPassword() throws Exception {
+  void google_newAccount_signsUpInactiveResearcherWithoutTokens() throws Exception {
     givenGoogleAccount("google-sub-1", "new-google@gmail.com");
 
     google(GOOGLE_ID_TOKEN)
-        .andExpect(status().isOk())
-        .andExpect(jsonPath("$.accessToken").value(notNullValue()))
-        .andExpect(header().string(HttpHeaders.SET_COOKIE, matchesPattern(
-            "refreshToken=[0-9a-f]{64}; Path=/api/auth; Max-Age=1209600; Expires=.+; Secure; HttpOnly; SameSite=Strict")));
+        .andExpect(status().isUnauthorized())
+        .andExpect(header().doesNotExist(HttpHeaders.SET_COOKIE))
+        .andExpect(jsonPath("$.code").value("AUT-ERR-005"));
 
     Map<String, Object> user = jdbcTemplate.queryForMap(
         "SELECT email, password_hash, auth_provider, name, role, is_active FROM users WHERE google_sub = 'google-sub-1'");
@@ -256,11 +261,57 @@ class AuthControllerTest {
         .containsEntry("auth_provider", "google")
         .containsEntry("name", "구글 사용자")
         .containsEntry("role", "researcher")
-        .containsEntry("is_active", true);
+        .containsEntry("is_active", false);
+    assertThat(jdbcTemplate.queryForObject(
+        "SELECT COUNT(*) FROM refresh_tokens t JOIN users u ON u.user_id = t.user_id WHERE u.google_sub = 'google-sub-1'",
+        Integer.class)).isZero();
+  }
+
+  /**
+   * 테스트 트랜잭션 밖에서 실제로 커밋한다 — 첫 로그인의 비활성 오류가 가입을 되돌리지 않는지는 커밋해야 보인다.
+   * 운영자가 계정 화면과 같은 API 로 켠 뒤에는 같은 Google 계정으로 로그인된다. 만든 행은 끝에서 지운다.
+   */
+  @Test
+  @Transactional(propagation = Propagation.NOT_SUPPORTED)
+  void google_newAccount_isKeptAndLogsInAfterOperatorActivates() throws Exception {
+    givenGoogleAccount("google-sub-approval", "approval-google@gmail.com");
+    jdbcTemplate.update("INSERT INTO users (email, password_hash, auth_provider, name, role, is_active) "
+        + "VALUES ('approval-admin@uxight.com', 'x', 'local', '운영자', 'admin', true)");
+    try {
+      google(GOOGLE_ID_TOKEN)
+          .andExpect(status().isUnauthorized())
+          .andExpect(jsonPath("$.code").value("AUT-ERR-005"));
+      Long userId = jdbcTemplate.queryForObject(
+          "SELECT user_id FROM users WHERE google_sub = 'google-sub-approval' AND is_active = false", Long.class);
+      Long adminId = jdbcTemplate.queryForObject(
+          "SELECT user_id FROM users WHERE email = 'approval-admin@uxight.com'", Long.class);
+
+      mvc.perform(patch("/api/admin/users/{userId}/active", userId)
+              .header(HttpHeaders.AUTHORIZATION, "Bearer " + jwtProvider.createAccessToken(adminId))
+              .contentType(MediaType.APPLICATION_JSON).content("{\"isActive\": true}"))
+          .andExpect(status().isOk())
+          .andExpect(jsonPath("$.isActive").value(true));
+
+      google(GOOGLE_ID_TOKEN)
+          .andExpect(status().isOk())
+          .andExpect(jsonPath("$.accessToken").value(notNullValue()))
+          .andExpect(header().string(HttpHeaders.SET_COOKIE, matchesPattern(
+              "refreshToken=[0-9a-f]{64}; Path=/api/auth; Max-Age=1209600; Expires=.+; Secure; HttpOnly; SameSite=Strict")));
+      assertThat(jdbcTemplate.queryForObject(
+          "SELECT COUNT(*) FROM users WHERE google_sub = 'google-sub-approval'", Integer.class)).isEqualTo(1);
+    } finally {
+      String users = "SELECT user_id FROM users WHERE google_sub = 'google-sub-approval' "
+          + "OR email = 'approval-admin@uxight.com'";
+      jdbcTemplate.update("DELETE FROM refresh_tokens WHERE user_id IN (" + users + ")");
+      jdbcTemplate.update("DELETE FROM audit_log WHERE target IN (SELECT CONCAT('user:', user_id) FROM (" + users + ") u)");
+      jdbcTemplate.update("DELETE FROM users WHERE google_sub = 'google-sub-approval' OR email = 'approval-admin@uxight.com'");
+    }
   }
 
   @Test
   void google_existingAccount_logsInWithoutSigningUpAgain() throws Exception {
+    jdbcTemplate.update("INSERT INTO users (email, auth_provider, google_sub, name, role, is_active) "
+        + "VALUES ('google@gmail.com', 'google', 'google-sub-1', '구글 사용자', 'researcher', true)");
     givenGoogleAccount("google-sub-1", "google@gmail.com");
 
     google(GOOGLE_ID_TOKEN).andExpect(status().isOk());

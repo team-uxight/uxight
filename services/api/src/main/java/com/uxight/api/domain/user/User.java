@@ -52,25 +52,29 @@ public class User {
   @Column(insertable = false, updatable = false)
   private LocalDateTime updatedAt;
 
-  // 가입 계정은 모두 활성 리서처로 시작한다. 관리자 승격은 계정 역할 변경으로 한다.
-  private User(String email, String passwordHash, AuthProvider authProvider, String googleSub, String name) {
+  // 가입 계정은 모두 리서처로 시작한다. 관리자 승격은 계정 역할 변경으로 한다.
+  private User(String email, String passwordHash, AuthProvider authProvider, String googleSub, String name,
+      boolean active) {
     this.email = email;
     this.passwordHash = passwordHash;
     this.authProvider = authProvider;
     this.googleSub = googleSub;
     this.name = name;
     this.role = Role.researcher;
-    this.active = true;
+    this.active = active;
   }
 
   /** 이메일 가입. passwordHash 는 해시된 값이어야 한다. */
   public static User signUp(String email, String passwordHash, String name) {
-    return new User(email, passwordHash, AuthProvider.local, null, name);
+    return new User(email, passwordHash, AuthProvider.local, null, name, true);
   }
 
-  /** 처음 보는 Google 계정의 가입. 비밀번호 없이 Google 계정 고유 식별자(googleSub)로 로그인한다. */
+  /**
+   * 처음 보는 Google 계정의 가입. 비밀번호 없이 Google 계정 고유 식별자(googleSub)로 로그인한다.
+   * 누구나 Google 계정으로 가입할 수 있으므로 비활성으로 만든다 — 운영자가 계정을 켜야 로그인된다.
+   */
   public static User signUpWithGoogle(String email, String googleSub, String name) {
-    return new User(email, null, AuthProvider.google, googleSub, name);
+    return new User(email, null, AuthProvider.google, googleSub, name, false);
   }
 
   /** 역할 변경. 권한 · 마지막 관리자 확인은 UserService 가 잠금 안에서 한다. 토큰에 역할이 없어 다음 요청부터 적용된다. */
