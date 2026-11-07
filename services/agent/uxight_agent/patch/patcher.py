@@ -77,7 +77,8 @@ _APPLY_JS = """
       } else {
         target.style.backgroundColor = '#fff3a3';
       }
-      description = `'${oldText}' 요소 강조 (${patch.style})`;
+      const shortText = oldText.replace(/\\s+/g, ' ').slice(0, 30);
+      description = `'${shortText}' 요소 강조 (${patch.style})`;
       break;
     }
     case 'help_text': {

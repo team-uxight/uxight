@@ -216,3 +216,49 @@ def test_move_description_uses_destination_text_before_moving(position):
                 await browser.close()
 
     asyncio.run(run())
+
+
+def test_highlight_description_truncates_long_text():
+    """긴 메뉴 텍스트도 설명은 한 줄, 최대 30자만 사용한다."""
+
+    async def run():
+        async with async_playwright() as playwright:
+            browser = await playwright.chromium.launch()
+            try:
+                page = await browser.new_page()
+
+                long_text = ("장학금 신청 안내\n    ") * 1000
+                await page.set_content('<div id="long-menu"></div>')
+                await page.locator("#long-menu").evaluate(
+                    "(el, text) => { el.textContent = text; }",
+                    long_text,
+                )
+
+                original_text = await page.locator("#long-menu").text_content()
+
+                result = await apply_patch(
+                    page,
+                    "highlight",
+                    {
+                        "target": "#long-menu",
+                        "style": "outline",
+                    },
+                )
+
+                description = result["description"]
+                summary = description.removeprefix("'").split("' 요소 강조")[0]
+
+                assert len(original_text) > 12000
+                assert len(summary) == 30
+                assert "\n" not in description
+                assert "  " not in description
+                assert description.endswith("요소 강조 (outline)")
+
+                assert await page.locator("#long-menu").text_content() == original_text
+                assert await page.locator("#long-menu").evaluate(
+                    "(el) => el.style.outlineStyle"
+                ) == "solid"
+            finally:
+                await browser.close()
+
+    asyncio.run(run())
