@@ -200,6 +200,6 @@ uv run python -m uxight_agent.bench_diagnose ../../config/bench-school.json \
 - 진단자가 새로 더한 진단의 근거는 로그와 대조한다. 없는 Persona · step 은 버리고, url 은 `step_from` 의 로그 값으로 쓴다.
 - 유형이 붙을 수 없는 Persona 의 근거도 버린다. 과제 실패는 한 번도 못 닿은 Persona 에만, 과도한 단계는 닿은 Persona 에만 붙는다.
 - 새로 더한 진단의 심각도는 `friction_rules.rule_severity` 가 근거 Persona 마다 매긴 값 가운데 가장 높은 값이다.
-- 진단자의 출력 한도는 2000토큰이다. MLAPI 프록시가 스트리밍 아닌 답을 2000 까지만 받아서다.
+- 다중 진단자의 출력 한도는 2000토큰이다. MLAPI 프록시가 스트리밍 아닌 답을 2000 까지만 받아서다. 단일은 회차 전체를 한 답에 써야 해서 스트리밍으로 받고 한도가 8000토큰이다.
   - 단일로 Persona 25명을 돌리면 보고가 이 한도를 넘을 수 있다. 잘린 답은 다시 배정되고, 또 잘리면 회차 전체가 진단 없이 마감된다.
   - 단일이 내용이 아니라 한도 때문에 진 경우는 `summary.md` 의 잘린 답 칸으로 가려낸다.

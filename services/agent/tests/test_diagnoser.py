@@ -17,6 +17,8 @@ from conftest import FIXTURES, NO_CHOICES
 
 from uxight_agent.diagnose.assign import diagnose_run
 from uxight_agent.diagnose.diagnoser import (
+    LONG_MAX_TOKENS,
+    MAX_TOKENS,
     SYSTEM_PROMPT,
     BadReport,
     Report,
@@ -65,6 +67,25 @@ def run(llm, root: Path, mode: str, **kwargs):
 def messages(root: Path) -> list[dict]:
     lines = (root / "9001" / "messages.jsonl").read_text(encoding="utf-8").splitlines()
     return [json.loads(line) for line in lines]
+
+
+def test_only_single_streams_a_longer_answer(scripted_llm, root: Path, tmp_path: Path) -> None:
+    # 단일은 회차 전체를 한 답에 쓰려고 스트리밍으로 받고, 다중의 호출은 그대로다.
+    llm, requests = scripted_llm(answer=report)
+    other = tmp_path / "other"
+    shutil.copytree(root, other)
+
+    run(llm, root, "multi")
+    multi = list(requests)
+    requests.clear()
+    run(llm, other, "single")
+
+    assert all("stream" not in body and "stream_options" not in body for body in multi)
+    assert {body["max_completion_tokens"] for body in multi} == {MAX_TOKENS}
+    (single,) = requests
+    assert single["stream"] is True
+    assert single["stream_options"] == {"include_usage": True}
+    assert single["max_completion_tokens"] == LONG_MAX_TOKENS > MAX_TOKENS
 
 
 def test_multi_assigns_one_diagnoser_per_judged_persona(scripted_llm, root: Path) -> None:
@@ -380,7 +401,7 @@ def test_truncated_replies_are_counted(scripted_llm, root: Path) -> None:
 
 def test_reply_without_a_message_is_a_bad_report(root: Path) -> None:
     class NoMessage:
-        async def chat(self, messages: list[dict], **kwargs) -> SimpleNamespace:
+        async def chat_stream(self, messages: list[dict], **kwargs) -> SimpleNamespace:
             choice = SimpleNamespace(finish_reason="stop", message=None)
             return SimpleNamespace(choices=[choice])
 

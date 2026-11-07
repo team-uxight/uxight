@@ -8,11 +8,13 @@
   키 · 프롬프트 · 응답 본문은 남기지 않는다.
 """
 
+import asyncio
 import json
 import os
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from openai import AsyncOpenAI
@@ -102,6 +104,50 @@ class LLMClient:
             raise
         record_usage(resp, latency_ms=_ms(start), **meta)
         return resp
+
+    async def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        role: str,
+        max_tokens: int,
+        timeout: float,
+        run_id: int | None = None,
+        persona_id: str | None = None,
+    ) -> Any:
+        """chat() 과 같은 모양의 답을 스트리밍으로 받는다 (GACA-181).
+
+        MLAPI 프록시는 스트리밍 아닌 답의 한도를 2000 까지만 받는다. 그보다 긴 답에 쓴다.
+        timeout 은 답 전체의 상한(초)이다. SDK 의 timeout 은 조각 사이의 시간만 재서 따로 건다.
+        사용량은 마지막 조각에 온다. 답이 도중에 끊기면 쓴 토큰을 알 수 없어 실패로만 남긴다.
+        """
+        start = time.monotonic()
+        meta = {"role": role, "model": self.model, "run_id": run_id, "persona_id": persona_id}
+        texts: list[str] = []
+        finish_reason, usage = None, None
+        try:
+            async with asyncio.timeout(timeout):
+                stream = await self._client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    max_completion_tokens=max_tokens,
+                    stream=True,
+                    stream_options={"include_usage": True},
+                    timeout=timeout,
+                )
+                async for chunk in stream:
+                    usage = chunk.usage or usage
+                    for choice in chunk.choices:
+                        texts.append(choice.delta.content or "")
+                        finish_reason = choice.finish_reason or finish_reason
+        except Exception as e:
+            record_usage(None, latency_ms=_ms(start), error=type(e).__name__, **meta)
+            raise
+        message = SimpleNamespace(content="".join(texts))
+        choice = SimpleNamespace(finish_reason=finish_reason, message=message)
+        response = SimpleNamespace(usage=usage, choices=[choice] if finish_reason else [])
+        record_usage(response, latency_ms=_ms(start), **meta)
+        return response
 
 
 def _ms(start: float) -> int:
