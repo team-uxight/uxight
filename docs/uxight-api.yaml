@@ -2519,7 +2519,7 @@ components:
           minimum: 0
           maximum: 100
           description: >-
-            11/03 결정 기준. 판정 가능한 Persona 중 종료 상태가 done이고
+            판정 가능한 Persona 중 종료 상태가 done이고
             성공 URL에 도달한 Persona의 비율(%).
             분모에는 종료 상태가 done, max_steps, stuck, timeout, token_limit 중
             하나이고 URL 도달 여부가 기록된 Persona만 포함한다.
@@ -2533,7 +2533,7 @@ components:
           description: 평균 뒤로가기 횟수
         avgSeconds:
           type: [number, "null"]
-          description: 평균 소요 시간(초)
+          description: 평균 소요 시간(초). 실행 자리를 잡은 뒤부터 끝날 때까지의 시간.
         tokens:
           type: [integer, "null"]
           format: int64

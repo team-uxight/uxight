@@ -625,6 +625,7 @@ def test_cancel_stops_all_personas_quickly(
     assert fakes.browsers.open == 0
     assert fakes.browsers.started == started
     assert free_global_slots() == 2 - slots_held_by_other_runs
+    assert len(fakes.personas.started_personas) == started
 
 
 def test_cancel_with_hung_browser_close_finishes_within_10_seconds(
