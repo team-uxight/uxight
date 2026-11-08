@@ -46,17 +46,27 @@ class LLMDecider(Decider):
 
     guard 가 "off" 면 페이지 글에 지시문 표시를 붙이지 않는다 (GACA-180, bench 만).
     그 밖의 값은 모두 표시한다.
+    rules 가 False 면 프롬프트에서 페이지 글 규칙을 뺀다 (GACA-233, bench 만).
     """
 
-    def __init__(self, llm: LLMClient, run_id: int | None = None, guard: GuardMode = "on") -> None:
+    def __init__(
+        self,
+        llm: LLMClient,
+        run_id: int | None = None,
+        guard: GuardMode = "on",
+        rules: bool = True,
+    ) -> None:
         self._llm = llm
         self._run_id = run_id
         self._mark = guard != "off"
+        self._rules = rules
 
     async def decide(
         self, persona: dict, task: dict, observation: Observation, history: list[StepResult]
     ) -> Decision:
-        messages = build_messages(persona, task, observation, history, mark=self._mark)
+        messages = build_messages(
+            persona, task, observation, history, mark=self._mark, rules=self._rules
+        )
         start = time.monotonic()
         try:
             # response_format 을 본문에 직접 실어 create() 로 부른다 — parse() 처럼 SDK 가

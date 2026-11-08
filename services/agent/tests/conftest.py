@@ -15,6 +15,26 @@ from uxight_agent.llm import LLMClient
 NO_CHOICES = "<no choices>"
 
 
+def _sse(content: str | None, finish: str) -> bytes:
+    """스트리밍 답. 글은 두 조각으로 나눠 보내고, 사용량은 choices 가 빈 마지막 조각에 온다.
+
+    content 가 None 이면 choices 가 있는 조각이 하나도 없는 답이다.
+    """
+    base = {"id": "c", "object": "chat.completion.chunk", "created": 0, "model": "test-model"}
+    chunks = []
+    if content is not None:
+        half = len(content) // 2
+        chunks = [
+            {**base, "choices": [{"index": 0, "delta": {"content": part}, "finish_reason": None}]}
+            for part in (content[:half], content[half:])
+        ]
+        chunks.append({**base, "choices": [{"index": 0, "delta": {}, "finish_reason": finish}]})
+    usage = {"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18}
+    chunks.append({**base, "choices": [], "usage": usage})
+    lines = [f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n" for chunk in chunks]
+    return "".join([*lines, "data: [DONE]\n\n"]).encode()
+
+
 @pytest.fixture
 def scripted_llm(tmp_path, monkeypatch):
     """정해 둔 답을 차례로 내는 LLMClient 를 만든다. 네트워크 없이 진짜 openai SDK 를 거친다.
@@ -22,19 +42,26 @@ def scripted_llm(tmp_path, monkeypatch):
     답 하나는 모델이 낸 글(content) 문자열이다. None 이면 HTTP 500 (호출 실패),
     (글, "length") 처럼 주면 그 finish_reason 으로 끝난 답, NO_CHOICES 면 choices 가 빈 답이다.
     돌려주는 requests 에 SDK 가 보낸 요청 본문이 쌓인다.
+    answer 를 주면 차례 대신 answer(요청 본문)의 값을 답으로 쓴다 — 동시에 도는 호출을 시험할 때.
     """
     monkeypatch.setenv("LLM_USAGE_LOG", str(tmp_path / "llm-usage.jsonl"))
 
-    def make(*replies) -> tuple[LLMClient, list[dict]]:
+    def make(*replies, answer=None) -> tuple[LLMClient, list[dict]]:
         queue = list(replies)
         requests: list[dict] = []
 
         def handler(request: httpx.Request) -> httpx.Response:
             requests.append(json.loads(request.content))
-            reply = queue.pop(0)
+            reply = answer(requests[-1]) if answer else queue.pop(0)
             if reply is None:
                 return httpx.Response(500, json={"error": {"message": "boom"}})
             content, finish = reply if isinstance(reply, tuple) else (reply, "stop")
+            if requests[-1].get("stream"):
+                return httpx.Response(
+                    200,
+                    headers={"content-type": "text/event-stream"},
+                    content=_sse(None if reply == NO_CHOICES else content, finish),
+                )
             choice = {
                 "index": 0,
                 "finish_reason": finish,

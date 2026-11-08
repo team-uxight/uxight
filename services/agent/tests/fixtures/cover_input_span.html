@@ -1,0 +1,5 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>로그인</title><style>
+body{margin:40px;font:16px sans-serif}.f{position:relative;width:260px;margin-bottom:12px}.f input{display:block;width:260px;height:32px}
+.f span{position:absolute;left:4px;top:6px;width:200px;height:20px;color:#888}
+</style></head><body><div class="f"><span>아이디</span><input name="id"></div><div class="f"><span>비밀번호</span><input name="pw" type="password"></div><button type="button" onclick="document.title='보낸 값 '+document.querySelector('[name=id]').value">로그인</button>
+<script>document.querySelectorAll('.f span').forEach(l=>l.onclick=()=>{l.style.display='none';l.nextElementSibling.focus()});document.querySelectorAll('.f input').forEach(i=>i.oninput=()=>{i.previousElementSibling.style.display=i.value?'none':'block'})</script></body></html>

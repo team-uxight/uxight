@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
+import java.time.LocalDateTime;
 
 @Service
 public class AuthService {
@@ -60,10 +61,12 @@ public class AuthService {
   }
 
   /**
-   * Google 회원가입 · 로그인. ID 토큰의 Google 계정 고유 식별자(sub)로 계정을 찾고, 없으면 리서처로 가입시킨다.
+   * Google 회원가입 · 로그인. ID 토큰의 Google 계정 고유 식별자(sub)로 계정을 찾고, 없으면 비활성 리서처로 가입시킨다.
+   * 새 계정은 운영자가 켜기 전까지 비활성이라 첫 로그인은 AUT-ERR-005 로 끝난다.
    * 같은 이메일의 이메일 가입 계정이 있으면 연결하지 않고 AUT-ERR-008 — 이메일 가입은 이메일 소유를 확인하지 않았기 때문이다.
+   * <p>트랜잭션으로 묶지 않는다. 묶으면 비활성 오류가 가입까지 되돌려 운영자가 켤 계정이 남지 않는다.
+   * 계정 저장과 refresh 토큰 저장은 저장소 메서드가 각자 트랜잭션으로 한다.
    */
-  @Transactional
   public LoginTokens googleLogin(String idToken) {
     GoogleAccount account = googleIdTokenVerifier.verify(idToken)
         .orElseThrow(() -> new ApiException(ErrorCode.GOOGLE_AUTH_FAILED));
@@ -91,6 +94,8 @@ public class AuthService {
       throw new ApiException(ErrorCode.ACCOUNT_DISABLED);
     }
 
+    // 마지막 로그인 기록. access 토큰 재발급(refresh)은 로그인이 아니라 여기서만 쓴다
+    userRepository.updateLastLoginAt(user.getId(), LocalDateTime.now());
     String rawRefreshToken = RefreshToken.newRawToken();
     refreshTokenRepository.save(RefreshToken.issue(user, rawRefreshToken, refreshTokenTtl));
     return new LoginTokens(jwtProvider.createAccessToken(user.getId()), rawRefreshToken);

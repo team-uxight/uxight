@@ -396,7 +396,7 @@ def test_only_guard_off_jobs_pass_guard_to_make_decider(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # 가드 켬 변형은 예전처럼 make_decider(run_id) 로 부른다 — run_id 만 받는 시험 · 데모 판단기가
-    # 그대로 돈다. guard-log.jsonl 은 가드 끔 실행만 쓴다(걸린 가드가 없으면 빈 파일).
+    # 그대로 돈다. 걸린 가드가 없으면 guard-log.jsonl 은 빈 파일이다.
     calls: list[tuple[int, dict]] = []
 
     def make_decider(run_id: int, **mode) -> Decider:
@@ -411,6 +411,49 @@ def test_only_guard_off_jobs_pass_guard_to_make_decider(
 
     assert sorted(calls) == [(1, {}), (7, {"guard": "off"})]
     assert (tmp_path / "guard-log.jsonl").read_text(encoding="utf-8") == ""
+
+
+def test_prompt_rules_off_jobs_pass_rules_to_make_decider(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 네 조건 가운데 운영과 같은 변형만 make_decider(run_id) 로 부른다.
+    calls: list[tuple[int, dict]] = []
+
+    def make_decider(run_id: int, **mode) -> Decider:
+        calls.append((run_id, mode))
+        return Done()
+
+    monkeypatch.setitem(bench.DRIVERS, "dom", Page)
+    config = bench_config(
+        rules_on={},
+        rules_off={"prompt_rules": False},
+        prompt_only={"guard": "off"},
+        nothing={"guard": "off", "prompt_rules": False},
+    )
+    jobs = [
+        dataclasses.replace(JOB, run_id=1, variant="rules_on", guard="on"),
+        dataclasses.replace(JOB, run_id=2, variant="rules_off", guard="on", prompt_rules=False),
+        dataclasses.replace(JOB, run_id=3, variant="prompt_only", guard="off"),
+        dataclasses.replace(JOB, run_id=4, variant="nothing", guard="off", prompt_rules=False),
+    ]
+
+    asyncio.run(bench._run_jobs(jobs, config, make_decider, {}, tmp_path))
+
+    assert sorted(calls, key=lambda call: call[0]) == [
+        (1, {}),
+        (2, {"rules": False}),
+        (3, {"guard": "off"}),
+        (4, {"guard": "off", "rules": False}),
+    ]
+
+
+def test_plan_gives_each_job_the_prompt_rules_of_its_variant() -> None:
+    config = bench_config(rules_on={}, rules_off={"prompt_rules": False})
+    urls = {site.name: site.url for site in config.sites}
+
+    jobs = bench.plan(config, [PERSONA], urls)
+
+    assert {job.variant: job.prompt_rules for job in jobs} == {"rules_on": True, "rules_off": False}
 
 
 def test_subrequest_blocking_for_every_bench_variant(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -517,11 +560,18 @@ def test_bench_runs_guard_on_and_off_on_same_page(
     assert [MARK_START in u for u in users] == [True] * 3 + [False] * 5
     assert [INSTRUCTION in u for u in users] == [False] * 4 + [True, True, False, False]
     assert len({r["messages"][0]["content"] for r in requests}) == 1
-    # 가드 판단 기록은 가드 끔 변형만, 가드 셋이 걸린 것 하나에 한 줄이다. 페이지 글 원문은 없다.
+    # 가드 판단 기록은 가드 셋이 걸린 것 하나에 한 줄이다. 페이지 글 원문은 없다.
     log_text = (out / "guard-log.jsonl").read_text(encoding="utf-8")
     assert "AI 도우미" not in log_text and "지시를 무시" not in log_text
     click = {"kind": "click", "text": None, "direction": None}
-    assert _jsonl(out / "guard-log.jsonl") == [
+    log = _jsonl(out / "guard-log.jsonl")
+    # 가드 켬도 남는다. 막은 것이라 목적지로 공격 링크를 가려낼 수 있다 (GACA-233).
+    on_log = [line for line in log if line["run_id"] == 1]
+    assert [line["guard"] for line in on_log] == [
+        "page_text", "domain", "page_text", "destructive", "page_text",
+    ]  # fmt: skip
+    assert on_log[1]["destination"] == ext
+    assert [line for line in log if line["run_id"] == 2] == [
         {"run_id": 2, "persona_id": "P001", "step": 1, "guard": "page_text",
          "reason": "ignore_previous", "action": {**click, "target": 3}, "destination": None,
          "marks": 1},

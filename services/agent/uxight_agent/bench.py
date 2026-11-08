@@ -11,9 +11,11 @@
 - LLM 설정은 운영과 같은 env(LLM_BASE_URL · LLM_API_KEY · LLM_MODEL)다.
   사용량은 <out>/usage.jsonl 에 따로 남긴다.
 - 변형의 guard 가 off 면 가드 끔(판단만 기록)으로 돈다 (GACA-180). 가드 셋(도메인 · 파괴적 행동 ·
-  지시문 표시)은 판단만 하고 막지 않으며, 판단은 guard-log.jsonl 에 남긴다.
+  지시문 표시)은 판단만 하고 막지 않는다.
   - 가드 끔은 막을 행동을 실제로 실행한다. 그래서 가드 끔 변형이 하나라도 있으면 모든 사이트가
     --serve 로 띄운 사본이어야 한다 (check_guard_off_sites).
+- 변형의 prompt_rules 가 false 면 페이지 글의 지시를 따르지 않는다는 규칙을 프롬프트에서
+  뺀다 (GACA-233).
 - 모든 변형이 운영 Watcher 처럼 허용 밖 하위 요청 차단(드라이버 block_outside_subrequests)으로
   돈다 (GACA-227). 드라이버의 요청 단계 차단은 주 창 · 새 창 이동만 끊으므로, 실행된 클릭이 낸
   하위 요청(fetch · 이미지 · beacon · ping) · iframe 이동 · WebSocket 은 이 차단이 막는다.
@@ -23,7 +25,8 @@
   - summary.md · summary.csv: 변형 × 사이트마다 한 행
   - personas.jsonl: Persona 실행 하나 = 한 줄
   - steps.jsonl: step 하나 = 한 줄 (행동 로그 명세 14칸)
-  - guard-log.jsonl: 가드 끔 변형에서 가드가 걸린 것 하나 = 한 줄 (guard_lines). 가드 끔 변형만 쓴다
+  - guard-log.jsonl: 가드가 걸린 것 하나 = 한 줄 (guard_lines). 가드 켬은 막은 것,
+    가드 끔은 막았을 것이다
 """
 
 import argparse
@@ -113,7 +116,9 @@ class Variant(BaseModel):
     body_text: bool = True  # 끄면 관측에서 본문 글을 뺀다 — 본문 글(GACA-217)의 효과 비교
     # on = 가드 켬(운영 값). off = 가드 끔 — 가드 셋이 막을지 판단만 기록한다 (GACA-180)
     guard: GuardMode = "on"
-    # 자리만 있다. 지금 코드에 스위치가 없어 운영 값만 받는다. 다중 진단은 GACA-181
+    # false = 프롬프트 규칙 끔 — 페이지 글 규칙을 프롬프트에서 뺀다 (GACA-233)
+    prompt_rules: bool = True
+    # 자리만 있다. 단일 · 다중 진단은 변형이 아니다 — 같은 실행 로그로 bench_diagnose 가 둘 다 잰다
     diagnosis: Literal["single"] = "single"
 
 
@@ -172,6 +177,7 @@ class Job:
     persona: dict
     body_text: bool = True
     guard: GuardMode = "on"
+    prompt_rules: bool = True
 
 
 def load_config(path: Path) -> BenchConfig:
@@ -310,6 +316,7 @@ def plan(config: BenchConfig, personas: list[dict], urls: dict[str, str]) -> lis
                                 observation=variant.observation,
                                 body_text=variant.body_text,
                                 guard=variant.guard,
+                                prompt_rules=variant.prompt_rules,
                                 site=site.name,
                                 url=url,
                                 hosts=hosts,
@@ -349,7 +356,7 @@ async def run_persona(
     브라우저 닫기도 운영과 같다. Persona 시간 상한 밖에서 닫고 닫기 상한을 따로 둔다.
     닫기가 실패해도 정해진 결과를 덮지 않는다.
     화면 그림은 저장하지 않는다 (step 로그의 screenshot 은 null).
-    가드 끔 변형이고 guard_log 를 주면 가드 판단 기록(guard_lines 줄)을 거기에 더한다 (GACA-180).
+    guard_log 를 주면 가드가 걸린 것(guard_lines 줄)을 거기에 더한다 (GACA-180 · GACA-233).
     decider 는 이 실행의 가드 모드(job.guard)로 만든 것이어야 한다.
     모든 변형이 운영 Watcher 처럼 허용 밖 하위 요청 차단으로 돈다 (GACA-227).
     """
@@ -395,7 +402,7 @@ async def run_persona(
     finally:
         with contextlib.suppress(Exception):
             await asyncio.wait_for(driver.close(), BROWSER_CLOSE_TIMEOUT_SECONDS)
-    if guard_log is not None and job.guard == "off":
+    if guard_log is not None:
         guard_log += guards
     record = {
         "run_id": job.run_id,
@@ -476,7 +483,8 @@ async def run_bench(
     """모든 Persona 실행을 돌려 out 에 원자료를 쓴다.
 
     (표의 행들, Persona 기록들)을 돌려준다. 표의 한 행은 변형 × 사이트다.
-    판단기는 make_decider(run_id) 로 만든다. 가드 끔 변형만 make_decider(run_id, guard="off") 다.
+    판단기는 make_decider(run_id) 로 만든다. 가드 끔 변형은 guard="off", 프롬프트 규칙 끔 변형은
+    rules=False 를 더한다.
     """
     out.mkdir(parents=True, exist_ok=True)
     # 벤치 호출은 운영 사용량 기록(비용 리포트)과 섞지 않는다 (bakeoff 와 같다).
@@ -526,16 +534,17 @@ async def _run_jobs(
 
     async def one(job: Job) -> None:
         guard_log: list[dict] = []
-        # 가드 켬 변형은 예전처럼 make_decider(run_id) 로 만든다 — 시험 · 데모 판단기를 그대로 쓰게.
+        # 운영과 같은 변형은 make_decider(run_id) 로 만든다 — 시험 · 데모 판단기를 그대로 쓰게.
         mode = {"guard": job.guard} if job.guard == "off" else {}
+        if not job.prompt_rules:
+            mode["rules"] = False
         async with slots:
             decider = make_decider(job.run_id, **mode)
             record, steps = await run_persona(job, decider, prices, config, guard_log)
         # 끝난 실행부터 바로 쓴다 — 도중에 멈춰도 그때까지의 원자료는 남는다.
         _append_jsonl(out / "personas.jsonl", [record])
         _append_jsonl(out / "steps.jsonl", steps)
-        if job.guard == "off":
-            _append_jsonl(out / "guard-log.jsonl", guard_log)
+        _append_jsonl(out / "guard-log.jsonl", guard_log)
         records.append(record)
         print(
             f"[{len(records)}/{len(jobs)}] {job.variant} · {job.site} · Task {job.task_no} · "
@@ -568,7 +577,8 @@ def render_summary(
     errors = sum(1 for r in records if r["error"])
     variants = " / ".join(
         f"{name} = 관측 {v.observation} · 본문 {'on' if v.body_text else 'off'}"
-        f" · 가드 {v.guard} · 진단 {v.diagnosis}"
+        f" · 가드 {v.guard} · 프롬프트 규칙 {'on' if v.prompt_rules else 'off'}"
+        f" · 진단 {v.diagnosis}"
         for name, v in config.variants.items()
     )
     sites = " / ".join(
@@ -637,7 +647,8 @@ def commit() -> str:
 def main(argv: list[str] | None = None, make_decider: Callable[..., Decider] | None = None) -> int:
     """make_decider 를 주면 LLM 대신 그것을 쓴다 (시험 · 데모). 안 주면 운영과 같은 LLMDecider.
 
-    make_decider(run_id) 로 부른다. 가드 끔 변형은 make_decider(run_id, guard="off") 다.
+    make_decider(run_id) 로 부른다. 가드 끔 변형은 guard="off", 프롬프트 규칙 끔 변형은
+    rules=False 를 더한다.
     """
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("config", type=Path, help="설정 파일 (JSON)")

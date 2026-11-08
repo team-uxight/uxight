@@ -44,6 +44,10 @@ export async function loginWithGoogle(idToken: string): Promise<void> {
 		body: JSON.stringify({ idToken }),
 	});
 	if (!response.ok) {
+		// 처음 Google 로 가입한 계정은 운영자가 활성화하기 전까지 비활성이다 (AUT-ERR-005).
+		if (response.status === 401 && (await apiErrorCode(response.clone())) === 'AUT-ERR-005') {
+			throw new Error('운영자가 승인하면 로그인할 수 있습니다.');
+		}
 		throw new Error(await apiErrorMessage(response, 'Google 로그인에 실패했습니다.'));
 	}
 
@@ -58,6 +62,16 @@ export async function loginWithGoogle(idToken: string): Promise<void> {
 		throw new Error('서버에서 올바르지 않은 인증 응답을 받았습니다.');
 	}
 	setAccessToken(body.accessToken);
+}
+
+async function apiErrorCode(response: Response): Promise<string | null> {
+	try {
+		const body: unknown = await response.json();
+		if (typeof body === 'object' && body !== null && 'code' in body && typeof body.code === 'string') return body.code;
+	} catch {
+		return null;
+	}
+	return null;
 }
 
 export async function apiErrorMessage(response: Response, fallback: string): Promise<string> {
