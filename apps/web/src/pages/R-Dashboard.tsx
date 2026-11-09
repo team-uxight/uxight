@@ -33,13 +33,14 @@ async function getProjects(): Promise<Project[]> {
 	return body.projects;
 }
 
-function Icon({ name, size = 18 }: { name: 'plus' | 'arrow' | 'clock' | 'search' | 'settings'; size?: number }) {
+function Icon({ name, size = 18 }: { name: 'plus' | 'arrow' | 'clock' | 'search' | 'settings' | 'compare'; size?: number }) {
 	const paths = {
 		plus: 'M12 5v14M5 12h14',
 		arrow: 'M7 17 17 7M7 7h10v10',
 		clock: 'M12 8v4l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z',
 		search: 'm20 20-4.5-4.5M18 10.5a7.5 7.5 0 1 1-15 0 7.5 7.5 0 0 1 15 0Z',
 		settings: 'M19.14 12.94a7.3 7.3 0 0 0 0-1.88l2.03-1.58-2-3.46-2.4.97a7.2 7.2 0 0 0-1.63-.94L14.78 3.5h-4l-.36 2.55c-.58.22-1.12.54-1.63.94l-2.4-.97-2 3.46 2.03 1.58a7.3 7.3 0 0 0 0 1.88l-2.03 1.58 2 3.46 2.4-.97c.5.4 1.05.72 1.63.94l.36 2.55h4l.36-2.55a7.2 7.2 0 0 0 1.63-.94l2.4.97 2-3.46-2.03-1.58Z',
+		compare: 'M4 19V5m0 14h16M8 15v-4m4 4V7m4 8V9',
 	};
 
 	return (
@@ -302,7 +303,7 @@ export default function RDashboard() {
 									<h3>{project.title}</h3>
 									<a href={project.targetUrl} target="_blank" rel="noreferrer">{project.targetUrl.replace(/^https?:\/\//, '')}</a>
 								</div>
-								<button type="button" className="rd-open-project" aria-label={`${project.title} 열기`} onClick={() => openRunSetting(project)}>
+								<button type="button" className="rd-open-project" aria-label={`${project.title} 모니터링 보기`} onClick={() => navigate('/monitor')}>
 									<Icon name="arrow" />
 								</button>
 							</div>
@@ -313,7 +314,7 @@ export default function RDashboard() {
 								<div><span>실험 이력</span><strong>실험 연결 단계에서 표시</strong></div>
 							</div>
 							<footer className="rd-project-footer">
-								<button type="button" onClick={() => navigate('/monitor')}><Icon name="clock" size={14} /> History</button>
+								<button type="button" onClick={() => navigate(`/compare?projectId=${project.projectId}`)}><Icon name="compare" size={14} /> Compare</button>
 								<div className="rd-project-actions">
 									<button type="button" onClick={() => openEditForm(project)}>수정</button>
 									<button type="button" className="rd-project-delete-button" onClick={() => {

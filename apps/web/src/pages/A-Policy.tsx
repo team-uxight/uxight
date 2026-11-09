@@ -201,7 +201,6 @@ export default function AdminPolicy() {
     <section className="admin-page" aria-labelledby="admin-policy-title">
       <header className="admin-page-header admin-page-header--actions">
         <div>
-          <p className="admin-eyebrow">A2 · POLICY & RESOURCES</p>
           <h1 id="admin-policy-title">정책·자원</h1>
           <p>AI 실험에 적용되는 운영 정책과 자원 한도를 설정할 수 있습니다.</p>
         </div>

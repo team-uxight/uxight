@@ -116,7 +116,6 @@ export default function AdminUsage() {
 		<section className="admin-page" aria-labelledby="admin-usage-title">
 			<header className="admin-page-header admin-page-header--actions">
 				<div>
-					<p className="admin-eyebrow">A3 · USAGE & AUDIT</p>
 					<h1 id="admin-usage-title">사용량·감사</h1>
 					<p>실험 사용량과 주요 운영 이벤트를 확인합니다.</p>
 				</div>
