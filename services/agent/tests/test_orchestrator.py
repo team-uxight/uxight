@@ -1847,13 +1847,13 @@ def test_finished_persona_saves_backtracks_from_step_log(
 
     assert fakes.personas.statuses == {1: "max_steps"}
     assert fakes.personas.backtracks == {1: 2}
-    # 진단이 같은 step 로그로 센 값과 같다.
+    # 같은 step 로그를 지표 정의 함수(calculate_metrics, diagnose_persona 가 씀)로 센 값과 같다.
     steps = orchestrator_module.step_log_writer.read_steps(RUN_ID, 1)
     assert diagnose_persona(steps)["metrics"]["backtrack_count"] == 2
 
 
 def test_persona_without_step_log_saves_zero_backtracks(fakes: SimpleNamespace) -> None:
-    # 브라우저를 띄우지 못해 step 로그가 없으면 진단처럼 되돌아가기 0 이다.
+    # 브라우저를 띄우지 못해 step 로그가 없으면 되돌아가기 0 이다(calculate_metrics([]) 와 같다).
     # step 수 칸도 0 이라 회차 평균 step 과 평균 되돌아가기가 같은 Persona 들로 나뉜다.
     fakes.browsers.start_error = RuntimeError("Executable doesn't exist")
 

@@ -395,7 +395,9 @@ class RunOrchestrator:
         # 모든 Step 로그에서 성공 URL 도달 여부를 집계한다.
         # 한 번이라도 도달했다면 이후 다른 페이지로 이동해도 True를 유지한다.
         url_reached = step_log_writer.get_url_reached(run_id, persona_id)
-        # 되돌아가기 수는 진단과 같은 함수로 센다. step 로그가 없으면 진단처럼 0 이다.
+        # 되돌아가기 수는 설계서 지표 정의(calculate_metrics 의 backtrack_count)대로 센다.
+        # 진단 목록의 '길 찾기 혼란'은 friction_rules 로 따로 세서 숫자가 다를 수 있다.
+        # step 로그가 없으면 0 이다.
         steps = step_log_writer.read_steps(run_id, persona_id)
         backtracks = calculate_metrics(steps)["backtrack_count"]
 
