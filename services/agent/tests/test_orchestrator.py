@@ -1899,11 +1899,24 @@ def test_blank_url_reached_is_filled_by_judge(
     assert orchestrator._last_pages == {}  # 끝난 Persona 의 화면을 들고 있지 않는다
 
 
+@pytest.mark.parametrize(
+    ("last", "page", "last_actions"),
+    [
+        (Action(kind="back"), 2, ["scroll down", "back"]),
+        (Action(kind="done"), 1, ["scroll down", "done"]),
+    ],
+    ids=["max_steps", "done"],
+)
 def test_judge_sees_the_screen_after_the_last_action(
-    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, scripted_llm
+    fakes: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    scripted_llm,
+    last: Action,
+    page: int,
+    last_actions: list[str],
 ) -> None:
     # step 로그에는 제목 · 본문 글이 없다. 판정은 Persona 가 끝날 때의 화면을 본다 — step 상한으로
-    # 끝나면 마지막 행동 뒤에 새로 본 화면(p2)이다.
+    # 끝나면 마지막 행동 뒤에 새로 본 화면(p2)이고, done 이면 done 을 낸 step 의 화면(p1)이다.
     class PageDriver(Driver):
         acts = 0
 
@@ -1913,7 +1926,11 @@ def test_judge_sees_the_screen_after_the_last_action(
         async def observe(self) -> Observation:
             n = self.acts
             return Observation(
-                url=f"https://example.com/p{n}", title=f"p{n}", dom="", text=f"본문 {n}"
+                url=f"https://example.com/p{n}",
+                title=f"p{n}",
+                dom="",
+                text=f"본문 {n}",
+                screenshot=b"png",
             )
 
         async def act(self, action: Action) -> ActionResult:
@@ -1925,12 +1942,17 @@ def test_judge_sees_the_screen_after_the_last_action(
 
     monkeypatch.setattr(orchestrator_module, "DomDriver", PageDriver)
     use_decider(
-        monkeypatch,
-        ScriptedDecider(
-            Decision(Action(kind="scroll", value="down")), Decision(Action(kind="back"))
-        ),
+        monkeypatch, ScriptedDecider(Decision(Action(kind="scroll", value="down")), Decision(last))
     )
     requests = use_judge(monkeypatch, scripted_llm, JUDGE_NO)
+    held: list[Observation] = []
+    real_judge_input = orchestrator_module.judge_input
+
+    def spy_judge_input(task, steps, observation):
+        held.append(observation)
+        return real_judge_input(task, steps, observation)
+
+    monkeypatch.setattr(orchestrator_module, "judge_input", spy_judge_input)
 
     asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)], max_steps=2)))
 
@@ -1938,14 +1960,16 @@ def test_judge_sees_the_screen_after_the_last_action(
         "task": "g",
         "criterion": "",
         "final_page": {
-            "url": "https://example.com/p2",
-            "title": "p2",
+            "url": f"https://example.com/p{page}",
+            "title": f"p{page}",
             "crumb": [],
-            "text": "본문 2",
+            "text": f"본문 {page}",
         },
-        "last_actions": ["scroll down", "back"],
+        "last_actions": last_actions,
     }
     assert fakes.personas.url_reached[1] is False
+    # 끝날 때까지 들고 있는 화면에는 PNG 를 두지 않는다 — 판정에 쓰지 않는다.
+    assert [observation.screenshot for observation in held] == [None]
 
 
 @pytest.mark.parametrize("success_url", ["https://example.com", "https://example.com/goal"])

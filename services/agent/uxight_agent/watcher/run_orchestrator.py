@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import dataclasses
 import logging
 import os
 from collections.abc import AsyncIterator, Awaitable
@@ -95,22 +96,26 @@ def make_summary_llm() -> LLMClient | None:
 def make_judge_llm() -> LLMClient | None:
     """성공 판정 보조 LLM (GACA-161). JUDGE_MODEL 이 비면 None — 판정하지 않는다.
 
-    주소는 JUDGE_BASE_URL, 키는 JUDGE_API_KEY(비면 LLM_API_KEY). 주소가 비면 KeyError 다 —
-    Persona 의 주소로 넘어가지 않는다(MLAPI 는 주소 하나에 모델 하나가 묶인다).
-    테스트는 이 함수를 바꿔 끼운다.
+    JUDGE_MODEL 이 Persona 모델(LLM_MODEL)과 같아도 경고만 남기고 None 이다. 판정은 Persona 와
+    다른 LLM 이 한다. 접두어(provider/)만 다른 이름도 같은 모델로 본다.
+    주소 JUDGE_BASE_URL · 키 JUDGE_API_KEY 가 비면 KeyError 다. Persona 의 주소 · 키로 넘어가지
+    않는다 — MLAPI 는 주소 하나에 모델 하나가 묶이고, 판정 주소가 다른 곳이면 회사 키가 그쪽으로
+    나간다. 테스트는 이 함수를 바꿔 끼운다.
     """
     model = os.environ.get("JUDGE_MODEL")
     if not model:
         return None
+    persona_model = os.environ.get("LLM_MODEL") or ""
+    if model.rsplit("/", 1)[-1] == persona_model.rsplit("/", 1)[-1]:
+        logger.warning("판정 모델이 Persona 모델(%s)과 같아 판정하지 않음", model)
+        return None
     base_url = os.environ.get("JUDGE_BASE_URL")
     if not base_url:
         raise KeyError("JUDGE_BASE_URL")
-    return LLMClient(
-        model=model,
-        base_url=base_url,
-        api_key=os.environ.get("JUDGE_API_KEY") or os.environ["LLM_API_KEY"],
-        max_retries=JUDGE_MAX_RETRIES,
-    )
+    api_key = os.environ.get("JUDGE_API_KEY")
+    if not api_key:
+        raise KeyError("JUDGE_API_KEY")
+    return LLMClient(model=model, base_url=base_url, api_key=api_key, max_retries=JUDGE_MAX_RETRIES)
 
 
 @dataclass
@@ -598,7 +603,10 @@ class RunOrchestrator:
                         )
                         return "cancelled"
                     # 판정 보조용 마지막 화면. 마지막 행동 뒤 화면을 새로 보면 아래에서 바꾼다.
-                    self._last_pages[(run_id, persona_id)] = step.observation
+                    # 화면 그림(PNG)은 판정에 쓰지 않으므로 빼고 둔다.
+                    self._last_pages[(run_id, persona_id)] = dataclasses.replace(
+                        step.observation, screenshot=None
+                    )
                     # 페르소나가 넘겨준 스텝 결과를 즉시 한 줄로 남긴다.
                     # 도중에 죽어도 그때까지의 스텝은 남는다.
                     # 화면 그림을 먼저 쓰고 그다음 로그 줄을 쓴다 (행동 로그 명세 2절).
@@ -700,7 +708,7 @@ class RunOrchestrator:
                 run_id, persona_id, driver, last_screen_step, cancel_event
             )
             if page is not None:
-                self._last_pages[(run_id, persona_id)] = page
+                self._last_pages[(run_id, persona_id)] = dataclasses.replace(page, screenshot=None)
         return outcome
 
     async def _save_last_screenshot(

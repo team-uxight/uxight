@@ -137,26 +137,49 @@ def test_no_judge_model_means_no_judge(monkeypatch) -> None:
     assert orchestrator_module.make_judge_llm() is None
 
 
-def test_judge_model_settings_and_key_fallback(monkeypatch) -> None:
-    monkeypatch.setenv("JUDGE_MODEL", "judge-model")
-    monkeypatch.setenv("JUDGE_BASE_URL", "http://judge.test/v1")
-    monkeypatch.setenv("LLM_API_KEY", "step-key")
-    monkeypatch.delenv("JUDGE_API_KEY", raising=False)
+def judge_env(monkeypatch, **values: str) -> None:
+    """판정 설정 셋과 Persona 설정. 값을 주면 그 값으로 바꾼다."""
+    env = {
+        "JUDGE_MODEL": "judge-model",
+        "JUDGE_BASE_URL": "http://judge.test/v1",
+        "JUDGE_API_KEY": "judge-key",
+        "LLM_MODEL": "step-model",
+        "LLM_BASE_URL": "http://step.test/v1",
+        "LLM_API_KEY": "step-key",
+        **values,
+    }
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+
+
+def test_judge_model_settings(monkeypatch) -> None:
+    judge_env(monkeypatch)
     llm = orchestrator_module.make_judge_llm()
     assert (llm.model, str(llm._client.base_url), llm._client.api_key) == (
         "judge-model",
         "http://judge.test/v1/",
-        "step-key",  # JUDGE_API_KEY 가 없으면 LLM_API_KEY
+        "judge-key",
     )
-    monkeypatch.setenv("JUDGE_API_KEY", "judge-key")
-    assert orchestrator_module.make_judge_llm()._client.api_key == "judge-key"
 
 
-def test_judge_model_without_base_url_is_an_error(monkeypatch) -> None:
-    # 주소가 비면 Persona 의 주소로 넘어가지 않는다 — MLAPI 는 주소 하나에 모델 하나가 묶인다.
-    monkeypatch.setenv("JUDGE_MODEL", "judge-model")
-    monkeypatch.setenv("JUDGE_BASE_URL", "")
-    monkeypatch.setenv("LLM_BASE_URL", "http://step.test/v1")
-    monkeypatch.setenv("LLM_API_KEY", "step-key")
+@pytest.mark.parametrize("name", ["JUDGE_BASE_URL", "JUDGE_API_KEY"])
+def test_judge_model_without_base_url_or_key_is_an_error(monkeypatch, name: str) -> None:
+    # 주소 · 키가 비면 Persona 의 주소 · 키로 넘어가지 않는다. MLAPI 는 주소 하나에 모델 하나가
+    # 묶이고, 판정 주소가 다른 곳(OpenRouter 등)이면 회사 키가 그쪽으로 나간다.
+    judge_env(monkeypatch, **{name: ""})
     with pytest.raises(KeyError):
         orchestrator_module.make_judge_llm()
+    monkeypatch.delenv(name)
+    with pytest.raises(KeyError):
+        orchestrator_module.make_judge_llm()
+
+
+@pytest.mark.parametrize("judge_model", ["step-model", "openai/step-model"])
+def test_judge_model_same_as_persona_model_means_no_judge(
+    monkeypatch, caplog, judge_model: str
+) -> None:
+    # 판정 LLM 은 Persona 와 다른 모델이어야 한다. 접두어(provider/)만 다른 이름도 같은 모델이다.
+    judge_env(monkeypatch, JUDGE_MODEL=judge_model)
+    with caplog.at_level("WARNING", logger=orchestrator_module.logger.name):
+        assert orchestrator_module.make_judge_llm() is None
+    assert [r.levelname for r in caplog.records] == ["WARNING"]

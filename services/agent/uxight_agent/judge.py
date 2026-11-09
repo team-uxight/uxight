@@ -2,8 +2,11 @@
 
 - 규칙(step 로그의 url_reached)이 True · False 를 낸 Persona 는 판정하지 않는다.
   빈칸(None)만 채운다.
-- 프롬프트 · 답 모양은 bakeoff 의 판정과 같다. 문제집(eval/cases/judge.jsonl)으로 잰 정답률이
-  그대로 맞게 하려고서다. 가상 사용자의 '찾았다'는 믿지 않고 마지막 화면만 본다.
+- 프롬프트 · 답 모양 · 입력 칸은 bakeoff 의 판정(문제집 eval/cases/judge.jsonl)과 같다.
+  가상 사용자의 '찾았다'는 믿지 않고 마지막 화면만 본다.
+- 입력 내용은 문제집과 조금 다르다. 마지막 행동의 대상은 요소 번호('click [12]')이고 문제집은
+  요소 글('click [학사안내]')이다. 본문 글은 링크 · 버튼 글이 빠진 화면 안 글이고 2000자까지다.
+  경로(crumb)는 빈 목록이다. 그래서 문제집 일치율이 실제 판정에 그대로 옮겨지지는 않는다.
 - 판정 답은 run_personas.url_reached 에만 들어간다. 진단 · Friction 규칙은 step 로그의
   url_reached 를 보므로, 판정한 Persona 도 거기서는 판정 안 함으로 남는다.
 """
