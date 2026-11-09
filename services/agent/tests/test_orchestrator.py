@@ -27,6 +27,8 @@ from uxight_agent.watcher.step_log_writer import StepLogWriter
 
 # 운영 판단기를 만드는 함수. fakes 가 테스트마다 가짜로 바꿔 끼우기 전의 것이다.
 REAL_MAKE_DECIDER = orchestrator_module.make_decider
+# 판정 보조 LLM 을 만드는 함수 (GACA-161). fakes 가 바꿔 끼우기 전의 것이다.
+REAL_MAKE_JUDGE_LLM = orchestrator_module.make_judge_llm
 
 RUN_ID = 1
 # 실제 감시 간격(2초)을 줄인 값. 취소 계약 10초 = 감시 5주기라, 테스트는 10주기 안에 멈추는지 본다.
@@ -240,6 +242,8 @@ def fakes(monkeypatch: pytest.MonkeyPatch, tmp_path) -> SimpleNamespace:
     monkeypatch.setattr(orchestrator_module, "finding_repository", findings)
     # 진단 설명은 LLM 없이 규칙 문장으로 — 설명 LLM 을 쓰는 테스트는 따로 바꿔 끼운다.
     monkeypatch.setattr(orchestrator_module, "make_summary_llm", lambda: None)
+    # 판정 보조 LLM 도 없이 — 판정 LLM 을 쓰는 테스트는 따로 바꿔 끼운다 (GACA-161).
+    monkeypatch.setattr(orchestrator_module, "make_judge_llm", lambda: None)
     monkeypatch.setattr(orchestrator_module, "CANCEL_POLL_SECONDS", POLL_SECONDS)
     set_global_cap(monkeypatch, 3)
     return SimpleNamespace(
@@ -1833,3 +1837,237 @@ def test_cancelled_or_failed_run_is_not_diagnosed(
 
     assert fakes.runs.status in ("cancelled", "failed")
     assert fakes.findings.rows == []
+
+
+# --- 성공 판정 보조 (GACA-161) ---
+# 이 파일의 회차는 성공 URL 이 없어 step 로그의 도달 기록이 모두 비었다 — 판정할 빈칸이다.
+
+JUDGE_YES = '{"success": true, "evidence": "장학금 지급방법"}'
+JUDGE_NO = '{"success": false, "evidence": "홈 화면이다"}'
+
+
+def use_judge(monkeypatch: pytest.MonkeyPatch, scripted_llm, *replies) -> list[dict]:
+    llm, requests = scripted_llm(*replies)
+    monkeypatch.setattr(orchestrator_module, "make_judge_llm", lambda: llm)
+    return requests
+
+
+def judge_file(fakes: SimpleNamespace):
+    return persona_folder(fakes) / "judge.json"
+
+
+@pytest.mark.parametrize(
+    ("ends_with_done", "reply", "status", "reached", "success_rate"),
+    [
+        (True, JUDGE_YES, "done", True, 100.0),
+        (False, JUDGE_YES, "max_steps", True, 0.0),
+        (True, JUDGE_NO, "done", False, 0.0),
+    ],
+    ids=["성공", "어렵게-성공", "실패"],
+)
+def test_blank_url_reached_is_filled_by_judge(
+    fakes: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    scripted_llm,
+    ends_with_done: bool,
+    reply: str,
+    status: str,
+    reached: bool,
+    success_rate: float,
+) -> None:
+    # 판정 LLM 의 답이 Persona 칸에 들어가고, 성공률은 그 칸으로 지금 규칙대로 센다.
+    requests = use_judge(monkeypatch, scripted_llm, reply)
+    if ends_with_done:
+        use_decider(monkeypatch, ScriptedDecider(Decision(Action(kind="done"), reasoning="찾았다")))
+    orchestrator = RunOrchestrator()
+
+    asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)], max_steps=2), orchestrator))
+
+    assert fakes.personas.statuses[1] == status
+    assert fakes.personas.url_reached[1] is reached
+    assert fakes.runs.status == "done"
+    assert fakes.runs.success_rate == success_rate
+    assert len(requests) == 1
+    sent = json.loads(requests[0]["messages"][1]["content"])
+    assert sent["last_actions"] == (["done — 찾았다"] if ends_with_done else ["scroll down"] * 2)
+    # 판정 답과 근거는 Persona 폴더의 judge.json 에 남는다 — DB 칸만으로는 규칙 값과 가를 수 없다.
+    assert json.loads(judge_file(fakes).read_text(encoding="utf-8")) == {
+        "success": reached,
+        "evidence": json.loads(reply)["evidence"],
+        "model": "test-model",
+    }
+    assert orchestrator._last_pages == {}  # 끝난 Persona 의 화면을 들고 있지 않는다
+
+
+def test_judge_sees_the_screen_after_the_last_action(
+    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, scripted_llm
+) -> None:
+    # step 로그에는 제목 · 본문 글이 없다. 판정은 Persona 가 끝날 때의 화면을 본다 — step 상한으로
+    # 끝나면 마지막 행동 뒤에 새로 본 화면(p2)이다.
+    class PageDriver(Driver):
+        acts = 0
+
+        async def start(self, url: str) -> None:
+            pass
+
+        async def observe(self) -> Observation:
+            n = self.acts
+            return Observation(
+                url=f"https://example.com/p{n}", title=f"p{n}", dom="", text=f"본문 {n}"
+            )
+
+        async def act(self, action: Action) -> ActionResult:
+            self.acts += 1
+            return ActionResult(ok=True, url_after=f"https://example.com/p{self.acts}")
+
+        async def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(orchestrator_module, "DomDriver", PageDriver)
+    use_decider(
+        monkeypatch,
+        ScriptedDecider(
+            Decision(Action(kind="scroll", value="down")), Decision(Action(kind="back"))
+        ),
+    )
+    requests = use_judge(monkeypatch, scripted_llm, JUDGE_NO)
+
+    asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)], max_steps=2)))
+
+    assert json.loads(requests[0]["messages"][1]["content"]) == {
+        "task": "g",
+        "criterion": "",
+        "final_page": {
+            "url": "https://example.com/p2",
+            "title": "p2",
+            "crumb": [],
+            "text": "본문 2",
+        },
+        "last_actions": ["scroll down", "back"],
+    }
+    assert fakes.personas.url_reached[1] is False
+
+
+@pytest.mark.parametrize("success_url", ["https://example.com", "https://example.com/goal"])
+def test_rule_result_is_never_judged(
+    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, scripted_llm, success_url: str
+) -> None:
+    # 규칙이 True · False 를 냈으면 판정하지 않는다 (가짜 브라우저는 늘 https://example.com).
+    requests = use_judge(monkeypatch, scripted_llm)
+    snap = snapshot([persona(1)], max_steps=2)
+    snap.task["success_url"] = success_url
+
+    asyncio.run(run(fakes, RUN_ID, snap))
+
+    assert fakes.personas.url_reached[1] is (success_url == "https://example.com")
+    assert requests == []
+    assert not judge_file(fakes).exists()
+
+
+def test_failed_persona_is_not_judged(
+    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, scripted_llm
+) -> None:
+    requests = use_judge(monkeypatch, scripted_llm)
+    use_decider(monkeypatch, ScriptedDecider(parse_failure(), parse_failure(), parse_failure()))
+
+    asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)], max_steps=5)))
+
+    assert fakes.personas.statuses == {1: "fail"}
+    assert fakes.personas.url_reached[1] is None
+    assert requests == []
+
+
+def test_cancelled_persona_is_not_judged(
+    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, scripted_llm
+) -> None:
+    class CancelDecider(Decider):
+        async def decide(self, persona, task, observation, history) -> Decision:
+            fakes.runs.cancel_requested = True  # 이 step 이 끝나면 취소를 본다
+            return Decision(Action(kind="scroll", value="down"))
+
+    requests = use_judge(monkeypatch, scripted_llm)
+    use_decider(monkeypatch, CancelDecider())
+
+    asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)], max_steps=5)))
+
+    assert fakes.personas.statuses == {1: "cancelled"}
+    assert requests == []
+
+
+def test_no_judge_model_leaves_url_reached_blank(
+    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(orchestrator_module, "make_judge_llm", REAL_MAKE_JUDGE_LLM)
+    monkeypatch.delenv("JUDGE_MODEL", raising=False)
+
+    asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)], max_steps=2)))
+
+    assert fakes.personas.url_reached[1] is None
+    assert fakes.runs.success_rate is None
+    assert not judge_file(fakes).exists()
+
+
+@pytest.mark.parametrize("reply", ["성공입니다", None], ids=["bad-format", "call-failed"])
+def test_judge_failure_leaves_url_reached_blank(
+    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, scripted_llm, reply: str | None
+) -> None:
+    requests = use_judge(monkeypatch, scripted_llm, reply)
+
+    asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)], max_steps=2)))
+
+    assert len(requests) == 1
+    assert fakes.personas.url_reached[1] is None
+    assert fakes.runs.status == "done"  # 판정 실패가 회차를 실패로 만들지 않는다
+    assert fakes.runs.success_rate is None
+    assert not judge_file(fakes).exists()
+
+
+def test_judge_settings_error_leaves_url_reached_blank(
+    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def broken() -> None:
+        raise KeyError("JUDGE_BASE_URL")
+
+    monkeypatch.setattr(orchestrator_module, "make_judge_llm", broken)
+
+    asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)], max_steps=2)))
+
+    assert fakes.personas.url_reached[1] is None
+    assert fakes.runs.status == "done"
+
+
+def test_cancel_stops_judge_quickly(
+    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 판정 LLM 이 답하지 않아도 취소 신호가 오면 바로 멈춘다 — 취소 10초 약속을 지키게.
+    # 취소 신호가 먼저 와 있으면 부르지도 않는다.
+    calls: list[str] = []
+
+    class HangingLLM:
+        model = "hanging"
+
+        async def chat(self, *args, **kwargs):
+            calls.append("chat")
+            await asyncio.sleep(HANG_SECONDS)
+
+    monkeypatch.setattr(orchestrator_module, "make_judge_llm", HangingLLM)
+    page = Observation(url="https://example.com", title="t", dom="")
+
+    async def judge_then_cancel() -> tuple[bool | None, float]:
+        event = asyncio.Event()
+        asyncio.get_running_loop().call_later(0.2, event.set)
+        start = time.monotonic()
+        reached = await RunOrchestrator()._judge_url_reached(RUN_ID, 1, {"goal": "g"}, page, event)
+        return reached, time.monotonic() - start
+
+    async def judge_after_cancel() -> bool | None:
+        event = asyncio.Event()
+        event.set()
+        return await RunOrchestrator()._judge_url_reached(RUN_ID, 1, {"goal": "g"}, page, event)
+
+    reached, seconds = asyncio.run(judge_then_cancel())
+    assert reached is None
+    assert seconds < 1
+    assert calls == ["chat"]
+    assert asyncio.run(judge_after_cancel()) is None
+    assert calls == ["chat"]

@@ -3,7 +3,8 @@
 - 보통은 `chat()` 이다. 2000 토큰보다 긴 답은 `chat_stream()` 으로 받는다(GACA-181 단일 진단).
 
 - 주소 · 키 · 모델은 env 로만: LLM_BASE_URL · LLM_API_KEY · LLM_MODEL.
-  제공자를 바꿀 땐 env 만 바꾼다.
+  제공자를 바꿀 땐 env 만 바꾼다. 다른 배포를 쓰는 판정 보조(GACA-161)는 JUDGE_* env 를 읽어
+  인자로 넘긴다.
 - 사용량 로그: LLM_USAGE_LOG (기본 data/llm-usage.jsonl). 한 줄 = 호출 한 번. 비용 리포트는
   `uv run python -m uxight_agent.usage_report`.
 - 로그에는 토큰 수 · 비용(부를 때의 단가) · 걸린 시간 · 역할 · 실행 id 만 남긴다.
@@ -71,13 +72,19 @@ class LLMClient:
     """
 
     def __init__(
-        self, client: Any | None = None, model: str | None = None, max_retries: int = 2
+        self,
+        client: Any | None = None,
+        model: str | None = None,
+        max_retries: int = 2,
+        base_url: str | None = None,
+        api_key: str | None = None,
     ) -> None:
         # max_retries: 실패한 호출을 SDK 가 다시 보내는 횟수 (SDK 기본 2).
+        # base_url · api_key 를 주지 않으면 LLM_BASE_URL · LLM_API_KEY 를 쓴다.
         self.model = model or os.environ["LLM_MODEL"]
         self._client = client or AsyncOpenAI(
-            base_url=os.environ["LLM_BASE_URL"],
-            api_key=os.environ["LLM_API_KEY"],
+            base_url=base_url or os.environ["LLM_BASE_URL"],
+            api_key=api_key or os.environ["LLM_API_KEY"],
             max_retries=max_retries,
         )
 
