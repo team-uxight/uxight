@@ -38,10 +38,14 @@ PriceTable = dict[str, tuple[float, float, float]]
 # 공개 정가 기준 추정치. 실제 청구는 제공자 쪽 사용량이 기준이다.
 # 모델 가격은 어느 경로(엘리스 MLAPI · OpenRouter)로 불러도 OpenRouter pricing 기준이다 (PM 결정).
 GPT_6_LUNA_PRICES = (0.10, 0.50, 0.01)  # OpenRouter pricing, 10/30 조회
+# 판정 보조 모델 (GACA-161). OpenRouter /api/v1/models 11/07 조회
+GPT_6_1_TERRA_PRICES = (1.00, 5.00, 0.05)
 DEFAULT_PRICES: PriceTable = {
     "openai/gpt-5.6-luna": (0.20, 1.20, 0.20),  # 캐시 단가를 몰라 입력 단가와 같게 둔다
     "openai/gpt-6-luna": GPT_6_LUNA_PRICES,
     "gpt-6-luna": GPT_6_LUNA_PRICES,  # 접두어 없는 이름으로 부르는 경로
+    "openai/gpt-6.1-terra": GPT_6_1_TERRA_PRICES,
+    "gpt-6.1-terra": GPT_6_1_TERRA_PRICES,  # 접두어 없는 이름으로 부르는 경로
     # Anthropic 계열은 Anthropic 공식 API 가격이다 (PM 결정 11/01, 11/01 확인).
     # dev 서버 agent 가 11/01 부터 claude-haiku-5-5 를 쓴다 (MLAPI 크레딧 소진).
     # Haiku 5.5 는 프롬프트 10만 토큰 이하 가격이다(넘으면 0.50 · 2.50). 캐시 읽기는 입력의 0.1배.

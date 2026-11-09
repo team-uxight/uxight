@@ -189,6 +189,18 @@ def test_cached_input_is_billed_at_cache_price(log) -> None:
     assert usage_report.cost_usd(row, usage_report.price_table()) == pytest.approx(0.564)
 
 
+@pytest.mark.parametrize("model", ["openai/gpt-6.1-terra", "gpt-6.1-terra"])
+def test_gpt_6_1_terra_is_priced(log, model: str) -> None:
+    # 판정 보조 모델(GACA-161). 서버는 기본 단가표만 쓰므로 단가가 없으면 비용 칸이 비어 남는다.
+    resp = _resp(1_000_000, 1_000_000, 0)
+    resp.usage.prompt_tokens_details = SimpleNamespace(cached_tokens=400_000)
+
+    row = record_usage(resp, role="judge", model=model, latency_ms=1)
+
+    # 캐시된 40만 × $0.05 + 나머지 입력 60만 × $1.00 + 출력 100만 × $5.00 (100만 토큰당)
+    assert row["cost_usd"] == pytest.approx(5.62)
+
+
 def test_reasoning_tokens_are_not_billed_twice(log) -> None:
     # 출력 1,660 안에 추론 1,559 가 들어 있다 (실제 기록의 모양) — 출력 단가는 1,660 에만 곱한다.
     row = record_usage(_resp(0, 1660, 1559), role="persona_step", model="gpt-6-luna", latency_ms=1)
