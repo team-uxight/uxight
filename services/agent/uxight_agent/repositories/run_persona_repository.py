@@ -108,14 +108,17 @@ class RunPersonaRepository:
         persona_id: int,
         status: PersonaOutcome,
         url_reached: bool | None = None,
+        backtracks: int | None = None,
     ) -> None:
         # 이미 종료된 Persona는 덮어쓰지 않는다.
-        # URL 도달 여부는 전체 Step 로그를 기준으로 집계한 값이다.
+        # URL 도달 여부와 되돌아가기 수는 전체 Step 로그를 기준으로 집계한 값이다.
+        # 되돌아가기 수를 넘기지 않으면(취소 · 실패 정리) 칸을 비워 둔다.
         with engine.begin() as conn:
             conn.execute(
                 text(
                     "UPDATE run_personas "
-                    "SET status = :status, url_reached = :url_reached, finished_at = NOW() "
+                    "SET status = :status, url_reached = :url_reached, "
+                    "backtracks = :backtracks, finished_at = NOW() "
                     "WHERE run_id = :run_id AND persona_id = :persona_id AND status = 'running'"
                 ),
                 {
@@ -123,6 +126,7 @@ class RunPersonaRepository:
                     "persona_id": persona_id,
                     "status": status,
                     "url_reached": url_reached,
+                    "backtracks": backtracks,
                 },
             )
 

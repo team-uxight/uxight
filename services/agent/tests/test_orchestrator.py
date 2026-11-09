@@ -22,6 +22,7 @@ from uxight_agent.persona.persona_agent import Decider, Decision
 from uxight_agent.repositories.run_repository import RunSnapshot
 from uxight_agent.schemas import Action
 from uxight_agent.watcher import run_orchestrator as orchestrator_module
+from uxight_agent.watcher.persona_diagnosis import diagnose_persona
 from uxight_agent.watcher.run_orchestrator import RunOrchestrator
 from uxight_agent.watcher.step_log_writer import StepLogWriter
 
@@ -89,6 +90,7 @@ class FakeRunPersonaRepository:
         self.statuses: dict[int, str] = {}
         self.started_personas: list[int] = []
         self.url_reached: dict[int, bool | None] = {}
+        self.backtracks: dict[int, int | None] = {}
         self.steps: dict[int, int] = {}
         self.tokens: dict[int, int] = {}
         # 비용은 실제 SQL 처럼 None 이면 건드리지 않고, 처음 값이 오면 0 에서 시작해 더한다.
@@ -125,10 +127,12 @@ class FakeRunPersonaRepository:
         persona_id: int,
         status: str,
         url_reached: bool | None = None,
+        backtracks: int | None = None,
     ) -> None:
         if self.statuses[persona_id] == "running":
             self.statuses[persona_id] = status
             self.url_reached[persona_id] = url_reached
+            self.backtracks[persona_id] = backtracks
 
 
 class FakeFindingRepository:
@@ -680,6 +684,7 @@ def test_exception_during_run_does_not_leave_run_running(fakes: SimpleNamespace)
         persona_id: int,
         status: str,
         url_reached: bool | None = None,
+        backtracks: int | None = None,
     ) -> None:
         calls.append(persona_id)
         if len(calls) == 1:
@@ -1803,6 +1808,60 @@ def test_real_step_log_decides_reach_and_success_rate(
     assert fakes.personas.url_reached[1] is reached
     assert fakes.runs.status == "done"
     assert fakes.runs.success_rate == success_rate
+
+
+class BackAndForthDriver(Driver):
+    """행동마다 /a 와 /b 를 오가는 가짜 브라우저. 두 번째 행동부터는 가 본 곳으로 되돌아간다."""
+
+    def __init__(
+        self,
+        allowed_hosts: frozenset[str] = frozenset(),
+        block_outside_subrequests: bool = False,
+    ) -> None:
+        super().__init__(allowed_hosts, block_outside_subrequests)
+        self.url = "https://example.com/a"
+
+    async def start(self, url: str) -> None:
+        pass
+
+    async def observe(self) -> Observation:
+        return Observation(url=self.url, title="t", dom="")
+
+    async def act(self, action: Action) -> ActionResult:
+        self.url = "https://example.com/" + ("b" if self.url.endswith("/a") else "a")
+        return ActionResult(ok=True, url_after=self.url)
+
+    async def close(self) -> None:
+        pass
+
+
+def test_finished_persona_saves_backtracks_from_step_log(
+    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 결과 화면의 평균 되돌아가기는 run_personas.backtracks 의 평균이다. 끝날 때 그 Persona 의
+    # step 로그로 센 값을 쓴다. step 1 은 /a → /b, step 2 는 /b → /a(되돌아감),
+    # step 3 은 /a → /b(되돌아감) 이라 2 다.
+    monkeypatch.setattr(orchestrator_module, "DomDriver", BackAndForthDriver)
+
+    asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)], max_steps=3)))
+
+    assert fakes.personas.statuses == {1: "max_steps"}
+    assert fakes.personas.backtracks == {1: 2}
+    # 진단이 같은 step 로그로 센 값과 같다.
+    steps = orchestrator_module.step_log_writer.read_steps(RUN_ID, 1)
+    assert diagnose_persona(steps)["metrics"]["backtrack_count"] == 2
+
+
+def test_persona_without_step_log_saves_zero_backtracks(fakes: SimpleNamespace) -> None:
+    # 브라우저를 띄우지 못해 step 로그가 없으면 진단처럼 되돌아가기 0 이다.
+    # step 수 칸도 0 이라 회차 평균 step 과 평균 되돌아가기가 같은 Persona 들로 나뉜다.
+    fakes.browsers.start_error = RuntimeError("Executable doesn't exist")
+
+    asyncio.run(run(fakes, RUN_ID, snapshot([persona(1)], max_steps=3)))
+
+    assert fakes.personas.statuses == {1: "fail"}
+    assert orchestrator_module.step_log_writer.read_steps(RUN_ID, 1) == []
+    assert fakes.personas.backtracks == {1: 0}
 
 
 def test_diagnosis_error_fails_run(fakes: SimpleNamespace) -> None:
