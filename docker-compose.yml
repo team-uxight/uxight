@@ -44,6 +44,9 @@ services:
       LLM_BASE_URL: ${LLM_BASE_URL}
       LLM_API_KEY: ${LLM_API_KEY}
       LLM_MODEL: ${LLM_MODEL}
+      JUDGE_MODEL: ${JUDGE_MODEL:-}       # 성공 판정 보조(GACA-161). 비면 판정하지 않는다
+      JUDGE_BASE_URL: ${JUDGE_BASE_URL:-}
+      JUDGE_API_KEY: ${JUDGE_API_KEY:-}
       DB_URL: mysql+pymysql://${MYSQL_USER:-uxight}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE:-uxight}
       INTERNAL_TOKEN: ${INTERNAL_TOKEN:-}   # 내부 API 공유 토큰 (X-Internal-Token) — api 와 같은 값
       LOG_DIR: /app/data/runs            # step 로그 → 아래 data/ 볼륨. 절대 경로 (DB log_path 는 이 기준 상대 경로)
