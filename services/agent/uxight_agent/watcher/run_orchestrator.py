@@ -24,6 +24,7 @@ from ..repositories.finding_repository import finding_repository
 from ..repositories.run_persona_repository import PersonaOutcome, run_persona_repository
 from ..repositories.run_repository import RunSnapshot, run_repository
 from ..usage_report import PriceTable, price_table
+from .persona_metrics import calculate_metrics
 from .step_log_writer import step_log_writer
 from .step_rules import (
     BLOCK_REASONS,
@@ -430,14 +431,21 @@ class RunOrchestrator:
         # 모든 Step 로그에서 성공 URL 도달 여부를 집계한다.
         # 한 번이라도 도달했다면 이후 다른 페이지로 이동해도 True를 유지한다.
         url_reached = step_log_writer.get_url_reached(run_id, persona_id)
+        # 되돌아가기 수는 설계서 지표 정의(calculate_metrics 의 backtrack_count)대로 센다.
+        # 진단 목록의 '길 찾기 혼란'은 friction_rules 로 따로 세서 숫자가 다를 수 있다.
+        # step 로그가 없으면 0 이다.
+        steps = step_log_writer.read_steps(run_id, persona_id)
+        backtracks = calculate_metrics(steps)["backtrack_count"]
         # 규칙이 도달 여부를 내지 못한 빈칸만 판정 LLM 이 채운다 (GACA-161).
         if url_reached is None and outcome in JUDGED_STATUSES:
             url_reached = await self._judge_url_reached(
                 run_id, persona_id, task, page, cancel_event
             )
 
-        # 종료 상태와 URL 도달 여부를 함께 저장한 뒤 진행률을 갱신한다.
-        run_persona_repository.mark_finished(run_id, persona_id, outcome, url_reached=url_reached)
+        # 종료 상태 · URL 도달 여부 · 되돌아가기 수를 함께 저장한 뒤 진행률을 갱신한다.
+        run_persona_repository.mark_finished(
+            run_id, persona_id, outcome, url_reached=url_reached, backtracks=backtracks
+        )
         # 진단은 모든 Persona 가 끝난 뒤 회차 단위로 한다 (_finish_run → _save_findings).
         self._refresh_progress(run_id)
 
