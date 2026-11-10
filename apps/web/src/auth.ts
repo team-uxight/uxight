@@ -16,8 +16,10 @@ export type AdminUser = {
 	authProvider: 'local' | 'google';
 	isActive: boolean;
 	createdAt: string;
+	/** 로그인한 적 없으면 null */
 	lastLoginAt: string | null;
-	totalCostUsd: number;
+	/** 그 계정 프로젝트의 회차 비용 합(USD). 값을 주지 않는 서버면 null */
+	totalCostUsd: number | null;
 };
 
 export type PageResponse<T> = {
@@ -219,16 +221,16 @@ export async function getAdminUsers(page = 0, size = 20): Promise<PageResponse<A
 			!('isActive' in item) ||
 			typeof item.isActive !== 'boolean' ||
 			!('createdAt' in item) ||
-			typeof item.createdAt !== 'string' ||
-			!('lastLoginAt' in item) ||
-			(item.lastLoginAt !== null && typeof item.lastLoginAt !== 'string') ||
-			!('totalCostUsd' in item) ||
-			typeof item.totalCostUsd !== 'number' ||
-			!Number.isFinite(item.totalCostUsd) ||
-			item.totalCostUsd < 0
+			typeof item.createdAt !== 'string'
 		) {
 			throw new Error('서버에서 올바르지 않은 계정 정보를 받았습니다.');
 		}
+		// 11/07(PR #118) 전 서버는 두 칸을 주지 않는다. 없거나 모양이 다르면 null 로 두고 화면은 '—' 를 쓴다.
+		const lastLoginAt = 'lastLoginAt' in item && typeof item.lastLoginAt === 'string' ? item.lastLoginAt : null;
+		const totalCostUsd = 'totalCostUsd' in item && typeof item.totalCostUsd === 'number' &&
+			Number.isFinite(item.totalCostUsd) && item.totalCostUsd >= 0
+			? item.totalCostUsd
+			: null;
 
 		return {
 			userId: item.userId,
@@ -238,8 +240,8 @@ export async function getAdminUsers(page = 0, size = 20): Promise<PageResponse<A
 			authProvider: item.authProvider,
 			isActive: item.isActive,
 			createdAt: item.createdAt,
-			lastLoginAt: item.lastLoginAt,
-			totalCostUsd: item.totalCostUsd,
+			lastLoginAt,
+			totalCostUsd,
 		};
 	});
 

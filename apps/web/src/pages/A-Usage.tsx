@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { CircleAlert } from 'lucide-react';
 import { getAdminExperiments, getAuditLogs, getMonthlyUsage, type AdminExperiment, type AuditLog, type MonthlyUsage } from '../auth';
+import { KRW_PER_USD, formatKrw, formatTime } from './adminFormat';
 
 type RunStatusFilter = 'all' | AdminExperiment['status'];
 
@@ -19,9 +20,6 @@ function monthRange(month: string): { from: string; to: string } {
 	return { from: `${month}-01T00:00:00+09:00`, to: `${nextMonth}-01T00:00:00+09:00` };
 }
 
-const KRW_PER_USD = 1400;
-const formatKrw = (usd: number) => `₩ ${Math.round(usd * KRW_PER_USD).toLocaleString('ko-KR')}`;
-const formatTime = (ts: string) => ts.replace('T', ' ').slice(0, 16);
 const runStatusLabels: Record<AdminExperiment['status'], string> = {
 	queued: '대기',
 	accepted: '접수',

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Plus, RefreshCw, Search, UserRoundCog, X } from 'lucide-react';
 import { useOutletContext } from 'react-router-dom';
 import { changeUserActive, changeUserRole, createAdminUser, getAdminUsers, getCurrentUserRole, type AdminUser, type UserRole } from '../auth';
+import { formatKrw, formatTime } from './adminFormat';
 
 const pageSize = 20;
 
@@ -17,24 +18,6 @@ type AdminLayoutContext = {
 	accountSearch: string;
 	setAccountSearch: (value: string) => void;
 };
-
-function formatLastLogin(value: string | null): string {
-	if (value === null) return '로그인 기록 없음';
-	const date = new Date(value);
-	return Number.isNaN(date.getTime())
-		? value
-		: new Intl.DateTimeFormat('ko-KR', { dateStyle: 'short', timeStyle: 'short' }).format(date);
-}
-
-function formatCost(value: number): string {
-	if (value > 0 && value < 0.000001) return '<$0.000001';
-	return new Intl.NumberFormat('en-US', {
-		style: 'currency',
-		currency: 'USD',
-		minimumFractionDigits: 2,
-		maximumFractionDigits: 6,
-	}).format(value);
-}
 
 export default function AdminAccounts() {
 	const { accountSearch, setAccountSearch } = useOutletContext<AdminLayoutContext>();
@@ -289,8 +272,10 @@ export default function AdminAccounts() {
 									<td><span className={`admin-role-badge admin-role-badge--${account.role}`}>{roleLabels[account.role]}</span></td>
 									<td><span className={`admin-status${account.isActive ? ' is-active' : ' is-inactive'}`}>{account.isActive ? '활성' : '비활성'}</span></td>
 									<td>{account.authProvider === 'google' ? 'Google' : '이메일'}</td>
-									<td>{formatLastLogin(account.lastLoginAt)}</td>
-									<td>{formatCost(account.totalCostUsd)}</td>
+									<td>{account.lastLoginAt ? formatTime(account.lastLoginAt) : '—'}</td>
+									<td title={account.totalCostUsd == null ? undefined : `${account.totalCostUsd} USD`}>
+										{account.totalCostUsd == null ? '—' : formatKrw(account.totalCostUsd)}
+									</td>
 									<td>
 										<button className="admin-icon-button" type="button" aria-label={`${account.name} 계정 관리`} onClick={() => openAccount(account)}>
 											<UserRoundCog size={16} aria-hidden="true" />

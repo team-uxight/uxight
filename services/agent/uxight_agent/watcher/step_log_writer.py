@@ -5,6 +5,7 @@ from pathlib import Path
 from ..db import settings
 
 LOG_FILE_NAME = "steps.jsonl"
+JUDGE_FILE_NAME = "judge.json"
 
 
 class StepLogWriter:
@@ -44,6 +45,14 @@ class StepLogWriter:
         line = json.dumps(record, ensure_ascii=False, default=str)
         with open(self._root / self.relative_path(run_id, persona_id), "a", encoding="utf-8") as f:
             f.write(line + "\n")
+
+    def write_judgment(self, run_id: int, persona_id: int, record: dict) -> None:
+        """판정 LLM 의 답(GACA-161)을 Persona 폴더의 judge.json 으로 남긴다. Spring 은 읽지 않는다.
+
+        DB 의 url_reached 만으로는 규칙 값인지 판정 값인지 가를 수 없어 따로 둔다.
+        """
+        path = self._root / f"{run_id}/{persona_id}/{JUDGE_FILE_NAME}"
+        path.write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
 
     def read_steps(self, run_id: int, persona_id: int) -> list[dict]:
         """Persona의 JSONL 행동 로그를 읽어 Step 목록으로 반환한다."""

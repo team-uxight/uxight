@@ -264,3 +264,47 @@ def test_mark_started_updates_only_running_persona(
         (2, "2026-10-21 11:00:00"),
         (3, "2026-10-21 11:00:00"),
     ]
+
+
+def test_mark_finished_writes_backtracks(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """종료할 때 되돌아가기 수를 같이 쓴다. 회차 지표의 평균 되돌아가기가 이 칸의 평균이다."""
+    engine = sqlite_engine(tmp_path)
+
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE run_personas (run_id INTEGER, persona_id INTEGER, status TEXT, "
+                "url_reached INTEGER, backtracks INTEGER, finished_at TEXT)"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO run_personas VALUES "
+                "(1, 1, 'running', NULL, NULL, NULL), "
+                "(1, 2, 'running', NULL, NULL, NULL), "
+                "(1, 3, 'done', 1, 4, '2026-10-21 11:00:00')"
+            )
+        )
+
+    monkeypatch.setattr(persona_module, "engine", engine)
+    repository = RunPersonaRepository()
+
+    repository.mark_finished(1, 1, "max_steps", url_reached=False, backtracks=2)
+    # 취소 · 실패 정리처럼 되돌아가기 수를 넘기지 않는 호출은 칸을 비워 둔다.
+    repository.mark_finished(1, 2, "fail")
+    # 이미 종료된 Persona는 덮어쓰지 않는다.
+    repository.mark_finished(1, 3, "fail", backtracks=0)
+
+    with engine.begin() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT persona_id, status, url_reached, backtracks FROM run_personas "
+                "WHERE run_id = 1 ORDER BY persona_id"
+            )
+        ).all()
+
+    assert [tuple(row) for row in rows] == [
+        (1, "max_steps", 0, 2),
+        (2, "fail", None, None),
+        (3, "done", 1, 4),
+    ]

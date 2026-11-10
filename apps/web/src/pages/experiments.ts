@@ -53,10 +53,17 @@ export type ExperimentStats = {
 	thisWeekFrom: string;
 };
 
-const pageSize = 20;
+export const experimentPageSize = 20;
 
-async function fetchExperimentPage(page: number): Promise<{ content: Experiment[]; totalPages: number }> {
-	const response = await authenticatedFetch(`${API_BASE_URL}/api/runs?page=${page}&size=${pageSize}`);
+export type ExperimentPage = {
+	content: Experiment[];
+	totalPages: number;
+	totalElements: number;
+};
+
+/** 실험 목록 한 쪽. page 는 0 부터 센다. */
+export async function fetchExperimentPage(page: number): Promise<ExperimentPage> {
+	const response = await authenticatedFetch(`${API_BASE_URL}/api/runs?page=${page}&size=${experimentPageSize}`);
 	if (!response.ok) {
 		throw new Error(await apiErrorMessage(response, '실험 목록을 불러오지 못했습니다.'));
 	}
@@ -70,11 +77,24 @@ async function fetchExperimentPage(page: number): Promise<{ content: Experiment[
 		!('totalPages' in body) ||
 		typeof body.totalPages !== 'number' ||
 		!Number.isInteger(body.totalPages) ||
-		body.totalPages < 0
+		body.totalPages < 0 ||
+		!('totalElements' in body) ||
+		typeof body.totalElements !== 'number' ||
+		!Number.isInteger(body.totalElements) ||
+		body.totalElements < 0
 	) {
 		throw new Error('서버에서 올바르지 않은 실험 목록을 받지 못했습니다.');
 	}
-	return { content: body.content, totalPages: body.totalPages };
+	return { content: body.content, totalPages: body.totalPages, totalElements: body.totalElements };
+}
+
+export async function fetchExperiments(): Promise<Experiment[]> {
+	const firstPage = await fetchExperimentPage(0);
+	const experiments = [...firstPage.content];
+	for (let page = 1; page < firstPage.totalPages; page += 1) {
+		experiments.push(...(await fetchExperimentPage(page)).content);
+	}
+	return experiments;
 }
 
 function isExperiment(value: unknown): value is Experiment {
@@ -131,10 +151,6 @@ function isExperimentStats(value: unknown): value is ExperimentStats {
 		'awaitingApprovalCount' in value && typeof value.awaitingApprovalCount === 'number' &&
 		'totalTokens' in value && typeof value.totalTokens === 'number' &&
 		'thisWeekFrom' in value && typeof value.thisWeekFrom === 'string';
-}
-
-export async function fetchExperiments(): Promise<Experiment[]> {
-	return (await fetchExperimentPage(0)).content;
 }
 
 export async function fetchExperimentStats(): Promise<ExperimentStats> {
