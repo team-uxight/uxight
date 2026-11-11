@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   AlertTriangle,
   Bot,
@@ -12,6 +12,45 @@ import {
 } from "lucide-react";
 import AdminStopModal from "../components/AdminStopModal";
 import { API_BASE_URL, apiErrorMessage, authenticatedFetch } from "../auth";
+
+type ServerPolicy = {
+  maxSteps: number | null;
+  maxSeconds: number | null;
+  maxTokens: number | null;
+  runConcurrency: number | null;
+  personaConcurrency: number | null;
+  rateLimitPerDomain: number | null;
+  dailyTokenBudget: number | null;
+};
+
+type ServerPolicyUpdate = Partial<ServerPolicy>;
+
+function isServerPolicy(data: unknown): data is ServerPolicy {
+  if (typeof data !== "object" || data === null) {
+    return false;
+  }
+
+  const policy = data as Record<string, unknown>;
+
+  const fields = [
+    "maxSteps",
+    "maxSeconds",
+    "maxTokens",
+    "runConcurrency",
+    "personaConcurrency",
+    "rateLimitPerDomain",
+    "dailyTokenBudget",
+  ];
+
+  return fields.every((field) => {
+    const value = policy[field];
+
+    return (
+      value === null ||
+      (typeof value === "number" && Number.isSafeInteger(value) && value > 0)
+    );
+  });
+}
 
 type Role = "researcher" | "maintainer" | "admin";
 
@@ -31,7 +70,7 @@ type NumberField =
 type PolicyData = {
   roles: Record<Role, RolePolicy>;
   domains: string[];
-} & Record<NumberField, number>;
+} & Record<NumberField, number | null>;
 
 const INITIAL_POLICY: PolicyData = {
   roles: {
@@ -58,7 +97,7 @@ const MODEL_OPTIONS = ["GPT-4o mini", "GPT-4o"];
 
 const LIMIT_FIELDS: { key: NumberField; label: string }[] = [
   { key: "maxConcurrent", label: "최대 동시 실행 수 (건)" },
-  { key: "maxPersonas", label: "실험당 Persona 상한 (명)" },
+  { key: "maxPersonas", label: "회차당 동시 실행 Persona 수 (명)" },
   { key: "maxSteps", label: "Persona당 Step 상한 (steps)" },
   { key: "maxMinutes", label: "실행 시간 상한 (분)" },
 ];
@@ -87,6 +126,77 @@ export default function AdminPolicy() {
   const [isError, setIsError] = useState(false);
   const [showStopDialog, setShowStopDialog] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
+
+  const [serverPolicy, setServerPolicy] = useState<ServerPolicy | null>(null);
+  const [isLoadingPolicy, setIsLoadingPolicy] = useState(true);
+  const [isSavingPolicy, setIsSavingPolicy] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadPolicy() {
+      setIsLoadingPolicy(true);
+
+      try {
+        const response = await authenticatedFetch(
+          `${API_BASE_URL}/api/admin/policy`,
+        );
+
+        if (!response.ok) {
+          throw new Error(
+            await apiErrorMessage(response, "정책 정보를 불러오지 못했습니다."),
+          );
+        }
+
+        const data: unknown = await response.json();
+
+        if (!isServerPolicy(data)) {
+          throw new Error("서버 정책 응답 형식이 올바르지 않습니다.");
+        }
+
+        if (!active) return;
+
+        setServerPolicy(data);
+
+        const nextPolicy: PolicyData = {
+          ...clonePolicy(INITIAL_POLICY),
+          dailyTokens: data.dailyTokenBudget,
+          maxConcurrent: data.runConcurrency,
+          maxPersonas: data.personaConcurrency,
+          maxSteps: data.maxSteps,
+          maxMinutes:
+            data.maxSeconds === null
+              ? null
+              : data.maxSeconds % 60 === 0
+                ? data.maxSeconds / 60
+                : null,
+        };
+
+        setPolicy(clonePolicy(nextPolicy));
+        setSavedPolicy(clonePolicy(nextPolicy));
+        showNotice("");
+      } catch (error) {
+        if (!active) return;
+
+        showNotice(
+          error instanceof Error
+            ? error.message
+            : "정책 조회 중 오류가 발생했습니다.",
+          true,
+        );
+      } finally {
+        if (active) {
+          setIsLoadingPolicy(false);
+        }
+      }
+    }
+
+    void loadPolicy();
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   async function handleStopAll() {
     if (isStopping) return;
@@ -170,31 +280,121 @@ export default function AdminPolicy() {
     showNotice("저장 전 변경 내용을 취소했습니다.");
   }
 
-  function saveChanges() {
+  async function saveChanges() {
+    if (!serverPolicy || isLoadingPolicy || isSavingPolicy) return;
+
     const invalid =
-      Object.values(policy.roles).some(
-        (role) => !Number.isFinite(role.budget) || role.budget < 0,
+      (policy.dailyTokens !== null &&
+        (!Number.isSafeInteger(policy.dailyTokens) ||
+          policy.dailyTokens < 1)) ||
+      [policy.maxConcurrent, policy.maxSteps].some(
+        (value) =>
+          value !== null &&
+          (!Number.isInteger(value) || value < 1 || value > 2147483647),
       ) ||
-      !Number.isFinite(policy.monthlyBudget) ||
-      policy.monthlyBudget < 0 ||
-      !Number.isInteger(policy.dailyTokens) ||
-      policy.dailyTokens < 0 ||
-      [
-        policy.maxConcurrent,
-        policy.maxPersonas,
-        policy.maxSteps,
-        policy.maxMinutes,
-      ].some((value) => !Number.isInteger(value) || value < 1);
+      (policy.maxMinutes !== null &&
+        (!Number.isInteger(policy.maxMinutes) ||
+          policy.maxMinutes < 1 ||
+          policy.maxMinutes * 60 > 2147483647));
 
     if (invalid) {
-      showNotice("예산 및 실행 제한값을 확인해 주세요.", true);
+      showNotice("실행 제한값을 확인해 주세요.", true);
       return;
     }
 
-    setSavedPolicy(clonePolicy(policy));
-    showNotice(
-      "화면에만 변경 내용을 저장했습니다. 정책 API는 아직 연결되지 않아 서버에는 반영되지 않았습니다.",
-    );
+    // PATCH가 지원하는 필드만 전송
+
+    const changes: ServerPolicyUpdate = {};
+
+    if (
+      policy.dailyTokens !== null &&
+      policy.dailyTokens !== savedPolicy.dailyTokens
+    ) {
+      changes.dailyTokenBudget = policy.dailyTokens;
+    }
+
+    if (
+      policy.maxConcurrent !== null &&
+      policy.maxConcurrent !== savedPolicy.maxConcurrent
+    ) {
+      changes.runConcurrency = policy.maxConcurrent;
+    }
+
+    if (policy.maxSteps !== null && policy.maxSteps !== savedPolicy.maxSteps) {
+      changes.maxSteps = policy.maxSteps;
+    }
+
+    // Persona 항목은 현재 조회 전용이므로 PATCH에서 제외
+
+    if (
+      policy.maxMinutes !== null &&
+      policy.maxMinutes !== savedPolicy.maxMinutes
+    ) {
+      changes.maxSeconds = policy.maxMinutes * 60;
+    }
+
+    if (Object.keys(changes).length === 0) {
+      showNotice(
+        "변경한 항목 중 서버 정책 API에 저장할 수 있는 항목이 없습니다.",
+        true,
+      );
+      return;
+    }
+
+    setIsSavingPolicy(true);
+
+    try {
+      const response = await authenticatedFetch(
+        `${API_BASE_URL}/api/admin/policy`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(changes),
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          await apiErrorMessage(response, "정책 저장에 실패했습니다."),
+        );
+      }
+
+      const updated: unknown = await response.json();
+
+      if (!isServerPolicy(updated)) {
+        throw new Error(
+          "정책 저장 요청 후 서버 응답을 확인할 수 없습니다. 재조회가 필요합니다.",
+        );
+      }
+      setServerPolicy(updated);
+
+      const nextPolicy = clonePolicy(savedPolicy);
+
+      nextPolicy.dailyTokens = updated.dailyTokenBudget;
+      nextPolicy.maxConcurrent = updated.runConcurrency;
+      nextPolicy.maxPersonas = updated.personaConcurrency;
+      nextPolicy.maxSteps = updated.maxSteps;
+
+      nextPolicy.maxMinutes =
+        updated.maxSeconds === null
+          ? null
+          : updated.maxSeconds % 60 === 0
+            ? updated.maxSeconds / 60
+            : null;
+
+      setPolicy(nextPolicy);
+      setSavedPolicy(clonePolicy(nextPolicy));
+      showNotice("서버 정책이 저장되었습니다.");
+    } catch (error) {
+      showNotice(
+        error instanceof Error
+          ? error.message
+          : "정책 저장 중 오류가 발생했습니다.",
+        true,
+      );
+    } finally {
+      setIsSavingPolicy(false);
+    }
   }
 
   return (
@@ -213,13 +413,20 @@ export default function AdminPolicy() {
             <RefreshCw size={13} aria-hidden="true" />
             변경 취소
           </button>
+
           <button
             className="admin-button admin-button--primary"
             type="button"
-            onClick={saveChanges}
-            disabled={!hasChanges}
+            onClick={() => void saveChanges()}
+            disabled={
+              isLoadingPolicy || isSavingPolicy || !serverPolicy || !hasChanges
+            }
           >
-            변경 저장
+            {isLoadingPolicy
+              ? "정책 불러오는 중..."
+              : isSavingPolicy
+                ? "저장 중..."
+                : "변경 저장"}
           </button>
         </div>
       </header>
@@ -253,6 +460,7 @@ export default function AdminPolicy() {
                   <label>
                     AI 모델
                     <select
+                      disabled
                       value={policy.roles[key].model}
                       onChange={(event) =>
                         updateRole(key, "model", event.target.value)
@@ -268,6 +476,7 @@ export default function AdminPolicy() {
                   <label>
                     실행당 예산 (USD)
                     <input
+                      disabled
                       type="number"
                       min="0"
                       step="0.5"
@@ -284,9 +493,10 @@ export default function AdminPolicy() {
               <label>
                 월 예산 상한 (USD)
                 <input
+                  disabled
                   type="number"
                   min="0"
-                  value={policy.monthlyBudget}
+                  value={policy.monthlyBudget ?? ""}
                   onChange={(event) =>
                     updateNumber("monthlyBudget", event.target.valueAsNumber)
                   }
@@ -295,10 +505,11 @@ export default function AdminPolicy() {
               <label>
                 일일 토큰 예산 (tokens)
                 <input
+                  disabled={isLoadingPolicy || !serverPolicy || isSavingPolicy}
                   type="number"
-                  min="0"
+                  min="1"
                   step="1"
-                  value={policy.dailyTokens}
+                  value={policy.dailyTokens ?? ""}
                   onChange={(event) =>
                     updateNumber("dailyTokens", event.target.valueAsNumber)
                   }
@@ -328,6 +539,7 @@ export default function AdminPolicy() {
               <label className="admin-full-field admin-domain-field">
                 허용 도메인 입력
                 <input
+                  disabled
                   type="text"
                   placeholder="예: example.com"
                   value={domainInput}
@@ -343,6 +555,7 @@ export default function AdminPolicy() {
               <button
                 className="admin-button admin-button--primary"
                 type="button"
+                disabled
                 onClick={addDomain}
               >
                 <Plus size={13} aria-hidden="true" />
@@ -355,6 +568,7 @@ export default function AdminPolicy() {
                   {domain}
                   <button
                     type="button"
+                    disabled
                     aria-label={`${domain} 삭제`}
                     onClick={() => removeDomain(domain)}
                   >
@@ -389,10 +603,19 @@ export default function AdminPolicy() {
                 <label key={key}>
                   {label}
                   <input
+                    disabled={
+                      key === "maxPersonas" ||
+                      (key === "maxMinutes" &&
+                        serverPolicy?.maxSeconds != null &&
+                        serverPolicy.maxSeconds % 60 !== 0) ||
+                      isLoadingPolicy ||
+                      !serverPolicy ||
+                      isSavingPolicy
+                    }
                     type="number"
                     min="1"
                     step="1"
-                    value={policy[key]}
+                    value={policy[key] ?? ""}
                     onChange={(event) =>
                       updateNumber(key, event.target.valueAsNumber)
                     }
@@ -400,6 +623,13 @@ export default function AdminPolicy() {
                 </label>
               ))}
             </div>
+            {serverPolicy?.maxSeconds != null &&
+              serverPolicy.maxSeconds % 60 !== 0 && (
+                <p className="admin-inline-feedback" role="status">
+                  현재 서버 실행 시간은 {serverPolicy.maxSeconds}초입니다. 분
+                  단위로 정확히 표시할 수 없어 수정이 제한됩니다.
+                </p>
+              )}
             <div className="admin-policy-callout">
               <ShieldCheck size={15} aria-hidden="true" />
               <span>
