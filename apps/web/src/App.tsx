@@ -47,8 +47,10 @@ export default function App() {
             <Route path="/monitor" element={<RMonitor />} />
             <Route path="/monitor/:runId" element={<RMonitorLive />} />
             <Route path="/diagnosis" element={<RDiagnosis />} />
+            <Route path="/diagnosis/:runId" element={<RDiagnosis />} />
             <Route path="/fixes" element={<RFixes />} />
             <Route path="/reports" element={<RReports />} />
+            <Route path="/reports/:firstRunId" element={<RReports />} />
             <Route path="/compare" element={<RCompare />} />
             <Route path="/history" element={<Navigate to="/compare" replace />} />
           </Route>

@@ -88,6 +88,15 @@ export async function fetchExperimentPage(page: number): Promise<ExperimentPage>
 	return { content: body.content, totalPages: body.totalPages, totalElements: body.totalElements };
 }
 
+export async function fetchExperiments(): Promise<Experiment[]> {
+	const firstPage = await fetchExperimentPage(0);
+	const experiments = [...firstPage.content];
+	for (let page = 1; page < firstPage.totalPages; page += 1) {
+		experiments.push(...(await fetchExperimentPage(page)).content);
+	}
+	return experiments;
+}
+
 function isExperiment(value: unknown): value is Experiment {
 	return typeof value === 'object' &&
 		value !== null &&

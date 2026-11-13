@@ -1424,6 +1424,11 @@
 	color: #a87810;
 }
 
+.rd-severity-badge--low {
+	background: #e4f2e7;
+	color: #3b8a47;
+}
+
 .rd-friction-card-heading > strong {
 	overflow: hidden;
 	font-size: 14px;
@@ -1520,6 +1525,8 @@
 	display: grid;
 	gap: 14px;
 	width: min(760px, 100%);
+	max-height: 90vh;
+	overflow-y: auto;
 	padding: 18px 24px 26px;
 	border-radius: 20px;
 	background: #fff;
@@ -1551,12 +1558,50 @@
 	text-align: center;
 }
 
+.rd-evidence-url {
+	overflow-wrap: anywhere;
+}
+
+.rd-evidence-steps {
+	display: grid;
+	gap: 16px;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.rd-evidence-step {
+	display: grid;
+	gap: 10px;
+	padding-top: 12px;
+	border-top: 1px solid #eceaf1;
+}
+
+.rd-evidence-step h3 {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 10px;
+	margin: 0;
+	font-size: 14px;
+}
+
+.rd-evidence-step h3 time {
+	color: #777486;
+	font-size: 11px;
+	font-weight: 400;
+}
+
 .rd-evidence-meta {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
 	gap: 12px;
 	font-size: 14px;
+}
+
+.rd-evidence-meta .rd-evidence-url {
+	font-size: 11px;
 }
 
 .rd-evidence-score {
@@ -1582,6 +1627,14 @@
 	background: #ececf0;
 	color: #8b88a0;
 	font-size: 12px;
+}
+
+.rd-evidence-shot img {
+	display: block;
+	width: 100%;
+	height: auto;
+	max-height: 480px;
+	object-fit: contain;
 }
 
 .rd-evidence-notes {
@@ -1614,9 +1667,45 @@
 	line-height: 1.5;
 }
 
+.rd-finding-summary {
+	margin: 0 0 4px;
+	padding: 10px 14px;
+	border-radius: 12px;
+	background: rgb(255 255 255 / 83%);
+	color: #4f4c60;
+	font-size: 12px;
+	line-height: 1.6;
+}
+
+.rd-diagnosis-feedback {
+	margin: 12px 0;
+	color: #625f72;
+	font-size: 12px;
+}
+
+.rd-diagnosis-feedback.is-error {
+	color: #a13f3f;
+}
+
+.rd-diagnosis-actions {
+	display: flex;
+	justify-content: flex-end;
+	margin-top: 12px;
+}
+
 @media (max-width: 640px) {
 	.rd-evidence-body {
 		grid-template-columns: 1fr;
+	}
+
+	.rd-evidence-step h3 {
+		align-items: flex-start;
+		flex-direction: column;
+	}
+
+	.rd-evidence-meta {
+		align-items: flex-start;
+		flex-direction: column;
 	}
 }
 
@@ -2422,23 +2511,24 @@
 
 .rd-friction-point-grid {
 	display: grid;
-	grid-template-columns: repeat(3, minmax(0, 1fr));
+	grid-template-columns: minmax(0, 1fr);
 	gap: 12px 16px;
 }
 
 .rd-friction-point-grid > div {
 	display: grid;
-	grid-template-columns: 21px minmax(0, 1fr);
+	grid-template-columns: auto minmax(0, 1fr);
 	align-items: center;
 	gap: 5px 8px;
 }
 
 .rd-point-severity {
 	display: grid;
-	width: 19px;
+	min-width: 19px;
 	height: 19px;
+	padding: 0 6px;
 	place-items: center;
-	border-radius: 50%;
+	border-radius: 10px;
 	font-size: 9px;
 	font-weight: 750;
 }
@@ -2459,10 +2549,8 @@
 }
 
 .rd-friction-point-grid strong {
-	overflow: hidden;
+	overflow-wrap: anywhere;
 	font-size: 10px;
-	text-overflow: ellipsis;
-	white-space: nowrap;
 }
 
 .rd-friction-point-grid small {
@@ -2515,6 +2603,47 @@
 	grid-row: 1;
 	color: #625f72;
 	font-size: 9px;
+}
+
+.rd-action-plan li > span b {
+	color: #2b2749;
+	font-weight: 750;
+}
+
+.rd-round-box {
+	margin-top: 9px;
+	padding: 9px 12px;
+	border: 1px solid #efedf3;
+	border-radius: 14px;
+	background: rgb(255 255 255 / 79%);
+	box-shadow: 0 3px 8px rgb(43 39 73 / 7%);
+}
+
+.rd-round-table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 10px;
+}
+
+.rd-round-table caption {
+	margin-bottom: 6px;
+	color: #4a4760;
+	font-size: 10px;
+	font-weight: 700;
+	text-align: left;
+}
+
+.rd-round-table th,
+.rd-round-table td {
+	padding: 6px 8px;
+	border-top: 1px solid rgb(120 110 150 / 14%);
+	text-align: left;
+}
+
+.rd-round-table thead th {
+	border-top: 0;
+	color: #8a8795;
+	font-weight: 650;
 }
 
 .rd-report-disclaimer {
@@ -2921,10 +3050,6 @@
 
 	.rd-report-overview {
 		grid-template-columns: 1fr;
-	}
-
-	.rd-friction-point-grid {
-		grid-template-columns: repeat(2, minmax(0, 1fr));
 	}
 
 	.rd-action-plan li {

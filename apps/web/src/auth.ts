@@ -227,7 +227,8 @@ export async function getAdminUsers(page = 0, size = 20): Promise<PageResponse<A
 		}
 		// 11/07(PR #118) 전 서버는 두 칸을 주지 않는다. 없거나 모양이 다르면 null 로 두고 화면은 '—' 를 쓴다.
 		const lastLoginAt = 'lastLoginAt' in item && typeof item.lastLoginAt === 'string' ? item.lastLoginAt : null;
-		const totalCostUsd = 'totalCostUsd' in item && typeof item.totalCostUsd === 'number' && Number.isFinite(item.totalCostUsd)
+		const totalCostUsd = 'totalCostUsd' in item && typeof item.totalCostUsd === 'number' &&
+			Number.isFinite(item.totalCostUsd) && item.totalCostUsd >= 0
 			? item.totalCostUsd
 			: null;
 
@@ -245,6 +246,33 @@ export async function getAdminUsers(page = 0, size = 20): Promise<PageResponse<A
 	});
 
 	return { content, page: body.page, size: body.size, totalElements: body.totalElements, totalPages: body.totalPages };
+}
+
+export async function createAdminUser(email: string, name: string): Promise<{ userId: number; initialPassword: string }> {
+	const response = await authenticatedFetch(`${API_BASE_URL}/api/admin/users`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ email, name }),
+	});
+	if (!response.ok) {
+		throw new Error(await apiErrorMessage(response, '계정을 생성하지 못했습니다.'));
+	}
+
+	const body: unknown = await response.json();
+	if (
+		typeof body !== 'object' ||
+		body === null ||
+		!('userId' in body) ||
+		typeof body.userId !== 'number' ||
+		!Number.isSafeInteger(body.userId) ||
+		body.userId <= 0 ||
+		!('initialPassword' in body) ||
+		typeof body.initialPassword !== 'string' ||
+		body.initialPassword.length === 0
+	) {
+		throw new Error('계정 생성 응답이 올바르지 않습니다. 계정 목록을 확인해 주세요.');
+	}
+	return { userId: body.userId, initialPassword: body.initialPassword };
 }
 
 export async function changeUserRole(userId: number, role: UserRole): Promise<UserRole> {
@@ -326,8 +354,73 @@ export type AdminExperiment = {
 	finishedAt: string | null;
 };
 
+export type ImprovementDecision = 'approve' | 'reject';
+export type ImprovementPatchKind = 'relabel' | 'move' | 'highlight' | 'help_text';
+
+export const patchKindLabels: Record<ImprovementPatchKind, string> = {
+	relabel: '레이블 변경',
+	move: '요소 이동',
+	highlight: '요소 강조',
+	help_text: '도움말 추가',
+};
+
+export const decisionLabels: Record<ImprovementDecision, string> = {
+	approve: '승인됨',
+	reject: '반려됨',
+};
+
+export type ImprovementSummary = {
+	improvementId: number;
+	optionNo: number;
+	patchKind: ImprovementPatchKind;
+	fixCost: string | null;
+	decision: ImprovementDecision | null;
+};
+
+export type ImprovementRun = {
+	firstRunId: number;
+	round: number;
+	projectTitle: string;
+	taskGoal: string;
+	awaitingApproval: boolean;
+};
+
+export type ImprovementList = {
+	run: ImprovementRun;
+	improvements: ImprovementSummary[];
+};
+
+export type ImprovementDetail = {
+	improvementId: number;
+	runId: number;
+	optionNo: number;
+	patchKind: ImprovementPatchKind;
+	patch: Record<string, unknown>;
+	rationale: string;
+	expectedEffect: string;
+	fixCost: string | null;
+	findings: { findingId: number; taxonomy: string; severity: string; summary: string | null }[];
+	approval: { decision: ImprovementDecision; note: string | null; decidedAt: string } | null;
+	awaitingApproval: boolean;
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null;
+}
+
+function isImprovementDecision(value: unknown): value is ImprovementDecision {
+	return value === 'approve' || value === 'reject';
+}
+
+function isImprovementPatchKind(value: unknown): value is ImprovementPatchKind {
+	return value === 'relabel' || value === 'move' || value === 'highlight' || value === 'help_text';
+}
+
+function isImprovementApproval(value: unknown): value is NonNullable<ImprovementDetail['approval']> {
+	return isRecord(value) &&
+		isImprovementDecision(value.decision) &&
+		(value.note === null || typeof value.note === 'string') &&
+		typeof value.decidedAt === 'string';
 }
 
 function parseUsageDay(item: unknown): UsageDay {
@@ -452,6 +545,130 @@ export async function getAdminExperiments(page = 0, size = 20): Promise<PageResp
 	});
 
 	return { content, page: body.page, size: body.size, totalElements: body.totalElements, totalPages: body.totalPages };
+}
+
+export async function getRunImprovements(runId: number): Promise<ImprovementList> {
+	const response = await authenticatedFetch(`${API_BASE_URL}/api/runs/${runId}/improvements`);
+	if (!response.ok) {
+		throw new Error(await apiErrorMessage(response, '개선안 목록을 불러오지 못했습니다.'));
+	}
+
+	const body: unknown = await response.json();
+	if (
+		!isRecord(body) ||
+		!isRecord(body.run) ||
+		typeof body.run.firstRunId !== 'number' ||
+		typeof body.run.round !== 'number' ||
+		typeof body.run.projectTitle !== 'string' ||
+		typeof body.run.taskGoal !== 'string' ||
+		typeof body.run.awaitingApproval !== 'boolean' ||
+		!Array.isArray(body.improvements)
+	) {
+		throw new Error('서버에서 올바르지 않은 개선안 목록을 받았습니다.');
+	}
+
+	const improvements = body.improvements.map((item): ImprovementSummary => {
+		if (
+			!isRecord(item) ||
+			typeof item.improvementId !== 'number' ||
+			typeof item.optionNo !== 'number' ||
+			!isImprovementPatchKind(item.patchKind) ||
+			(item.fixCost !== null && typeof item.fixCost !== 'string') ||
+			(item.decision !== null && !isImprovementDecision(item.decision))
+		) {
+			throw new Error('서버에서 올바르지 않은 개선안 정보를 받았습니다.');
+		}
+		return {
+			improvementId: item.improvementId,
+			optionNo: item.optionNo,
+			patchKind: item.patchKind,
+			fixCost: item.fixCost,
+			decision: item.decision,
+		};
+	});
+
+	return {
+		run: {
+			firstRunId: body.run.firstRunId,
+			round: body.run.round,
+			projectTitle: body.run.projectTitle,
+			taskGoal: body.run.taskGoal,
+			awaitingApproval: body.run.awaitingApproval,
+		},
+		improvements,
+	};
+}
+
+export async function getImprovementDetail(improvementId: number): Promise<ImprovementDetail> {
+	const response = await authenticatedFetch(`${API_BASE_URL}/api/improvements/${improvementId}`);
+	if (!response.ok) {
+		throw new Error(await apiErrorMessage(response, '개선안 상세를 불러오지 못했습니다.'));
+	}
+
+	const body: unknown = await response.json();
+	if (
+		!isRecord(body) ||
+		typeof body.improvementId !== 'number' ||
+		typeof body.runId !== 'number' ||
+		typeof body.optionNo !== 'number' ||
+		!isImprovementPatchKind(body.patchKind) ||
+		!isRecord(body.patch) ||
+		typeof body.rationale !== 'string' ||
+		typeof body.expectedEffect !== 'string' ||
+		(body.fixCost !== null && typeof body.fixCost !== 'string') ||
+		!Array.isArray(body.findings) ||
+		!body.findings.every((finding) =>
+			isRecord(finding) &&
+			typeof finding.findingId === 'number' &&
+			typeof finding.taxonomy === 'string' &&
+			typeof finding.severity === 'string' &&
+			(finding.summary === null || typeof finding.summary === 'string'),
+		) ||
+		(body.approval !== null && !isImprovementApproval(body.approval)) ||
+		typeof body.awaitingApproval !== 'boolean'
+	) {
+		throw new Error('서버에서 올바르지 않은 개선안 상세를 받았습니다.');
+	}
+
+	return {
+		improvementId: body.improvementId,
+		runId: body.runId,
+		optionNo: body.optionNo,
+		patchKind: body.patchKind,
+		patch: body.patch,
+		rationale: body.rationale,
+		expectedEffect: body.expectedEffect,
+		fixCost: body.fixCost,
+		findings: body.findings,
+		approval: body.approval,
+		awaitingApproval: body.awaitingApproval,
+	};
+}
+
+export async function decideImprovement(
+	runId: number,
+	improvementId: number,
+	decision: ImprovementDecision,
+	note: string,
+): Promise<{ approvalId: number; runId: number | null }> {
+	const response = await authenticatedFetch(`${API_BASE_URL}/api/runs/${runId}/approvals`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ improvementId, decision, note: note.trim() || undefined }),
+	});
+	if (!response.ok) {
+		throw new Error(await apiErrorMessage(response, '개선안 결정을 저장하지 못했습니다.'));
+	}
+
+	const body: unknown = await response.json();
+	if (
+		!isRecord(body) ||
+		typeof body.approvalId !== 'number' ||
+		(body.runId !== null && typeof body.runId !== 'number')
+	) {
+		throw new Error('서버에서 올바르지 않은 개선안 결정 응답을 받았습니다.');
+	}
+	return { approvalId: body.approvalId, runId: body.runId };
 }
 
 export { API_BASE_URL };

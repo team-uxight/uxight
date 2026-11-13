@@ -186,6 +186,29 @@
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
+	gap: 12px;
+}
+
+.rml-round-actions {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.rml-diagnosis-link {
+	padding: 7px 12px;
+	border: 0;
+	border-radius: 999px;
+	background: #292744;
+	color: #fff;
+	font: inherit;
+	font-size: 11px;
+	font-weight: 700;
+	cursor: pointer;
+}
+
+.rml-diagnosis-link:hover {
+	background: #454166;
 }
 
 .rml-detail-heading small,

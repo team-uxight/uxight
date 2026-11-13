@@ -45,6 +45,25 @@ export type StepLog = {
 	hasScreenshot: boolean;
 };
 
+export function describeAction(step: StepLog): string {
+	const action = step.action;
+	if (!action?.kind) return '행동 없음';
+	switch (action.kind) {
+		case 'click':
+			return `클릭 [${action.target ?? '?'}]`;
+		case 'type':
+			return `입력 [${action.target ?? '?'}] "${action.text ?? ''}"`;
+		case 'scroll':
+			return action.direction === 'up' ? '위로 스크롤' : '아래로 스크롤';
+		case 'back':
+			return '뒤로 가기';
+		case 'done':
+			return '완료 선언';
+		default:
+			return action.kind;
+	}
+}
+
 /** 응답 상태 코드를 함께 담은 오류. */
 export class ApiError extends Error {
 	readonly status: number;

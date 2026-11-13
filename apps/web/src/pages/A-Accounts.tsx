@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
-import { RefreshCw, Search, UserRoundCog, X } from 'lucide-react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { Plus, RefreshCw, Search, UserRoundCog, X } from 'lucide-react';
 import { useOutletContext } from 'react-router-dom';
-import { changeUserActive, changeUserRole, getAdminUsers, getCurrentUserRole, type AdminUser, type UserRole } from '../auth';
+import { changeUserActive, changeUserRole, createAdminUser, getAdminUsers, getCurrentUserRole, type AdminUser, type UserRole } from '../auth';
 import { formatKrw, formatTime } from './adminFormat';
 
 const pageSize = 20;
@@ -35,6 +35,13 @@ export default function AdminAccounts() {
 	const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
 	const [error, setError] = useState('');
 	const [notice, setNotice] = useState('');
+	const [showCreate, setShowCreate] = useState(false);
+	const [createName, setCreateName] = useState('');
+	const [createEmail, setCreateEmail] = useState('');
+	const [createBusy, setCreateBusy] = useState(false);
+	const [createError, setCreateError] = useState('');
+	const [initialPassword, setInitialPassword] = useState<string | null>(null);
+	const [passwordConfirmed, setPasswordConfirmed] = useState(false);
 	const loading = loadedPage !== page;
 
 	useEffect(() => {
@@ -79,6 +86,41 @@ export default function AdminAccounts() {
 		setNotice('');
 		setLoadedPage(null);
 		setReloadKey((current) => current + 1);
+	};
+
+	const closeCreate = () => {
+		if (createBusy || (initialPassword !== null && !passwordConfirmed)) return;
+		setShowCreate(false);
+		setCreateName('');
+		setCreateEmail('');
+		setCreateError('');
+		setInitialPassword(null);
+		setPasswordConfirmed(false);
+	};
+
+	const createAccount = async (event: FormEvent<HTMLFormElement>) => {
+		event.preventDefault();
+		if (createBusy) return;
+		const name = createName.trim();
+		const email = createEmail.trim();
+		if (!name || !email) {
+			setCreateError('이름과 이메일을 입력해 주세요.');
+			return;
+		}
+		setCreateBusy(true);
+		setCreateError('');
+		try {
+			const created = await createAdminUser(email, name);
+			setInitialPassword(created.initialPassword);
+			setPage(0);
+			setLoadedPage(null);
+			setReloadKey((current) => current + 1);
+			setNotice(`${name} 리서처 계정을 생성했습니다.`);
+		} catch (cause: unknown) {
+			setCreateError(cause instanceof Error ? cause.message : '계정을 생성하지 못했습니다.');
+		} finally {
+			setCreateBusy(false);
+		}
 	};
 
 	const openAccount = (account: AdminUser) => {
@@ -140,13 +182,15 @@ export default function AdminAccounts() {
 		<section className="admin-page" aria-labelledby="admin-accounts-title">
 			<header className="admin-page-header">
 				<div>
-					<p className="admin-eyebrow">A1 · 계정·권한</p>
 					<h1 id="admin-accounts-title">계정·권한</h1>
 					<p>리서처 계정 관리 / 가입 계정</p>
 				</div>
 				<div className="admin-page-actions">
 					<button className="admin-button admin-button--secondary admin-button--accounts-refresh" type="button" onClick={refresh} disabled={loading}>
 						<RefreshCw size={14} aria-hidden="true" /> 새로고침
+					</button>
+					<button className="admin-button admin-button--primary admin-button--accounts-refresh" type="button" onClick={() => { setError(''); setNotice(''); setShowCreate(true); }}>
+						<Plus size={14} aria-hidden="true" /> 계정 생성
 					</button>
 				</div>
 			</header>
@@ -251,6 +295,53 @@ export default function AdminAccounts() {
 					</div>
 				</div>
 			</section>
+
+			{showCreate && (
+				<div className="admin-modal-backdrop">
+					<section className="admin-account-modal" role="dialog" aria-modal="true" aria-labelledby="create-account-title">
+						<header>
+							<span className="admin-modal-icon"><Plus size={18} aria-hidden="true" /></span>
+							{initialPassword === null && (
+								<button className="admin-icon-button" type="button" aria-label="계정 생성 닫기" disabled={createBusy} onClick={closeCreate}><X size={17} aria-hidden="true" /></button>
+							)}
+						</header>
+						<h2 id="create-account-title">{initialPassword === null ? '리서처 계정 생성' : '계정 생성 완료'}</h2>
+						{initialPassword === null ? (
+							<form className="admin-create-form" onSubmit={(event) => void createAccount(event)}>
+								<p>생성되는 계정의 역할은 Researcher입니다.</p>
+								<label className="admin-modal-role">
+									이름
+									<input type="text" value={createName} onChange={(event) => setCreateName(event.target.value)} maxLength={100} required disabled={createBusy} autoComplete="off" />
+								</label>
+								<label className="admin-modal-role">
+									이메일
+									<input type="email" value={createEmail} onChange={(event) => setCreateEmail(event.target.value)} maxLength={255} required disabled={createBusy} autoComplete="off" />
+								</label>
+								{createError && <p className="admin-inline-feedback is-error" role="alert">{createError}</p>}
+								<footer>
+									<button className="admin-button admin-button--secondary" type="button" disabled={createBusy} onClick={closeCreate}>취소</button>
+									<button className="admin-button admin-button--primary" type="submit" disabled={createBusy}>{createBusy ? '생성 중…' : '계정 생성'}</button>
+								</footer>
+							</form>
+						) : (
+							<div className="admin-create-form">
+								<p>초기 비밀번호는 지금 한 번만 확인할 수 있습니다. 안전한 방법으로 계정 사용자에게 전달해 주세요.</p>
+								<label className="admin-modal-role">
+									초기 비밀번호
+									<input type="text" value={initialPassword} readOnly autoComplete="off" onFocus={(event) => event.currentTarget.select()} />
+								</label>
+								<label className="admin-password-confirm">
+									<input type="checkbox" checked={passwordConfirmed} onChange={(event) => setPasswordConfirmed(event.target.checked)} />
+									초기 비밀번호를 확인했습니다.
+								</label>
+								<footer>
+									<button className="admin-button admin-button--primary" type="button" disabled={!passwordConfirmed} onClick={closeCreate}>확인</button>
+								</footer>
+							</div>
+						)}
+					</section>
+				</div>
+			)}
 
 			{selectedAccount && (
 				<div className="admin-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setSelectedAccount(null); }}>

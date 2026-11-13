@@ -213,9 +213,21 @@ export default function RMonitorLive() {
 										<small>선택한 회차</small>
 										<h2>{selectedRound.round}회차 상세</h2>
 									</div>
-									<span className={`rml-round-status rml-round-status--${selectedRound.status}`}>
-										{roundStatusLabels[selectedRound.status] ?? selectedRound.status}
-									</span>
+									<div className="rml-round-actions">
+										<span className={`rml-round-status rml-round-status--${selectedRound.status}`}>
+											{roundStatusLabels[selectedRound.status] ?? selectedRound.status}
+										</span>
+										{selectedRound.status === 'done' && (
+											<button type="button" className="rml-diagnosis-link" onClick={() => navigate(`/diagnosis/${selectedRound.runId}`)}>
+												진단 보기
+											</button>
+										)}
+										{selectedRound.status === 'done' && (
+											<button type="button" className="rml-diagnosis-link" onClick={() => navigate(`/reports/${runId}`)}>
+												리포트 보기
+											</button>
+										)}
+									</div>
 								</div>
 								<dl className="rml-round-times">
 									<div><dt>시작</dt><dd>{formatDateTime(selectedRound.createdAt)}</dd></div>

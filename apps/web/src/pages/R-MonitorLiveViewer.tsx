@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
 	chooseWatchedPersona,
+	describeAction,
 	fetchPersonaSteps,
 	fetchRunPersonas,
 	fetchStepScreenshot,
@@ -25,30 +26,14 @@ const personaStatusLabels: Record<string, string> = {
 	cancelled: '취소',
 };
 
+// 한도로 끝난 Persona 는 마지막 step + 1 번호로 마지막 화면을 받을 수 있다(없으면 404).
+const finalFrameStatuses = new Set(['max_steps', 'token_limit', 'stuck', 'timeout']);
+
 function personaStatusLabel(persona: RunPersona): string {
 	if (persona.status === null) return '대기';
 	// agent 는 회차를 접수할 때 모든 Persona 를 running · 0 step 으로 만든다 — 브라우저 자리를 기다리는 중일 수 있다.
 	if (persona.status === 'running' && !persona.steps) return '준비 중';
 	return personaStatusLabels[persona.status] ?? persona.status;
-}
-
-function describeAction(step: StepLog): string {
-	const action = step.action;
-	if (!action?.kind) return '행동 없음';
-	switch (action.kind) {
-		case 'click':
-			return `클릭 [${action.target ?? '?'}]`;
-		case 'type':
-			return `입력 [${action.target ?? '?'}] "${action.text ?? ''}"`;
-		case 'scroll':
-			return action.direction === 'up' ? '위로 스크롤' : '아래로 스크롤';
-		case 'back':
-			return '뒤로 가기';
-		case 'done':
-			return '완료 선언';
-		default:
-			return action.kind;
-	}
 }
 
 function errorMessage(error: unknown, fallback: string): string {
@@ -68,6 +53,7 @@ export default function MonitorLiveViewer({ runId, agentUnreachable }: Props) {
 	const [stepState, setStepState] = useState<{ personaId: number; steps: StepLog[] } | null>(null);
 	const [stepError, setStepError] = useState<string | null>(null);
 	const [pinned, setPinned] = useState<{ personaId: number; step: number } | null>(null);
+	const [finalFor, setFinalFor] = useState<number | null>(null);
 	const [image, setImage] = useState<{ personaId: number; step: number; url: string } | null>(null);
 	const [imageError, setImageError] = useState<{ personaId: number; step: number; message: string } | null>(null);
 	const watchedRef = useRef<number | null>(null);
@@ -147,7 +133,9 @@ export default function MonitorLiveViewer({ runId, agentUnreachable }: Props) {
 		? steps.find((step) => step.step === pinned.step) ?? null
 		: null;
 	const shown = pinnedStep ?? latest;
-	const imageStep = shown?.hasScreenshot ? shown.step : null;
+	const canShowFinal = latest !== null && watched?.status != null && finalFrameStatuses.has(watched.status);
+	const finalActive = canShowFinal && finalFor === watchedId && pinnedStep === null;
+	const imageStep = finalActive && latest ? latest.step + 1 : shown?.hasScreenshot ? shown.step : null;
 
 	// 보여 줄 step 의 스크린샷. 새 그림을 받은 뒤에 앞 그림 주소를 해제한다(바꿔 끼울 때 깜빡이지 않게).
 	useEffect(() => {
@@ -214,6 +202,8 @@ export default function MonitorLiveViewer({ runId, agentUnreachable }: Props) {
 			title: watched ? `${watched.name} 님이 아직 시작하지 않았습니다` : '표시할 Persona 가 없습니다',
 			detail: 'AI 모듈이 Persona 를 시작하면 step 마다 화면이 바뀝니다.',
 		};
+	} else if (finalActive) {
+		screenMessage = { title: currentImageError ? '마지막 화면이 남아 있지 않습니다' : '마지막 화면을 불러오는 중입니다', detail: '' };
 	} else if (shown !== null && !shown.hasScreenshot) {
 		screenMessage = { title: `step ${shown.step} 은 화면을 남기지 않았습니다`, detail: '이 step 을 기록할 때 화면을 찍지 못했습니다.' };
 	} else if (shown !== null) {
@@ -256,7 +246,7 @@ export default function MonitorLiveViewer({ runId, agentUnreachable }: Props) {
 				<div className="rml-viewer-toolbar">
 					<div className="rml-browser-dots" aria-hidden="true"><i /><i /><i /></div>
 					<span>
-						{watched ? `${watched.name}${shown ? ` · step ${shown.step}` : ''}` : 'AI 브라우저 화면'}
+						{watched ? `${watched.name}${finalActive ? ' · 마지막 화면' : shown ? ` · step ${shown.step}` : ''}` : 'AI 브라우저 화면'}
 					</span>
 					<span className={`rml-viewer-state${viewerState.className}`}>{viewerState.label}</span>
 				</div>
@@ -280,9 +270,13 @@ export default function MonitorLiveViewer({ runId, agentUnreachable }: Props) {
 				</div>
 				<div className="rml-viewer-caption">
 					<span className="rml-viewer-url">{shown?.url ?? '—'}</span>
-					{pinnedStep ? (
-						<button type="button" className="rml-follow" onClick={() => setPinned(null)}>
+					{pinnedStep || finalActive ? (
+						<button type="button" className="rml-follow" onClick={() => { setPinned(null); setFinalFor(null); }}>
 							최신 step 보기
+						</button>
+					) : canShowFinal ? (
+						<button type="button" className="rml-follow" onClick={() => { setPinned(null); setFinalFor(watchedId); }}>
+							마지막 화면 보기
 						</button>
 					) : (
 						<span>{live ? '1.5초마다 갱신합니다.' : '회차가 끝나 갱신을 멈췄습니다.'}</span>
@@ -314,9 +308,10 @@ export default function MonitorLiveViewer({ runId, agentUnreachable }: Props) {
 								type="button"
 								aria-current={shown?.step === step.step ? 'step' : undefined}
 								className={`rml-step${shown?.step === step.step ? ' is-selected' : ''}${step.blocked ? ' is-blocked' : ''}`}
-								onClick={() => setPinned(
-									step.step === latest?.step || watchedId === null ? null : { personaId: watchedId, step: step.step },
-								)}
+								onClick={() => {
+									setFinalFor(null);
+									setPinned(step.step === latest?.step || watchedId === null ? null : { personaId: watchedId, step: step.step });
+								}}
 							>
 								<strong>step {step.step}</strong>
 								<span>{describeAction(step)}</span>

@@ -322,9 +322,15 @@ export default function RRunSetting() {
             className="rd-save-button"
             disabled={isSubmitting || isLoadingPersonas}
           >
-            {isSubmitting ? "실험 생성 중…" : "실험 시작"}
+            {isSubmitting ? "성공 기준 생성 · 실험 생성 중…" : "실험 시작"}
           </button>
         </div>
+        {isSubmitting && (
+          <p role="status">
+            AI 가 성공 기준을 만들고 있어 몇 초 걸릴 수 있습니다. 완료되면
+            모니터로 이동합니다.
+          </p>
+        )}
       </form>
     </section>
   );
