@@ -15,6 +15,7 @@ class RunSnapshot:
     task: dict  # task_id, goal, success_rule, success_url, is_one_shot
     personas: list[dict]  # [{persona_id, name, profile}]
     policy: dict  # max_steps, ...
+    mode: str = "diagnose"  # diagnose / improve / loop
 
 
 class RunRepository:
@@ -144,7 +145,7 @@ class RunRepository:
             row = conn.execute(
                 text(
                     "SELECT target_url_snapshot, allowed_domains_snapshot, task_snapshot, "
-                    "persona_snapshot, policy_snapshot "
+                    "persona_snapshot, policy_snapshot, mode "
                     "FROM runs WHERE run_id = :run_id"
                 ),
                 {"run_id": run_id},
@@ -155,6 +156,7 @@ class RunRepository:
             task=json.loads(row.task_snapshot),
             personas=json.loads(row.persona_snapshot),
             policy=json.loads(row.policy_snapshot),
+            mode=row.mode,
         )
 
     def refresh_progress(self, run_id: int) -> None:
