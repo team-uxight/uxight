@@ -533,6 +533,16 @@ export default function AdminPolicy() {
               <div>
                 <h2>허용 사이트 목록</h2>
                 <p>실험 에이전트가 접근할 수 있는 도메인만 등록하세요.</p>
+                <p
+                  style={{
+                    color: "#DC2626",
+                    fontSize: "12px",
+                    marginTop: "6px",
+                  }}
+                >
+                  ※ 예시 · 연결 전 — 현재 표시된 도메인은 실제 서버 정책이
+                  아닙니다.
+                </p>
               </div>
             </div>
             <div className="admin-domain-row">
@@ -580,8 +590,8 @@ export default function AdminPolicy() {
             <div className="admin-policy-callout">
               <ShieldCheck size={15} aria-hidden="true" />
               <span>
-                서브도메인·와일드카드 허용 범위는 백엔드 정책에 맞춰 확인해야
-                합니다.
+                현재 표시된 허용 도메인은 예시 데이터이며, 실제 서버 정책과
+                연결되어 있지 않습니다.
               </span>
             </div>
           </section>
