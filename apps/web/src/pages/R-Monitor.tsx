@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate, useOutletContext } from 'react-router-dom';
 import { apiErrorMessage, authenticatedFetch, API_BASE_URL } from '../auth';
-import { fetchExperimentStats, fetchExperiments, type Experiment, type ExperimentStats } from './experiments';
+import { experimentPageSize, fetchExperimentPage, fetchExperimentStats, type Experiment, type ExperimentPage, type ExperimentStats } from './experiments';
 
 type MonitorFilter = '전체' | '진행 중' | '완료' | '중단' | '실패';
 type LocationState = {
@@ -40,6 +40,10 @@ export default function RMonitor() {
 	const { query } = useOutletContext<LayoutContext>();
 	const [filter, setFilter] = useState<MonitorFilter>('전체');
 	const [experiments, setExperiments] = useState<Experiment[]>([]);
+	// 실험 목록은 계정 목록처럼 20개씩 쪽으로 나눠 부른다. 상태 탭과 검색은 지금 쪽 안에서 거른다.
+	const [page, setPage] = useState(0);
+	const [totalPages, setTotalPages] = useState(0);
+	const [totalElements, setTotalElements] = useState(0);
 	const [isLoading, setIsLoading] = useState(true);
 	const [error, setError] = useState('');
 	const [stats, setStats] = useState<ExperimentStats | null>(null);
@@ -49,16 +53,22 @@ export default function RMonitor() {
 	const [notice, setNotice] = useState('');
 	const locationState = location.state as LocationState | null;
 
+	const showPage = useCallback((result: ExperimentPage) => {
+		setExperiments(result.content);
+		setTotalPages(result.totalPages);
+		setTotalElements(result.totalElements);
+	}, []);
+
 	const refreshExperiments = useCallback(async () => {
 		try {
-			setExperiments(await fetchExperiments());
+			showPage(await fetchExperimentPage(page));
 			setError('');
 		} catch (loadError: unknown) {
 			setError(loadError instanceof Error ? loadError.message : '실험 목록을 불러오지 못했습니다.');
 		} finally {
 			setIsLoading(false);
 		}
-	}, []);
+	}, [page, showPage]);
 
 	const refreshStats = useCallback(async () => {
 		try {
@@ -71,10 +81,10 @@ export default function RMonitor() {
 
 	useEffect(() => {
 		let active = true;
-		fetchExperiments()
-			.then((data) => {
+		fetchExperimentPage(page)
+			.then((result) => {
 				if (active) {
-					setExperiments(data);
+					showPage(result);
 					setError('');
 				}
 			})
@@ -89,7 +99,12 @@ export default function RMonitor() {
 		return () => {
 			active = false;
 		};
-	}, []);
+	}, [page, showPage]);
+
+	const movePage = (next: number) => {
+		setIsLoading(true);
+		setPage(next);
+	};
 
 	useEffect(() => {
 		let active = true;
@@ -342,6 +357,16 @@ export default function RMonitor() {
 			) : (
 				<div className="rd-empty-state">
 					<p>{experiments.length === 0 ? '아직 등록된 실험이 없습니다.' : '조건에 맞는 실험이 없습니다.'}</p>
+				</div>
+			)}
+			{totalElements > 0 && (
+				<div className="rd-monitor-pagination">
+					<span>{`${page * experimentPageSize + 1}–${Math.min((page + 1) * experimentPageSize, totalElements)} / ${totalElements}`}</span>
+					<div>
+						<button className="rd-pill-button" type="button" disabled={page === 0 || isLoading} onClick={() => movePage(page - 1)}>이전</button>
+						<span>{`${page + 1} / ${totalPages}`}</span>
+						<button className="rd-pill-button" type="button" disabled={page + 1 >= totalPages || isLoading} onClick={() => movePage(page + 1)}>다음</button>
+					</div>
 				</div>
 			)}
 		</section>

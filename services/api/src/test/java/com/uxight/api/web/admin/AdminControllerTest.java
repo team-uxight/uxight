@@ -24,11 +24,14 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.Map;
 
 /**
@@ -56,6 +59,9 @@ class AdminControllerTest {
   @Autowired
   private ObjectMapper objectMapper;
 
+  @Autowired
+  private PasswordEncoder passwordEncoder;
+
   private Long adminId;
 
   @BeforeEach
@@ -76,7 +82,7 @@ class AdminControllerTest {
         .andExpect(jsonPath("$.size").value(20))   // 기본값
         .andExpect(jsonPath("$.totalElements").value(total))
         // 최근 가입 순 — 방금 넣은 Google 계정이 맨 앞
-        .andExpect(jsonPath("$.content[0].*", hasSize(7)))
+        .andExpect(jsonPath("$.content[0].*", hasSize(9)))
         .andExpect(jsonPath("$.content[0].userId").value(google))
         .andExpect(jsonPath("$.content[0].email").value("users-google@uxight.com"))
         .andExpect(jsonPath("$.content[0].name").value(nullValue()))   // 이름 없이 가입한 계정
@@ -84,6 +90,8 @@ class AdminControllerTest {
         .andExpect(jsonPath("$.content[0].authProvider").value("google"))
         .andExpect(jsonPath("$.content[0].isActive").value(true))
         .andExpect(jsonPath("$.content[0].createdAt").isNotEmpty())
+        .andExpect(jsonPath("$.content[0].lastLoginAt").value(nullValue()))   // 로그인한 적 없음
+        .andExpect(jsonPath("$.content[0].totalCostUsd").value(0.0))          // 회차 없음
         .andExpect(jsonPath("$.content[0].googleSub").doesNotExist())
         .andExpect(jsonPath("$.content[0].passwordHash").doesNotExist())
         // 비활성 계정도 목록에 있다
@@ -169,6 +177,148 @@ class AdminControllerTest {
     users(adminId, get("/api/admin/users"))
         .andExpect(status().isUnauthorized())
         .andExpect(jsonPath("$.code").value("AUT-ERR-005"));
+  }
+
+  /** 누적 비용은 그 계정 프로젝트의 모든 회차 비용 합 — 진행 중 · 취소 회차와 삭제된 프로젝트의 회차도 센다. 다른 계정 회차는 섞이지 않는다. */
+  @Test
+  void totalCost_sumsAllRunsOfTheAccountsProjects_includingDeletedProjectsAndRunningRuns() throws Exception {
+    Long researcher = insertUser("users-cost@uxight.com", "local", null, "비용", "researcher", true);
+    Long other = insertUser("users-cost-other@uxight.com", "local", null, "다른", "researcher", true);
+    Long project = insertProject(researcher);
+    Long deletedProject = insertProject(researcher);
+    jdbcTemplate.update("UPDATE projects SET deleted_at = NOW() WHERE project_id = ?", deletedProject);
+    insertRun(project, "done", "1.2500");
+    insertRun(project, "running", "0.5000");
+    insertRun(project, "cancelled", null);        // 비용 기록 전에 취소 — 합에서 빠진다
+    insertRun(deletedProject, "failed", "0.2500");
+    insertRun(insertProject(other), "done", "9.0000");
+
+    users(adminId, get("/api/admin/users"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.content[0].userId").value(other))
+        .andExpect(jsonPath("$.content[0].totalCostUsd").value(9.0))
+        .andExpect(jsonPath("$.content[1].userId").value(researcher))
+        .andExpect(jsonPath("$.content[1].totalCostUsd").value(2.0));
+  }
+
+  /** 마지막 로그인은 이메일 로그인 성공 때 기록된다. 비밀번호가 틀린 로그인과 토큰 재발급은 바꾸지 않는다. */
+  @Test
+  void lastLoginAt_isSetOnSuccessfulLogin_notOnFailedLoginOrRefresh() throws Exception {
+    String body = createUser(adminId, "{\"email\":\"users-login@uxight.com\",\"name\":\"로그인\"}")
+        .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+    String password = objectMapper.readTree(body).get("initialPassword").asText();
+    Long target = jdbcTemplate.queryForObject("SELECT user_id FROM users WHERE email = 'users-login@uxight.com'", Long.class);
+
+    login("users-login@uxight.com", "wrong1234").andExpect(status().isUnauthorized());
+    entityManager.flush();
+    assertThat(lastLoginAtOf(target)).isNull();
+
+    Cookie refreshCookie = login("users-login@uxight.com", password)
+        .andExpect(status().isOk()).andReturn().getResponse().getCookie("refreshToken");
+    entityManager.flush();
+    assertThat(lastLoginAtOf(target)).isNotNull();
+    users(adminId, get("/api/admin/users"))
+        .andExpect(jsonPath("$.content[0].userId").value(target))
+        .andExpect(jsonPath("$.content[0].lastLoginAt").isNotEmpty());
+
+    jdbcTemplate.update("UPDATE users SET last_login_at = '2026-01-01 00:00:00' WHERE user_id = ?", target);
+    mvc.perform(post("/api/auth/refresh").cookie(refreshCookie)).andExpect(status().isOk());
+    entityManager.flush();
+    assertThat(lastLoginAtOf(target)).hasToString("2026-01-01T00:00");
+  }
+
+  // ───────── 계정 생성 ─────────
+
+  /** 완료 기준: 리서처 계정을 만들고, 초기 비밀번호는 응답에만 있고 DB 에는 해시만, 그 비밀번호로 로그인된다, 감사 로그가 남는다. */
+  @ParameterizedTest(name = "{0} 가 만든다")
+  @CsvSource({"admin", "maintainer"})
+  void adminOrMaintainer_createsResearcher_withOneTimePassword_andAuditLog(String actorRole) throws Exception {
+    Long actor = "admin".equals(actorRole) ? adminId
+        : insertUser("users-create-actor@uxight.com", "local", null, "메인테이너", "maintainer", true);
+    long auditBefore = auditLogCount();
+
+    String body = createUser(actor, "{\"email\":\"users-created@uxight.com\",\"name\":\"새 리서처\"}")
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.*", hasSize(2)))
+        .andExpect(jsonPath("$.userId").isNumber())
+        .andExpect(jsonPath("$.initialPassword").isString())
+        .andReturn().getResponse().getContentAsString();
+    Long userId = objectMapper.readTree(body).get("userId").asLong();
+    String initialPassword = objectMapper.readTree(body).get("initialPassword").asText();
+
+    entityManager.flush();
+    Map<String, Object> row = jdbcTemplate.queryForMap(
+        "SELECT email, name, role, auth_provider, is_active, password_hash, google_sub, last_login_at FROM users WHERE user_id = ?",
+        userId);
+    assertThat(row.get("email")).isEqualTo("users-created@uxight.com");
+    assertThat(row.get("name")).isEqualTo("새 리서처");
+    assertThat(row.get("role")).isEqualTo("researcher");
+    assertThat(row.get("auth_provider")).isEqualTo("local");
+    assertThat(row.get("is_active")).isEqualTo(true);
+    assertThat(row.get("google_sub")).isNull();
+    assertThat(row.get("last_login_at")).isNull();
+    String hash = (String) row.get("password_hash");
+    assertThat(hash).isNotEqualTo(initialPassword);
+    assertThat(passwordEncoder.matches(initialPassword, hash)).isTrue();
+
+    assertThat(auditLogCount()).isEqualTo(auditBefore + 1);
+    Map<String, Object> audit = jdbcTemplate.queryForMap("SELECT actor, action, target, "
+        + "JSON_UNQUOTE(JSON_EXTRACT(detail, '$.email')) AS email, JSON_UNQUOTE(JSON_EXTRACT(detail, '$.name')) AS name, "
+        + "JSON_UNQUOTE(JSON_EXTRACT(detail, '$.role')) AS role, JSON_LENGTH(detail) AS keys_count, "
+        + "CAST(detail AS CHAR) AS detail_text FROM audit_log ORDER BY audit_log_id DESC LIMIT 1");
+    assertThat(audit.get("actor")).isEqualTo("user:" + actor);
+    assertThat(audit.get("action")).isEqualTo("user.create");
+    assertThat(audit.get("target")).isEqualTo("user:" + userId);
+    assertThat(audit.get("email")).isEqualTo("users-created@uxight.com");
+    assertThat(audit.get("name")).isEqualTo("새 리서처");
+    assertThat(audit.get("role")).isEqualTo("researcher");
+    assertThat(((Number) audit.get("keys_count")).intValue()).isEqualTo(3);
+    assertThat((String) audit.get("detail_text")).doesNotContain(initialPassword);
+
+    login("users-created@uxight.com", initialPassword)
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.accessToken").isNotEmpty());
+  }
+
+  /** 같은 이메일이 있으면 이메일 가입이든 Google 가입이든 409 AUT-ERR-007 — 계정 · 감사 로그가 늘지 않는다. */
+  @ParameterizedTest(name = "{0} 가입 계정과 같은 이메일")
+  @CsvSource({"local, ", "google, google-sub-dup"})
+  void duplicateEmail_isConflict(String authProvider, String googleSub) throws Exception {
+    insertUser("users-dup@uxight.com", authProvider, googleSub, "기존", "researcher", true);
+    long usersBefore = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM users", Long.class);
+    long auditBefore = auditLogCount();
+
+    createUser(adminId, "{\"email\":\"users-dup@uxight.com\",\"name\":\"중복\"}")
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("AUT-ERR-007"));
+    assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM users", Long.class)).isEqualTo(usersBefore);
+    assertThat(auditLogCount()).isEqualTo(auditBefore);
+  }
+
+  @ParameterizedTest(name = "{0} → GLB-ERR-002 {1}")
+  @CsvSource(delimiter = '|', value = {
+      "{\"name\":\"이름\"}|email",
+      "{\"email\":\"not-an-email\",\"name\":\"이름\"}|email",
+      "{\"email\":\"users-noname@uxight.com\"}|name",
+      "{\"email\":\"users-noname@uxight.com\",\"name\":\" \"}|name"
+  })
+  void invalidCreateBody_isBadRequest(String body, String field) throws Exception {
+    createUser(adminId, body)
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("GLB-ERR-002"))
+        .andExpect(jsonPath("$.fieldErrors[0].field").value(field));
+  }
+
+  @Test
+  void create_byResearcher_isForbidden_andWithoutToken_isUnauthorized() throws Exception {
+    Long researcher = insertUser("users-create-researcher@uxight.com", "local", null, "리서처", "researcher", true);
+    createUser(researcher, "{\"email\":\"users-by-researcher@uxight.com\",\"name\":\"x\"}")
+        .andExpect(status().isForbidden())
+        .andExpect(jsonPath("$.code").value("AUT-ERR-006"));
+    mvc.perform(post("/api/admin/users").contentType(MediaType.APPLICATION_JSON)
+            .content("{\"email\":\"users-no-token@uxight.com\",\"name\":\"x\"}"))
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("AUT-ERR-001"));
   }
 
   // ───────── PATCH /api/admin/users/{userId}/role ─────────
@@ -514,6 +664,33 @@ class AdminControllerTest {
 
   private long auditLogCount() {
     return jdbcTemplate.queryForObject("SELECT COUNT(*) FROM audit_log", Long.class);
+  }
+
+  private ResultActions createUser(Long actorId, String json) throws Exception {
+    return mvc.perform(post("/api/admin/users")
+        .header(HttpHeaders.AUTHORIZATION, "Bearer " + jwtProvider.createAccessToken(actorId))
+        .contentType(MediaType.APPLICATION_JSON)
+        .content(json));
+  }
+
+  private LocalDateTime lastLoginAtOf(Long userId) {
+    return jdbcTemplate.queryForObject("SELECT last_login_at FROM users WHERE user_id = ?", LocalDateTime.class, userId);
+  }
+
+  private Long insertProject(Long ownerId) {
+    jdbcTemplate.update("INSERT INTO projects (user_id, title, target_url, allowed_domains) "
+        + "VALUES (?, 'p', 'https://a.example.com', JSON_ARRAY('a.example.com'))", ownerId);
+    return jdbcTemplate.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+  }
+
+  private void insertRun(Long project, String status, String costUsd) {
+    jdbcTemplate.update("INSERT INTO tasks (project_id, goal, success_rule, success_url) "
+        + "VALUES (?, 'g', 'rule', 'https://a.example.com/done')", project);
+    Long taskId = jdbcTemplate.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+    jdbcTemplate.update("INSERT INTO runs (project_id, task_id, mode, target_url_snapshot, allowed_domains_snapshot, "
+            + "task_snapshot, policy_snapshot, persona_snapshot, status, cost_usd) "
+            + "VALUES (?, ?, 'diagnose', 'https://a.example.com', JSON_ARRAY(), JSON_OBJECT(), JSON_OBJECT(), JSON_ARRAY(), ?, ?)",
+        project, taskId, status, costUsd == null ? null : new BigDecimal(costUsd));
   }
 
   private ResultActions users(Long userId, MockHttpServletRequestBuilder request) throws Exception {

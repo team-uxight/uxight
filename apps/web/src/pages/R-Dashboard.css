@@ -938,6 +938,27 @@
 	font-weight: 700;
 }
 
+.rd-monitor-pagination {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	padding-top: 16px;
+	color: #777486;
+	font-size: 11px;
+}
+
+.rd-monitor-pagination > div {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+}
+
+.rd-monitor-pagination button:disabled {
+	opacity: 0.45;
+	cursor: default;
+}
+
 .rd-monitor-result-count {
 	margin-left: auto;
 	color: #777486;

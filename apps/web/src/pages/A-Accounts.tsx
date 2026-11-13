@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { RefreshCw, Search, UserRoundCog, X } from 'lucide-react';
 import { useOutletContext } from 'react-router-dom';
 import { changeUserActive, changeUserRole, getAdminUsers, getCurrentUserRole, type AdminUser, type UserRole } from '../auth';
+import { formatKrw, formatTime } from './adminFormat';
 
 const pageSize = 20;
 
@@ -227,8 +228,10 @@ export default function AdminAccounts() {
 									<td><span className={`admin-role-badge admin-role-badge--${account.role}`}>{roleLabels[account.role]}</span></td>
 									<td><span className={`admin-status${account.isActive ? ' is-active' : ' is-inactive'}`}>{account.isActive ? '활성' : '비활성'}</span></td>
 									<td>{account.authProvider === 'google' ? 'Google' : '이메일'}</td>
-									<td title="계정 API에서 제공되지 않는 정보">—</td>
-									<td title="계정 API에서 제공되지 않는 정보">—</td>
+									<td>{account.lastLoginAt ? formatTime(account.lastLoginAt) : '—'}</td>
+									<td title={account.totalCostUsd == null ? undefined : `${account.totalCostUsd} USD`}>
+										{account.totalCostUsd == null ? '—' : formatKrw(account.totalCostUsd)}
+									</td>
 									<td>
 										<button className="admin-icon-button" type="button" aria-label={`${account.name} 계정 관리`} onClick={() => openAccount(account)}>
 											<UserRoundCog size={16} aria-hidden="true" />

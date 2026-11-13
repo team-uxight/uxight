@@ -16,6 +16,10 @@ export type AdminUser = {
 	authProvider: 'local' | 'google';
 	isActive: boolean;
 	createdAt: string;
+	/** 로그인한 적 없으면 null */
+	lastLoginAt: string | null;
+	/** 그 계정 프로젝트의 회차 비용 합(USD). 값을 주지 않는 서버면 null */
+	totalCostUsd: number | null;
 };
 
 export type PageResponse<T> = {
@@ -44,6 +48,10 @@ export async function loginWithGoogle(idToken: string): Promise<void> {
 		body: JSON.stringify({ idToken }),
 	});
 	if (!response.ok) {
+		// 처음 Google 로 가입한 계정은 운영자가 활성화하기 전까지 비활성이다 (AUT-ERR-005).
+		if (response.status === 401 && (await apiErrorCode(response.clone())) === 'AUT-ERR-005') {
+			throw new Error('운영자가 승인하면 로그인할 수 있습니다.');
+		}
 		throw new Error(await apiErrorMessage(response, 'Google 로그인에 실패했습니다.'));
 	}
 
@@ -58,6 +66,16 @@ export async function loginWithGoogle(idToken: string): Promise<void> {
 		throw new Error('서버에서 올바르지 않은 인증 응답을 받았습니다.');
 	}
 	setAccessToken(body.accessToken);
+}
+
+async function apiErrorCode(response: Response): Promise<string | null> {
+	try {
+		const body: unknown = await response.json();
+		if (typeof body === 'object' && body !== null && 'code' in body && typeof body.code === 'string') return body.code;
+	} catch {
+		return null;
+	}
+	return null;
 }
 
 export async function apiErrorMessage(response: Response, fallback: string): Promise<string> {
@@ -207,6 +225,11 @@ export async function getAdminUsers(page = 0, size = 20): Promise<PageResponse<A
 		) {
 			throw new Error('서버에서 올바르지 않은 계정 정보를 받았습니다.');
 		}
+		// 11/07(PR #118) 전 서버는 두 칸을 주지 않는다. 없거나 모양이 다르면 null 로 두고 화면은 '—' 를 쓴다.
+		const lastLoginAt = 'lastLoginAt' in item && typeof item.lastLoginAt === 'string' ? item.lastLoginAt : null;
+		const totalCostUsd = 'totalCostUsd' in item && typeof item.totalCostUsd === 'number' && Number.isFinite(item.totalCostUsd)
+			? item.totalCostUsd
+			: null;
 
 		return {
 			userId: item.userId,
@@ -216,6 +239,8 @@ export async function getAdminUsers(page = 0, size = 20): Promise<PageResponse<A
 			authProvider: item.authProvider,
 			isActive: item.isActive,
 			createdAt: item.createdAt,
+			lastLoginAt,
+			totalCostUsd,
 		};
 	});
 

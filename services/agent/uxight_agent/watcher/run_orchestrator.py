@@ -1,6 +1,8 @@
 import asyncio
 import contextlib
+import dataclasses
 import logging
+import os
 from collections.abc import AsyncIterator, Awaitable
 from dataclasses import dataclass
 from typing import TypeVar
@@ -9,10 +11,13 @@ from ..db import settings
 from ..diagnose.findings import build_findings
 from ..diagnose.summary import MAX_RETRIES as SUMMARY_MAX_RETRIES
 from ..diagnose.summary import build_facts, summarize
+from ..driver.base import Observation
 from ..driver.dom_driver import DomDriver
 from ..guard.domain import allowed_hosts, is_allowed
 from ..improve.generator import generate_improvements
 from ..improve.patch_validator import validate_patch_application
+from ..judge import MAX_RETRIES as JUDGE_MAX_RETRIES
+from ..judge import judge, judge_input
 from ..llm import LLMClient
 from ..persona.llm_decider import STEP_MAX_RETRIES, LLMDecider
 from ..persona.persona_agent import Decider, PersonaAgent
@@ -22,6 +27,7 @@ from ..repositories.improvement_repository import improvement_repository
 from ..repositories.run_persona_repository import PersonaOutcome, run_persona_repository
 from ..repositories.run_repository import RunSnapshot, run_repository
 from ..usage_report import PriceTable, price_table
+from .persona_metrics import calculate_metrics
 from .step_log_writer import step_log_writer
 from .step_rules import (
     BLOCK_REASONS,
@@ -65,6 +71,9 @@ persona_slots = asyncio.Semaphore(settings.max_concurrent_personas)
 # 가드가 막은 step — step 로그와 함께 감사 로그에도 남긴다 (architecture §9 L1 · L6).
 GUARD_BLOCK_CODES = ("DOMAIN_BLOCKED", "DESTRUCTIVE_ACTION_BLOCKED")
 
+# 성공률을 셀 수 있는 Persona 종료 상태 (11/03 결정). fail · cancelled 는 판정하지 않는다.
+JUDGED_STATUSES = frozenset({"done", "max_steps", "stuck", "timeout", "token_limit"})
+
 # LLM 클라이언트는 첫 회차를 수락할 때 만든다 — LLM 설정(env)이 없는 테스트 · 도구도 이 모듈을
 # 불러오게. 프로세스 안 모든 Persona 가 연결 하나를 나눠 쓴다.
 _llm: LLMClient | None = None
@@ -89,6 +98,31 @@ def make_summary_llm() -> LLMClient | None:
     None 이면 설명은 규칙 문장이다. 테스트는 이 함수를 바꿔 끼운다.
     """
     return LLMClient(max_retries=SUMMARY_MAX_RETRIES)
+
+
+def make_judge_llm() -> LLMClient | None:
+    """성공 판정 보조 LLM (GACA-161). JUDGE_MODEL 이 비면 None — 판정하지 않는다.
+
+    JUDGE_MODEL 이 Persona 모델(LLM_MODEL)과 같아도 경고만 남기고 None 이다. 판정은 Persona 와
+    다른 LLM 이 한다. 접두어(provider/)만 다른 이름도 같은 모델로 본다.
+    주소 JUDGE_BASE_URL · 키 JUDGE_API_KEY 가 비면 KeyError 다. Persona 의 주소 · 키로 넘어가지
+    않는다 — MLAPI 는 주소 하나에 모델 하나가 묶이고, 판정 주소가 다른 곳이면 회사 키가 그쪽으로
+    나간다. 테스트는 이 함수를 바꿔 끼운다.
+    """
+    model = os.environ.get("JUDGE_MODEL")
+    if not model:
+        return None
+    persona_model = os.environ.get("LLM_MODEL") or ""
+    if model.rsplit("/", 1)[-1] == persona_model.rsplit("/", 1)[-1]:
+        logger.warning("판정 모델이 Persona 모델(%s)과 같아 판정하지 않음", model)
+        return None
+    base_url = os.environ.get("JUDGE_BASE_URL")
+    if not base_url:
+        raise KeyError("JUDGE_BASE_URL")
+    api_key = os.environ.get("JUDGE_API_KEY")
+    if not api_key:
+        raise KeyError("JUDGE_API_KEY")
+    return LLMClient(model=model, base_url=base_url, api_key=api_key, max_retries=JUDGE_MAX_RETRIES)
 
 
 def validate_improvement_page_url(
@@ -141,6 +175,9 @@ class RunOrchestrator:
         self._run_tokens: dict[int, RunTokens] = {}
         # 회차별 단가표. 수락할 때 LLM_PRICES 를 검사하며 만든 것을 회차가 끝날 때까지 쓴다.
         self._run_prices: dict[int, PriceTable] = {}
+        # (회차, Persona) 별로 Persona 가 끝날 때 본 마지막 화면. 성공 판정 보조(GACA-161)가 쓴다 —
+        # step 로그에는 제목 · 본문 글이 없다. Persona 결과를 기록할 때 꺼내 지운다.
+        self._last_pages: dict[tuple[int, int], Observation] = {}
 
     def try_accept_and_start(self, run_id: int) -> RunSnapshot | None:
         """queued 인 회차만 수락한다.
@@ -358,11 +395,10 @@ class RunOrchestrator:
             # 판정 가능한 종료 상태만 포함하고, URL 기록이 없으면 제외한다.
             # fail/cancelled/running은 성공률 분모에 포함하지 않는다.
             outcomes = run_persona_repository.get_outcomes(run_id)
-            judged_statuses = {"done", "max_steps", "stuck", "timeout", "token_limit"}
             judged = [
                 (status, reached)
                 for status, reached in outcomes.values()
-                if status in judged_statuses and reached is not None
+                if status in JUDGED_STATUSES and reached is not None
             ]
             success = sum(1 for status, reached in judged if status == "done" and reached is True)
             success_rate = round(success / len(judged) * 100, 2) if judged else None
@@ -542,14 +578,71 @@ class RunOrchestrator:
                     logger.exception("run=%s persona=%s 수행 실패", run_id, persona_id)
                     outcome = "fail"
 
+        page = self._last_pages.pop((run_id, persona_id), None)
         # 모든 Step 로그에서 성공 URL 도달 여부를 집계한다.
         # 한 번이라도 도달했다면 이후 다른 페이지로 이동해도 True를 유지한다.
         url_reached = step_log_writer.get_url_reached(run_id, persona_id)
+        # 되돌아가기 수는 설계서 지표 정의(calculate_metrics 의 backtrack_count)대로 센다.
+        # 진단 목록의 '길 찾기 혼란'은 friction_rules 로 따로 세서 숫자가 다를 수 있다.
+        # step 로그가 없으면 0 이다.
+        steps = step_log_writer.read_steps(run_id, persona_id)
+        backtracks = calculate_metrics(steps)["backtrack_count"]
+        # 규칙이 도달 여부를 내지 못한 빈칸만 판정 LLM 이 채운다 (GACA-161).
+        if url_reached is None and outcome in JUDGED_STATUSES:
+            url_reached = await self._judge_url_reached(
+                run_id, persona_id, task, page, cancel_event
+            )
 
-        # 종료 상태와 URL 도달 여부를 함께 저장한 뒤 진행률을 갱신한다.
-        run_persona_repository.mark_finished(run_id, persona_id, outcome, url_reached=url_reached)
+        # 종료 상태 · URL 도달 여부 · 되돌아가기 수를 함께 저장한 뒤 진행률을 갱신한다.
+        run_persona_repository.mark_finished(
+            run_id, persona_id, outcome, url_reached=url_reached, backtracks=backtracks
+        )
         # 진단은 모든 Persona 가 끝난 뒤 회차 단위로 한다 (_finish_run → _save_findings).
         self._refresh_progress(run_id)
+
+    async def _judge_url_reached(
+        self,
+        run_id: int,
+        persona_id: int,
+        task: dict,
+        page: Observation | None,
+        cancel_event: asyncio.Event,
+    ) -> bool | None:
+        """판정 LLM 이 마지막 화면을 보고 도달 여부를 낸다 (GACA-161). 못 내면 None 그대로다.
+
+        판정 모델이 없음 · 마지막 화면이 없음 · 호출 실패 · 형식이 틀린 답 · 취소가 모두 None 이다.
+        판정 답은 run_personas.url_reached 에만 들어간다. 진단 · Friction 규칙은 step 로그를 보므로
+        이 Persona 를 판정 안 함으로 둔다.
+        """
+        try:
+            llm = make_judge_llm()
+            if llm is None:
+                return None
+            payload = judge_input(task, step_log_writer.read_steps(run_id, persona_id), page)
+            if payload is None or cancel_event.is_set():
+                # 취소된 회차는 성공률을 내지 않는다. 판정을 기다리면 취소 10초 약속도 깨진다.
+                logger.info(
+                    "run=%s persona=%s 판정하지 않음 (화면 없음 · 취소)", run_id, persona_id
+                )
+                return None
+            finished, judgment = await self._run_unless_cancelled(
+                judge(llm, payload, run_id=run_id, persona_id=persona_id), cancel_event
+            )
+            if not finished:
+                logger.info("run=%s persona=%s 취소 요청으로 판정 멈춤", run_id, persona_id)
+                return None
+            step_log_writer.write_judgment(
+                run_id,
+                persona_id,
+                {"success": judgment.success, "evidence": judgment.evidence, "model": llm.model},
+            )
+        except Exception:
+            logger.exception("run=%s persona=%s 판정 실패, 판정 안 함으로 둠", run_id, persona_id)
+            return None
+        logger.info(
+            "run=%s persona=%s 판정 LLM url_reached=%s", run_id, persona_id, judgment.success
+        )
+        return judgment.success
 
     @contextlib.asynccontextmanager
     async def _persona_slot(
@@ -679,6 +772,11 @@ class RunOrchestrator:
                             step_no,
                         )
                         return "cancelled"
+                    # 판정 보조용 마지막 화면. 마지막 행동 뒤 화면을 새로 보면 아래에서 바꾼다.
+                    # 화면 그림(PNG)은 판정에 쓰지 않으므로 빼고 둔다.
+                    self._last_pages[(run_id, persona_id)] = dataclasses.replace(
+                        step.observation, screenshot=None
+                    )
                     # 페르소나가 넘겨준 스텝 결과를 즉시 한 줄로 남긴다.
                     # 도중에 죽어도 그때까지의 스텝은 남는다.
                     # 화면 그림을 먼저 쓰고 그다음 로그 줄을 쓴다 (행동 로그 명세 2절).
@@ -776,9 +874,11 @@ class RunOrchestrator:
             )
             outcome = "timeout"
         if last_screen_step is not None:
-            await self._save_last_screenshot(
+            page = await self._save_last_screenshot(
                 run_id, persona_id, driver, last_screen_step, cancel_event
             )
+            if page is not None:
+                self._last_pages[(run_id, persona_id)] = dataclasses.replace(page, screenshot=None)
         return outcome
 
     async def _save_last_screenshot(
@@ -788,13 +888,14 @@ class RunOrchestrator:
         driver: DomDriver,
         step: int,
         cancel_event: asyncio.Event,
-    ) -> None:
+    ) -> Observation | None:
         """끝난 Persona 의 마지막 행동 뒤 화면을 step-<step>.png 로 한 장 더 남긴다 (GACA-221).
 
         다음 step 을 시작했다면 봤을 화면이라 step 스크린샷과 뜻이 같다. step 은 로그에 쓴 마지막
         step 번호 + 1 이고 로그 줄은 쓰지 않는다. 그림은 step 과 같은 observe() 로 얻고
         (입력칸 가림 포함) 같은 함수로 쓴다. 시간 상한으로 끊긴 step 의 행동이 이미 실행됐으면 그
         결과도 이 화면에 보일 수 있다. 얻거나 쓰지 못해도 Persona 결과는 그대로 두고 기록만 한다.
+        얻은 화면을 돌려준다 — 성공 판정 보조(GACA-161)의 마지막 화면이다. 얻지 못하면 None.
         """
         try:
             finished, observation = await self._run_unless_cancelled(
@@ -804,12 +905,13 @@ class RunOrchestrator:
                 logger.info(
                     "run=%s persona=%s 취소 요청으로 마지막 화면 건너뜀", run_id, persona_id
                 )
-                return
+                return None
             if observation.screenshot is None:
                 logger.warning("run=%s persona=%s 마지막 화면 그림을 얻지 못함", run_id, persona_id)
-                return
+                return observation
             step_log_writer.write_screenshot(run_id, persona_id, step, observation.screenshot)
             logger.info("run=%s persona=%s 마지막 화면 step-%s.png", run_id, persona_id, step)
+            return observation
         except TimeoutError:
             logger.warning(
                 "run=%s persona=%s 마지막 화면이 %ss 를 넘겨 건너뜀",
