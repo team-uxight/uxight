@@ -399,7 +399,7 @@ export type ImprovementDetail = {
 	rationale: string;
 	expectedEffect: string;
 	fixCost: string | null;
-	findings: { findingId: number; taxonomy: string; severity: string; summary: string }[];
+	findings: { findingId: number; taxonomy: string; severity: string; summary: string | null }[];
 	approval: { decision: ImprovementDecision; note: string | null; decidedAt: string } | null;
 	awaitingApproval: boolean;
 };
@@ -622,7 +622,7 @@ export async function getImprovementDetail(improvementId: number): Promise<Impro
 			typeof finding.findingId === 'number' &&
 			typeof finding.taxonomy === 'string' &&
 			typeof finding.severity === 'string' &&
-			typeof finding.summary === 'string',
+			(finding.summary === null || typeof finding.summary === 'string'),
 		) ||
 		(body.approval !== null && !isImprovementApproval(body.approval)) ||
 		typeof body.awaitingApproval !== 'boolean'

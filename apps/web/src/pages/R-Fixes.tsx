@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
 	decideImprovement,
@@ -11,6 +11,15 @@ import {
 	patchKindLabels,
 } from '../auth';
 import { fetchExperiments, type Experiment } from './experiments';
+import { severityLabels, taxonomyLabels } from './findings';
+
+function improvementRunId(experiment: Experiment): number {
+	return experiment.state === 'awaiting_approval' ? experiment.runId : experiment.firstRunId;
+}
+
+function labelFor(value: string, labels: Record<string, string>): string {
+	return Object.prototype.hasOwnProperty.call(labels, value) ? labels[value] : value;
+}
 
 function readRunIdFromState(state: unknown): number | null {
 	if (typeof state !== 'object' || state === null || !('runId' in state)) return null;
@@ -54,7 +63,7 @@ export default function RFixes() {
 				setExperiments(completed);
 				setSelectedRunId(
 					requestedRunId ??
-					completed[0]?.firstRunId ??
+					(completed[0] ? improvementRunId(completed[0]) : null) ??
 					null,
 				);
 				setExperimentsError('');
@@ -121,9 +130,11 @@ export default function RFixes() {
 	}, [selectedImprovementId]);
 
 	const completedRuns = useMemo(() => experiments, [experiments]);
-	const selectedExperiment = completedRuns.find((experiment) => experiment.firstRunId === selectedRunId) ?? null;
-	const selectedFirstRunId = selectedExperiment?.firstRunId ?? improvementList?.run.firstRunId ?? null;
-	const selectedRound = selectedExperiment?.round ?? improvementList?.run.round ?? null;
+	const selectedExperiment = completedRuns.find((experiment) =>
+		experiment.firstRunId === selectedRunId || experiment.runId === selectedRunId,
+	) ?? null;
+	const selectedFirstRunId = improvementList?.run.firstRunId ?? selectedExperiment?.firstRunId ?? null;
+	const selectedRound = improvementList?.run.round ?? null;
 	const selectedSummary = improvementList?.improvements.find((item) => item.improvementId === selectedImprovementId) ?? null;
 	const listLoading = selectedRunId !== null && improvementsRunId !== selectedRunId;
 	const detailLoading = selectedImprovementId !== null && detailId !== selectedImprovementId;
@@ -142,6 +153,9 @@ export default function RFixes() {
 
 	const handleDecision = async (decision: ImprovementDecision) => {
 		if (!selectedRunId || !detail || !canDecide || busy) return;
+		if (decision === 'approve' && !window.confirm(
+			'지금은 패치가 적용되지 않은 같은 사이트로 다음 회차를 실행하며 비용이 발생할 수 있습니다. 승인하시겠습니까?',
+		)) return;
 		setBusy(true);
 		setDetailError('');
 		setNotice('');
@@ -190,7 +204,7 @@ export default function RFixes() {
 							if (Number.isSafeInteger(value) && value > 0) changeRun(value);
 						}}
 					>
-						{selectedRunId !== null && !completedRuns.some((experiment) => experiment.firstRunId === selectedRunId) && (
+						{selectedRunId !== null && !selectedExperiment && (
 							<option value={selectedRunId}>
 								#{improvementList?.run.firstRunId ?? selectedRunId} · {improvementList?.run.projectTitle ?? '선택한 회차'}
 								{improvementList ? ` · ${improvementList.run.round}회차` : ''}
@@ -198,7 +212,7 @@ export default function RFixes() {
 						)}
 						{completedRuns.length === 0 && selectedRunId === null && <option value="">완료된 실험 없음</option>}
 						{completedRuns.map((experiment) => (
-							<option key={experiment.firstRunId} value={experiment.firstRunId}>
+							<option key={experiment.firstRunId} value={experiment === selectedExperiment ? selectedRunId ?? improvementRunId(experiment) : improvementRunId(experiment)}>
 								#{experiment.firstRunId} · {experiment.projectTitle} · {formatDate(experiment.createdAt)}
 							</option>
 						))}
@@ -233,12 +247,12 @@ export default function RFixes() {
 							<section><h3>예상 효과</h3><p>{detail.expectedEffect || '예상 효과가 제공되지 않았습니다.'}</p></section>
 							<section><h3>구현 비용</h3><p>{detail.fixCost ?? '추정 없음'}</p></section>
 						</div>
-						<section className="rd-fixes-data"><h3>적용 패치</h3><pre>{JSON.stringify(detail.patch, null, 2)}</pre></section>
+						<section className="rd-fixes-data"><h3>제안 패치</h3><pre>{JSON.stringify(detail.patch, null, 2)}</pre></section>
 						<section className="rd-fixes-data">
 							<h3>관련 진단 ({detail.findings.length})</h3>
 							{detail.findings.length === 0 ? <p>연결된 진단이 없습니다.</p> : (
 								<ul>{detail.findings.map((finding) => (
-									<li key={finding.findingId}><strong>{finding.taxonomy} · {finding.severity}</strong><span>{finding.summary}</span></li>
+									<li key={finding.findingId}><strong>{labelFor(finding.taxonomy, taxonomyLabels)} · {labelFor(finding.severity, severityLabels)}</strong><span>{finding.summary ?? '진단 요약이 없습니다.'}</span></li>
 								))}</ul>
 							)}
 						</section>
@@ -247,9 +261,13 @@ export default function RFixes() {
 								{detail.approval.note || '결정 사유 없음'} · {formatDate(detail.approval.decidedAt)}
 							</p>
 						)}
+						{!detail.approval && !canDecide && (
+							<p className="rd-fixes-decision-note">반복 모드 실험의 마지막 회차에서만 승인할 수 있습니다.</p>
+						)}
 						{canDecide && (
 							<div className="rd-fixes-decision-form">
 								<label>결정 사유 (선택)<textarea value={note} onChange={(event) => setNote(event.target.value)} rows={3} maxLength={1000} /></label>
+								<p>지금은 승인해도 다음 회차에 패치가 적용되지 않고 같은 사이트로 다시 실행됩니다.</p>
 								<div className="rd-fixes-actions">
 									<button className="rd-dark-pill" type="button" disabled={busy} onClick={() => void handleDecision('approve')}>
 										{busy ? '처리 중…' : '승인 및 다음 회차 실행'}
