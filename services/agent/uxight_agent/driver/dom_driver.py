@@ -758,6 +758,9 @@ class DomDriver(Driver):
         self._last_allowed_url: str | None = None
         self._late_returns = 0
         self._left_url: str | None = None
+        # 시작 주소의 HTTP 상태(응답이 없으면 None). 개선안 단계가 사본에 없는 페이지(404)를
+        # 건너뛸 때 쓴다.
+        self.start_status: int | None = None
         # 주 창 문서가 보내 아직 끝나지 않은 fetch · XHR. 관측 전에 끝나기를 기다린다 (GACA-157).
         # - _new_document: 주 창의 이동 요청이 왔다 — 그 문서가 들어오면 앞 문서의 요청을 잊는다
         self._pending_requests: set[Request] = set()
@@ -796,13 +799,16 @@ class DomDriver(Driver):
                 self._outside_web_socket, self._block_web_socket
             )
         try:
-            await self._page.goto(url, wait_until="domcontentloaded", timeout=NAVIGATION_TIMEOUT_MS)
+            response = await self._page.goto(
+                url, wait_until="domcontentloaded", timeout=NAVIGATION_TIMEOUT_MS
+            )
         except PlaywrightError:
             if self._failed_main_url is None:
                 raise
             # 시작 주소가 허용 밖으로 리다이렉트했다. 막힌 프록시 오류 대신 가려던 곳을 알린다.
             safe = safe_destination(self._failed_main_url)
             raise RuntimeError(f"시작 주소가 허용 밖으로 리다이렉트됐습니다: {safe}") from None
+        self.start_status = response.status if response is not None else None
         self._remember(url)
 
     def _launch_options(self) -> dict:

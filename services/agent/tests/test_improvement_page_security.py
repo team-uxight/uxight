@@ -46,9 +46,10 @@ async def _test_open_allowed_improvement_page(hosts):
     driver = SimpleNamespace(
         start=AsyncMock(),
         page=SimpleNamespace(url=url),
+        start_status=200,
     )
 
-    await RunOrchestrator._open_improvement_page(driver, url, hosts)
+    assert await RunOrchestrator._open_improvement_page(driver, url, hosts) == 200
 
     driver.start.assert_awaited_once_with(url)
 

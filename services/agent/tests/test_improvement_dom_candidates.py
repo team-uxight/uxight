@@ -175,6 +175,25 @@ def test_path_selector_only_when_no_other_candidate():
     ]
 
 
+def test_path_selector_skips_destructive_elements():
+    """id 가 없는 페이지에서도 위험한 요소(회원 탈퇴 등)는 경로 규칙으로 후보가 되지 않는다."""
+    html = """
+    <html><body>
+      <div>
+        <button>회원 탈퇴</button>
+        <button><span>계정 삭제</span></button>
+        <h2>회원 정보</h2>
+      </div>
+    </body></html>
+    """
+
+    candidates, _ = asyncio.run(candidates_on(html))
+
+    assert [item["selector"] for item in candidates] == [
+        "body > div:nth-of-type(1) > h2:nth-of-type(1)"
+    ]
+
+
 class CountingLLM:
     def __init__(self, options):
         self.options = options

@@ -13,7 +13,7 @@ from ..diagnose.summary import MAX_RETRIES as SUMMARY_MAX_RETRIES
 from ..diagnose.summary import build_facts, summarize
 from ..driver.base import Observation
 from ..driver.dom_driver import DomDriver
-from ..guard.domain import allowed_hosts, is_allowed
+from ..guard.domain import allowed_hosts, is_allowed, safe_destination
 from ..improve.generator import generate_improvements
 from ..improve.patch_validator import validate_patch_application
 from ..judge import MAX_RETRIES as JUDGE_MAX_RETRIES
@@ -454,64 +454,84 @@ class RunOrchestrator:
         # 한 페이지에서 안이 나오지 않으면(사본에 없는 페이지 · DOM 후보 없음 등)
         # 다음 근거 페이지로 넘어간다.
         for page_url, page_findings in pages:
-            async with self._open_driver(run_id, 0, hosts) as driver:
-                await self._open_improvement_page(driver, page_url, hosts)
-                for attempt in range(2):
-                    generated = await generate_improvements(
-                        llm=llm_client(),
-                        findings=page_findings,
-                        previous_patches=[],
-                        task_goal=snapshot.task.get("goal") or "",
-                        run_id=run_id,
-                        page=driver.page,
-                        hosts=hosts,
-                    )
-
-                    validated = []
-                    for option in generated:
-                        patch = option["patch"]
-                        patch_payload = {
-                            key: value for key, value in patch.items() if key != "page_url"
-                        }
-
-                        try:
-                            async with self._open_driver(run_id, 0, hosts) as trial_driver:
-                                await self._open_improvement_page(trial_driver, page_url, hosts)
-                                success, reason = await validate_patch_application(
-                                    trial_driver.page,
-                                    option["patch_kind"],
-                                    patch_payload,
-                                )
-                            if not success:
-                                logger.warning(
-                                    "run=%s trial patch rejected: %s",
-                                    run_id,
-                                    reason,
-                                )
-                                continue
-                        except Exception:
-                            logger.exception(
-                                "run=%s trial patch raised an error",
-                                run_id,
-                            )
-                            continue
-
-                        validated.append(
-                            {
-                                **option,
-                                "option_no": len(validated) + 1,
-                            }
+            # 페이지 하나의 예외(LLM 응답 오류 · 이동 시간 초과 · 허용 밖 리다이렉트 등)로 단계를
+            # 끝내지 않고 다음 근거 페이지를 본다. 120초 상한 · 취소(CancelledError)는 Exception 이
+            # 아니라 여기서 잡히지 않는다.
+            try:
+                async with self._open_driver(run_id, 0, hosts) as driver:
+                    status = await self._open_improvement_page(driver, page_url, hosts)
+                    if status is not None and status >= 400:
+                        # 사본에 없는 페이지는 nginx 가 404 로 안내 페이지를 준다. 그 페이지의
+                        # '홈으로' 링크로 낸 안이 저장되지 않게 LLM 을 부르지 않는다.
+                        logger.info(
+                            "run=%s 개선안 페이지 %s: 응답 %s, LLM 을 부르지 않고 다음 페이지로",
+                            run_id,
+                            safe_destination(page_url),
+                            status,
+                        )
+                        continue
+                    for attempt in range(2):
+                        generated = await generate_improvements(
+                            llm=llm_client(),
+                            findings=page_findings,
+                            previous_patches=[],
+                            task_goal=snapshot.task.get("goal") or "",
+                            run_id=run_id,
+                            page=driver.page,
+                            hosts=hosts,
                         )
 
-                    improvements = validated
-                    if improvements:
-                        break
+                        validated = []
+                        for option in generated:
+                            patch = option["patch"]
+                            patch_payload = {
+                                key: value for key, value in patch.items() if key != "page_url"
+                            }
 
-                    logger.warning(
-                        "run=%s no applicable improvements on attempt %s/2",
-                        run_id,
-                        attempt + 1,
-                    )
+                            try:
+                                async with self._open_driver(run_id, 0, hosts) as trial_driver:
+                                    await self._open_improvement_page(trial_driver, page_url, hosts)
+                                    success, reason = await validate_patch_application(
+                                        trial_driver.page,
+                                        option["patch_kind"],
+                                        patch_payload,
+                                    )
+                                if not success:
+                                    logger.warning(
+                                        "run=%s trial patch rejected: %s",
+                                        run_id,
+                                        reason,
+                                    )
+                                    continue
+                            except Exception:
+                                logger.exception(
+                                    "run=%s trial patch raised an error",
+                                    run_id,
+                                )
+                                continue
+
+                            validated.append(
+                                {
+                                    **option,
+                                    "option_no": len(validated) + 1,
+                                }
+                            )
+
+                        improvements = validated
+                        if improvements:
+                            break
+
+                        logger.warning(
+                            "run=%s no applicable improvements on attempt %s/2",
+                            run_id,
+                            attempt + 1,
+                        )
+            except Exception:
+                logger.exception(
+                    "run=%s 개선안 페이지 %s 에서 오류, 다음 근거 페이지로",
+                    run_id,
+                    safe_destination(page_url),
+                )
 
             if improvements:
                 break
@@ -664,11 +684,14 @@ class RunOrchestrator:
         driver: DomDriver,
         url: str,
         hosts: frozenset[str],
-    ) -> None:
-        """허용된 근거 페이지에 접속하고 최종 URL을 다시 검증한다."""
+    ) -> int | None:
+        """허용된 근거 페이지에 접속하고 최종 URL을 다시 검증한다.
+
+        시작 주소의 HTTP 상태를 돌려준다."""
         validate_improvement_page_url(url, hosts)
         await driver.start(url)
         validate_improvement_page_url(driver.page.url, hosts)
+        return driver.start_status
 
     @contextlib.asynccontextmanager
     async def _open_driver(
