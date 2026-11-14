@@ -3,7 +3,7 @@
 from playwright.async_api import Page
 
 _COLLECT_CANDIDATES_JS = """
-({limit, allowedHosts}) => {
+({limit, allowedHosts, pathFallback}) => {
   const elements = document.querySelectorAll(
     'a, button, [role="button"], nav a, label, h1, h2, h3, p, span, li'
   );
@@ -117,16 +117,29 @@ _COLLECT_CANDIDATES_JS = """
       const href = el.getAttribute('href');
       selector = 'a[href="' + CSS.escape(href) + '"]';
     } else {
-      const parent = el.parentElement;
-      if (!parent) continue;
+      // id 가 있는 부모 아래면 '#부모 > 태그:nth-of-type(n)' 으로 찾는다.
+      // pathFallback 이면 id 가 있는 가장 가까운 조상(없으면 body)까지 경로를 잇는다.
+      const steps = [];
+      let node = el;
+      while (node.parentElement) {
+        const parent = node.parentElement;
+        const siblings = Array.from(parent.children)
+          .filter(child => child.tagName === node.tagName);
+        steps.unshift(
+          node.tagName.toLowerCase() +
+          ':nth-of-type(' + (siblings.indexOf(node) + 1) + ')'
+        );
 
-      const siblings = Array.from(parent.children)
-        .filter(child => child.tagName === el.tagName);
-      const index = siblings.indexOf(el) + 1;
-
-      if (parent.id) {
-        selector = '#' + CSS.escape(parent.id) +
-          ' > ' + tag + ':nth-of-type(' + index + ')';
+        if (parent.id) {
+          selector = '#' + CSS.escape(parent.id) + ' > ' + steps.join(' > ');
+          break;
+        }
+        if (!pathFallback) break;
+        if (parent === document.body) {
+          selector = 'body > ' + steps.join(' > ');
+          break;
+        }
+        node = parent;
       }
     }
 
@@ -161,8 +174,14 @@ async def collect_dom_candidates(
     if not 1 <= limit <= 100:
         raise ValueError("limit은 1~100이어야 합니다")
 
-    args = {"limit": limit}
+    args = {"limit": limit, "pathFallback": False}
     if hosts is not None:
         args["allowedHosts"] = sorted(hosts)
 
-    return await page.evaluate(_COLLECT_CANDIDATES_JS, args)
+    candidates = await page.evaluate(_COLLECT_CANDIDATES_JS, args)
+    if candidates:
+        return candidates
+
+    # id · 링크 · id 가 있는 부모로 찾은 요소가 하나도 없으면 경로 선택자로 한 번 더 찾는다.
+    # 학교 사본의 표만 있는 페이지(졸업 이수학점 표 등)는 id 가 있는 요소가 없어 후보가 0개였다.
+    return await page.evaluate(_COLLECT_CANDIDATES_JS, {**args, "pathFallback": True})

@@ -103,7 +103,7 @@ def test_reject_redirected_improvement_page():
 
 
 def test_select_page_with_most_findings(hosts):
-    from uxight_agent.watcher.run_orchestrator import select_improvement_evidence
+    from uxight_agent.watcher.run_orchestrator import improvement_evidence_pages
 
     findings = [
         {
@@ -121,15 +121,17 @@ def test_select_page_with_most_findings(hosts):
         },
     ]
 
-    selected = select_improvement_evidence(findings, hosts)
+    pages = improvement_evidence_pages(findings, hosts)
 
-    assert selected is not None
-    assert selected[0] == "https://school.example.com/b"
-    assert [f["finding_id"] for f in selected[1]] == [1, 2]
+    assert [url for url, _ in pages] == [
+        "https://school.example.com/b",
+        "https://school.example.com/a",
+    ]
+    assert [f["finding_id"] for f in pages[0][1]] == [1, 2]
 
 
 def test_select_page_excludes_external_urls(hosts):
-    from uxight_agent.watcher.run_orchestrator import select_improvement_evidence
+    from uxight_agent.watcher.run_orchestrator import improvement_evidence_pages
 
     findings = [
         {
@@ -140,11 +142,11 @@ def test_select_page_excludes_external_urls(hosts):
         },
     ]
 
-    assert select_improvement_evidence(findings, hosts) is None
+    assert improvement_evidence_pages(findings, hosts) == []
 
 
 def test_select_page_deduplicates_evidence_per_finding(hosts):
-    from uxight_agent.watcher.run_orchestrator import select_improvement_evidence
+    from uxight_agent.watcher.run_orchestrator import improvement_evidence_pages
 
     findings = [
         {
@@ -168,8 +170,27 @@ def test_select_page_deduplicates_evidence_per_finding(hosts):
         },
     ]
 
-    selected = select_improvement_evidence(findings, hosts)
+    pages = improvement_evidence_pages(findings, hosts)
 
-    assert selected is not None
-    assert selected[0] == "https://school.example.com/b"
-    assert len(selected[1]) == 2
+    assert [url for url, _ in pages] == [
+        "https://school.example.com/b",
+        "https://school.example.com/a",
+    ]
+    assert len(pages[0][1]) == 2
+
+
+def test_pages_with_same_count_keep_evidence_order(hosts):
+    """근거 수가 같으면 먼저 나온 페이지가 앞이다 (회차 32: /kor/3120 다음 /kor/12490)."""
+    from uxight_agent.watcher.run_orchestrator import improvement_evidence_pages
+
+    findings = [
+        {"finding_id": 18, "evidence": [{"url": "https://school.example.com/kor/3120"}]},
+        {"finding_id": 19, "evidence": [{"url": "https://school.example.com/kor/12490"}]},
+    ]
+
+    pages = improvement_evidence_pages(findings, hosts)
+
+    assert [(url, [f["finding_id"] for f in items]) for url, items in pages] == [
+        ("https://school.example.com/kor/3120", [18]),
+        ("https://school.example.com/kor/12490", [19]),
+    ]

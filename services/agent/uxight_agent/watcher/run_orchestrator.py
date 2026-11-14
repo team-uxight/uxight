@@ -135,11 +135,11 @@ def validate_improvement_page_url(
     return url
 
 
-def select_improvement_evidence(
+def improvement_evidence_pages(
     findings: list[dict],
     hosts: frozenset[str],
-) -> tuple[str, list[dict]] | None:
-    """허용된 근거 페이지 하나와 해당 페이지의 Finding을 선택한다."""
+) -> list[tuple[str, list[dict]]]:
+    """허용된 근거 페이지와 그 페이지의 Finding 을 개선안을 만들어 볼 순서대로 돌려준다."""
     pages: dict[str, list[dict]] = {}
 
     for finding in findings:
@@ -153,13 +153,9 @@ def select_improvement_evidence(
             if is_allowed(url, hosts):
                 pages.setdefault(url, []).append(finding)
 
-    if not pages:
-        return None
-
-    # 가장 많은 Finding을 뒷받침하는 페이지를 우선 선택한다.
-    # 동률이면 처음 등장한 근거 URL을 선택한다.
-    selected_url = max(pages, key=lambda url: len(pages[url]))
-    return selected_url, pages[selected_url]
+    # 가장 많은 Finding을 뒷받침하는 페이지가 앞이다.
+    # 동률이면 처음 등장한 근거 URL이 앞이다 (sorted 는 같은 값의 순서를 바꾸지 않는다).
+    return sorted(pages.items(), key=lambda item: len(item[1]), reverse=True)
 
 
 @dataclass
@@ -449,72 +445,76 @@ class RunOrchestrator:
             return
 
         hosts = allowed_hosts(snapshot.target_url, snapshot.allowed_domains)
-        selected = select_improvement_evidence(findings, hosts)
-        if selected is None:
+        pages = improvement_evidence_pages(findings, hosts)
+        if not pages:
             logger.info("run=%s no allowed evidence page; skipping improvements", run_id)
             return
 
-        page_url, page_findings = selected
-
-        async with self._open_driver(run_id, 0, hosts) as driver:
-            await self._open_improvement_page(driver, page_url, hosts)
-            improvements = []
-            for attempt in range(2):
-                generated = await generate_improvements(
-                    llm=llm_client(),
-                    findings=page_findings,
-                    previous_patches=[],
-                    task_goal=snapshot.task.get("goal") or "",
-                    run_id=run_id,
-                    page=driver.page,
-                    hosts=hosts,
-                )
-
-                validated = []
-                for option in generated:
-                    patch = option["patch"]
-                    patch_payload = {
-                        key: value for key, value in patch.items() if key != "page_url"
-                    }
-
-                    try:
-                        async with self._open_driver(run_id, 0, hosts) as trial_driver:
-                            await self._open_improvement_page(trial_driver, page_url, hosts)
-                            success, reason = await validate_patch_application(
-                                trial_driver.page,
-                                option["patch_kind"],
-                                patch_payload,
-                            )
-                        if not success:
-                            logger.warning(
-                                "run=%s trial patch rejected: %s",
-                                run_id,
-                                reason,
-                            )
-                            continue
-                    except Exception:
-                        logger.exception(
-                            "run=%s trial patch raised an error",
-                            run_id,
-                        )
-                        continue
-
-                    validated.append(
-                        {
-                            **option,
-                            "option_no": len(validated) + 1,
-                        }
+        improvements = []
+        # 한 페이지에서 안이 나오지 않으면(사본에 없는 페이지 · DOM 후보 없음 등)
+        # 다음 근거 페이지로 넘어간다.
+        for page_url, page_findings in pages:
+            async with self._open_driver(run_id, 0, hosts) as driver:
+                await self._open_improvement_page(driver, page_url, hosts)
+                for attempt in range(2):
+                    generated = await generate_improvements(
+                        llm=llm_client(),
+                        findings=page_findings,
+                        previous_patches=[],
+                        task_goal=snapshot.task.get("goal") or "",
+                        run_id=run_id,
+                        page=driver.page,
+                        hosts=hosts,
                     )
 
-                improvements = validated
-                if improvements:
-                    break
+                    validated = []
+                    for option in generated:
+                        patch = option["patch"]
+                        patch_payload = {
+                            key: value for key, value in patch.items() if key != "page_url"
+                        }
 
-                logger.warning(
-                    "run=%s no applicable improvements on attempt %s/2",
-                    run_id,
-                    attempt + 1,
-                )
+                        try:
+                            async with self._open_driver(run_id, 0, hosts) as trial_driver:
+                                await self._open_improvement_page(trial_driver, page_url, hosts)
+                                success, reason = await validate_patch_application(
+                                    trial_driver.page,
+                                    option["patch_kind"],
+                                    patch_payload,
+                                )
+                            if not success:
+                                logger.warning(
+                                    "run=%s trial patch rejected: %s",
+                                    run_id,
+                                    reason,
+                                )
+                                continue
+                        except Exception:
+                            logger.exception(
+                                "run=%s trial patch raised an error",
+                                run_id,
+                            )
+                            continue
+
+                        validated.append(
+                            {
+                                **option,
+                                "option_no": len(validated) + 1,
+                            }
+                        )
+
+                    improvements = validated
+                    if improvements:
+                        break
+
+                    logger.warning(
+                        "run=%s no applicable improvements on attempt %s/2",
+                        run_id,
+                        attempt + 1,
+                    )
+
+            if improvements:
+                break
 
         if not improvements:
             logger.info(
