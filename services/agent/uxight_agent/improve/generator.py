@@ -7,6 +7,7 @@ from urllib.parse import urlsplit
 
 from pydantic import ValidationError
 
+from ..guard.domain import safe_destination
 from ..guard.page_text import mark_instructions
 from ..llm import LLMClient
 from .dom_candidates import collect_dom_candidates
@@ -223,7 +224,14 @@ async def generate_improvements(
             for candidate in dom_candidates
         ]
     if page is not None and not dom_candidates:
-        raise ValueError("No valid DOM candidates on the evidence page")
+        # 고칠 요소가 없는 페이지는 LLM 을 부르지 않는다.
+        # 오케스트레이터가 다음 근거 페이지로 넘어간다.
+        logger.info(
+            "run=%s 개선안 페이지 %s: DOM 후보 0개, LLM 을 부르지 않음",
+            run_id,
+            safe_destination(page.url),
+        )
+        return []
 
     response = await llm.chat(
         build_messages(findings, previous_patches, task_goal, dom_candidates),
@@ -255,6 +263,16 @@ async def generate_improvements(
         findings=findings,
         page=page,
         dom_candidates=dom_candidates,
+    )
+    # filter_improvement_options 가 options 가 목록인지 이미 확인했다.
+    option_count = len(data["options"])
+    logger.info(
+        "run=%s 개선안 페이지 %s: DOM 후보 %s개, LLM 이 낸 안 %s개, 걸러진 안 %s개",
+        run_id,
+        safe_destination(page.url) if page is not None else None,
+        len(dom_candidates) if dom_candidates is not None else 0,
+        option_count,
+        option_count - len(accepted),
     )
 
     if not accepted:
