@@ -289,6 +289,7 @@ export default function RFixes() {
 						type="button"
 						key={improvement.improvementId}
 						onClick={() => {
+							if (improvement.improvementId === selectedImprovementId) return;
 							setSelectedImprovementId(improvement.improvementId);
 							setDetail(null);
 							setDetailId(null);
