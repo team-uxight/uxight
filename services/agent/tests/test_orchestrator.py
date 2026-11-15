@@ -149,6 +149,34 @@ class FakeFindingRepository:
             raise RuntimeError("db down")
         self.rows.append((run_id, findings))
 
+    def get_by_run(self, run_id: int) -> list[dict]:
+        """저장된 진단 결과를 개선안 생성 단계에서 조회한다."""
+        return [
+            {
+                "finding_id": index,
+                "taxonomy": finding.taxonomy,
+                "severity": finding.severity,
+                "summary": finding.summary,
+                "evidence": finding.evidence,
+            }
+            for saved_run_id, findings in self.rows
+            if saved_run_id == run_id
+            for index, finding in enumerate(findings, start=1)
+        ]
+
+
+class FakeImprovementRepository:
+    """개선안 저장 여부와 저장 순서를 검증하는 테스트용 저장소."""
+
+    def __init__(self) -> None:
+        self.rows: list[tuple[int, list[dict]]] = []
+        self.fail = False
+
+    def insert_all(self, run_id: int, improvements: list[dict]) -> None:
+        if self.fail:
+            raise RuntimeError("improvement db down")
+        self.rows.append((run_id, improvements))
+
 
 class FakeAuditLogRepository:
     def __init__(self) -> None:
@@ -244,6 +272,8 @@ def fakes(monkeypatch: pytest.MonkeyPatch, tmp_path) -> SimpleNamespace:
     monkeypatch.setattr(orchestrator_module, "audit_log_repository", audits)
     findings = FakeFindingRepository()
     monkeypatch.setattr(orchestrator_module, "finding_repository", findings)
+    improvements = FakeImprovementRepository()
+    monkeypatch.setattr(orchestrator_module, "improvement_repository", improvements, raising=False)
     # 진단 설명은 LLM 없이 규칙 문장으로 — 설명 LLM 을 쓰는 테스트는 따로 바꿔 끼운다.
     monkeypatch.setattr(orchestrator_module, "make_summary_llm", lambda: None)
     # 판정 보조 LLM 도 없이 — 판정 LLM 을 쓰는 테스트는 따로 바꿔 끼운다 (GACA-161).
@@ -256,6 +286,7 @@ def fakes(monkeypatch: pytest.MonkeyPatch, tmp_path) -> SimpleNamespace:
         personas=personas,
         audits=audits,
         findings=findings,
+        improvements=improvements,
         log_dir=tmp_path,
     )
 
@@ -2154,3 +2185,220 @@ def test_cancel_stops_judge_quickly(
     assert calls == ["chat"]
     assert asyncio.run(judge_after_cancel()) is None
     assert calls == ["chat"]
+
+
+def test_diagnose_mode_does_not_save_improvements(
+    fakes: SimpleNamespace,
+) -> None:
+    """GACA-168: diagnose 모드는 진단만 수행하고 개선안을 저장하지 않는다."""
+    fakes.personas.statuses[1] = "done"
+    fakes.personas.url_reached[1] = True
+
+    snap = snapshot([])
+    assert snap.mode == "diagnose"
+
+    asyncio.run(RunOrchestrator()._finish_run(RUN_ID, snap))
+
+    assert fakes.runs.status == "done"
+    assert fakes.improvements.rows == []
+
+
+def test_improve_mode_saves_improvements_before_done(
+    fakes: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """GACA-168: 개선안 저장이 완료된 후 회차를 done으로 전환한다."""
+    fakes.personas.statuses[1] = "done"
+    fakes.personas.url_reached[1] = True
+
+    from dataclasses import replace
+
+    snap = replace(snapshot([]), mode="improve")
+
+    events = []
+
+    async def fake_save_improvements(self, run_id, snapshot):
+        assert run_id == RUN_ID
+        assert snapshot.mode == "improve"
+        events.append("save_improvements")
+        fakes.improvements.insert_all(
+            run_id,
+            [
+                {
+                    "option_no": 1,
+                    "finding_ids": [1],
+                    "patch_kind": "relabel",
+                    "patch": {"target": "#menu", "new_text": "장학금"},
+                    "rationale": "메뉴 이름을 명확하게 변경",
+                    "expected_effect": "step_count",
+                    "fix_cost": None,
+                }
+            ],
+        )
+
+    monkeypatch.setattr(
+        RunOrchestrator,
+        "_save_improvements",
+        fake_save_improvements,
+        raising=False,
+    )
+
+    original_mark_done = fakes.runs.mark_done
+
+    def record_mark_done(run_id, success_rate):
+        events.append("mark_done")
+        original_mark_done(run_id, success_rate)
+
+    monkeypatch.setattr(fakes.runs, "mark_done", record_mark_done)
+
+    asyncio.run(RunOrchestrator()._finish_run(RUN_ID, snap))
+
+    assert events == ["save_improvements", "mark_done"]
+    assert fakes.runs.status == "done"
+    assert len(fakes.improvements.rows) == 1
+
+
+@pytest.mark.parametrize("mode", ["improve", "loop"])
+def test_improvement_failure_still_marks_run_done(
+    fakes: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    mode: str,
+) -> None:
+    """GACA-168: 개선안 생성 실패 시에도 진단을 보존하고 done으로 종료한다."""
+    from dataclasses import replace
+
+    fakes.personas.statuses[1] = "done"
+    fakes.personas.url_reached[1] = True
+
+    async def fail_improvements(self, run_id, snapshot):
+        raise RuntimeError("improvement generation failed")
+
+    monkeypatch.setattr(
+        RunOrchestrator,
+        "_save_improvements",
+        fail_improvements,
+    )
+
+    snap = replace(snapshot([]), mode=mode)
+    asyncio.run(RunOrchestrator()._finish_run(RUN_ID, snap))
+
+    assert fakes.runs.status == "done"
+    assert fakes.runs.error is None
+    assert fakes.improvements.rows == []
+    assert "improvement generation failed" in caplog.text
+
+
+@pytest.mark.parametrize("mode", ["improve", "loop"])
+def test_no_findings_skips_improvement_generation(
+    fakes: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
+) -> None:
+    """GACA-168: 진단 결과가 없으면 개선안 생성을 생략한다."""
+    from dataclasses import replace
+
+    fakes.personas.statuses[1] = "done"
+    fakes.personas.url_reached[1] = True
+
+    def unexpected_llm():
+        raise AssertionError("진단 결과가 없는데 LLM을 호출했습니다.")
+
+    monkeypatch.setattr(orchestrator_module, "llm_client", unexpected_llm)
+
+    snap = replace(snapshot([]), mode=mode)
+    asyncio.run(RunOrchestrator()._finish_run(RUN_ID, snap))
+
+    assert fakes.runs.status == "done"
+    assert fakes.improvements.rows == []
+    assert fakes.browsers.started == 0
+
+
+def test_improvement_timeout_preserves_diagnosis_and_marks_done(
+    fakes: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """GACA-169: 개선안 단계 시간 초과에도 진단을 보존하고 done으로 종료한다."""
+    from dataclasses import replace
+
+    fakes.personas.statuses[1] = "done"
+    fakes.personas.url_reached[1] = True
+
+    events = []
+    was_cancelled = []
+
+    async def fake_save_findings(run_id, statuses, snap):
+        assert run_id == RUN_ID
+        events.append("diagnosis_saved")
+
+    async def slow_improvements(self, run_id, snap):
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            was_cancelled.append(True)
+            raise
+
+    monkeypatch.setattr(
+        RunOrchestrator,
+        "_save_findings",
+        staticmethod(fake_save_findings),
+    )
+    monkeypatch.setattr(
+        RunOrchestrator,
+        "_save_improvements",
+        slow_improvements,
+    )
+    monkeypatch.setattr(
+        orchestrator_module,
+        "IMPROVEMENT_TIMEOUT_SECONDS",
+        0.01,
+    )
+
+    snap = replace(snapshot([]), mode="improve")
+    asyncio.run(RunOrchestrator()._finish_run(RUN_ID, snap))
+
+    assert events == ["diagnosis_saved"]
+    assert was_cancelled == [True]
+    assert fakes.runs.status == "done"
+    assert fakes.runs.error is None
+    assert fakes.improvements.rows == []
+
+
+def test_heartbeat_continues_during_run_finalization(
+    fakes: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """GACA-169: Persona 종료 이후 진단·개선안 단계에서도 heartbeat를 유지한다."""
+    from dataclasses import replace
+
+    monkeypatch.setattr(orchestrator_module, "CANCEL_POLL_SECONDS", 0.01)
+
+    heartbeat_counts = []
+
+    async def fake_finish_run(self, run_id, snap):
+        # Persona 실행이 끝난 뒤에도 감시 태스크가 동작할 시간을 준다.
+        before = fakes.runs.heartbeats
+        await asyncio.sleep(0.05)
+        after = fakes.runs.heartbeats
+        heartbeat_counts.append((before, after))
+
+        fakes.runs.mark_done(run_id, success_rate=None)
+
+    monkeypatch.setattr(
+        RunOrchestrator,
+        "_finish_run",
+        fake_finish_run,
+    )
+
+    snap = replace(snapshot([persona(1)]), mode="improve")
+
+    orchestrator = RunOrchestrator()
+    asyncio.run(run(fakes, RUN_ID, snap, orchestrator))
+
+    assert len(heartbeat_counts) == 1
+
+    before, after = heartbeat_counts[0]
+    assert after > before, "Persona 종료 후 _finish_run 실행 중 heartbeat가 갱신되지 않았습니다."
+
+    assert fakes.runs.status == "done"
+    assert RUN_ID not in orchestrator._run_tokens

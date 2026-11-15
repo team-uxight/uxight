@@ -5,6 +5,10 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 NonEmptyText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+PatchText = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=200),
+]
 
 
 class PatchBase(BaseModel):
@@ -20,7 +24,7 @@ class RelabelPatch(PatchBase):
     """대상 요소의 표시 문구를 변경한다."""
 
     kind: Literal["relabel"] = "relabel"
-    new_text: NonEmptyText
+    new_text: PatchText
 
 
 class MovePatch(PatchBase):
@@ -42,7 +46,7 @@ class HelpTextPatch(PatchBase):
     """대상 요소에 안내 문구를 추가한다."""
 
     kind: Literal["help_text"] = "help_text"
-    text: NonEmptyText
+    text: PatchText
 
 
 Patch = Annotated[
