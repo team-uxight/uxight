@@ -65,6 +65,8 @@ type NumberField =
   | "maxConcurrent"
   | "maxPersonas"
   | "maxSteps"
+  | "maxTokens"
+  | "rateLimitPerDomain"
   | "maxMinutes";
 
 type PolicyData = {
@@ -74,17 +76,19 @@ type PolicyData = {
 
 const INITIAL_POLICY: PolicyData = {
   roles: {
-    researcher: { model: "GPT-4o mini", budget: 5 },
-    maintainer: { model: "GPT-4o", budget: 10 },
-    admin: { model: "GPT-4o", budget: 20 },
+    researcher: { model: "GPT-6-Luna", budget: 5 },
+    maintainer: { model: "GPT-6-Luna", budget: 10 },
+    admin: { model: "GPT-6-Luna", budget: 20 },
   },
   monthlyBudget: 300,
-  dailyTokens: 2000000,
+  dailyTokens: null,
   domains: ["gachon.ac.kr", "example.com", "uxight.ai"],
-  maxConcurrent: 3,
-  maxPersonas: 5,
-  maxSteps: 60,
-  maxMinutes: 30,
+  maxConcurrent: null,
+  maxPersonas: null,
+  maxSteps: null,
+  maxTokens: null,
+  rateLimitPerDomain: null,
+  maxMinutes: null,
 };
 
 const ROLES: { key: Role; name: string; title: string }[] = [
@@ -93,12 +97,14 @@ const ROLES: { key: Role; name: string; title: string }[] = [
   { key: "admin", name: "Admin", title: "관리자" },
 ];
 
-const MODEL_OPTIONS = ["GPT-4o mini", "GPT-4o"];
+const MODEL_OPTIONS = ["GPT-6-Luna"];
 
 const LIMIT_FIELDS: { key: NumberField; label: string }[] = [
   { key: "maxConcurrent", label: "최대 동시 실행 수 (건)" },
   { key: "maxPersonas", label: "회차당 동시 실행 Persona 수 (명)" },
   { key: "maxSteps", label: "Persona당 Step 상한 (steps)" },
+  { key: "maxTokens", label: "회차당 토큰 상한 (tokens)" },
+  { key: "rateLimitPerDomain", label: "도메인당 요청 상한 (회/분)" },
   { key: "maxMinutes", label: "실행 시간 상한 (분)" },
 ];
 
@@ -164,6 +170,9 @@ export default function AdminPolicy() {
           maxConcurrent: data.runConcurrency,
           maxPersonas: data.personaConcurrency,
           maxSteps: data.maxSteps,
+          maxTokens: data.maxTokens,
+          rateLimitPerDomain: data.rateLimitPerDomain,
+
           maxMinutes:
             data.maxSeconds === null
               ? null
@@ -287,11 +296,23 @@ export default function AdminPolicy() {
       (policy.dailyTokens !== null &&
         (!Number.isSafeInteger(policy.dailyTokens) ||
           policy.dailyTokens < 1)) ||
-      [policy.maxConcurrent, policy.maxSteps].some(
+      [
+        policy.maxConcurrent,
+        policy.maxSteps,
+        policy.rateLimitPerDomain,
+      ].some(
         (value) =>
           value !== null &&
           (!Number.isInteger(value) || value < 1 || value > 2147483647),
       ) ||
+      (policy.maxPersonas !== null &&
+        (!Number.isInteger(policy.maxPersonas) ||
+          policy.maxPersonas < 1 ||
+          policy.maxPersonas > 2147483647)) ||
+      (policy.maxTokens !== null &&
+        (!Number.isInteger(policy.maxTokens) ||
+          policy.maxTokens < 1 ||
+          policy.maxTokens > 2147483647)) ||
       (policy.maxMinutes !== null &&
         (!Number.isInteger(policy.maxMinutes) ||
           policy.maxMinutes < 1 ||
@@ -320,11 +341,30 @@ export default function AdminPolicy() {
       changes.runConcurrency = policy.maxConcurrent;
     }
 
+    if (
+      policy.maxPersonas !== null &&
+      policy.maxPersonas !== savedPolicy.maxPersonas
+    ) {
+      changes.personaConcurrency = policy.maxPersonas;
+    }
+
     if (policy.maxSteps !== null && policy.maxSteps !== savedPolicy.maxSteps) {
       changes.maxSteps = policy.maxSteps;
     }
 
-    // Persona 항목은 현재 조회 전용이므로 PATCH에서 제외
+    if (
+      policy.maxTokens !== null &&
+      policy.maxTokens !== savedPolicy.maxTokens
+    ) {
+      changes.maxTokens = policy.maxTokens;
+    }
+
+    if (
+      policy.rateLimitPerDomain !== null &&
+      policy.rateLimitPerDomain !== savedPolicy.rateLimitPerDomain
+    ) {
+      changes.rateLimitPerDomain = policy.rateLimitPerDomain;
+    }
 
     if (
       policy.maxMinutes !== null &&
@@ -374,6 +414,8 @@ export default function AdminPolicy() {
       nextPolicy.maxConcurrent = updated.runConcurrency;
       nextPolicy.maxPersonas = updated.personaConcurrency;
       nextPolicy.maxSteps = updated.maxSteps;
+      nextPolicy.maxTokens = updated.maxTokens;
+      nextPolicy.rateLimitPerDomain = updated.rateLimitPerDomain;
 
       nextPolicy.maxMinutes =
         updated.maxSeconds === null
@@ -519,8 +561,8 @@ export default function AdminPolicy() {
             <div className="admin-policy-callout">
               <Gauge size={15} aria-hidden="true" />
               <span>
-                화면의 모델명·예산 숫자는 데모 예시입니다. 실제 저장 가능한 값은
-                API 명세에 맞춰 확정합니다.
+                역할별 모델·실행당 예산과 월 예산은 예시이며 연결 전입니다.
+                일일 토큰 예산은 서버 정책입니다.
               </span>
             </div>
           </section>
@@ -532,17 +574,8 @@ export default function AdminPolicy() {
               </span>
               <div>
                 <h2>허용 사이트 목록</h2>
-                <p>실험 에이전트가 접근할 수 있는 도메인만 등록하세요.</p>
-                <p
-                  style={{
-                    color: "#DC2626",
-                    fontSize: "12px",
-                    marginTop: "6px",
-                  }}
-                >
-                  ※ 예시 · 연결 전 — 현재 표시된 도메인은 실제 서버 정책이
-                  아닙니다.
-                </p>
+                <p>예시 · 연결 전: 아래 목록은 실제 허용 도메인 정책이 아닙니다.</p>
+
               </div>
             </div>
             <div className="admin-domain-row">
@@ -614,7 +647,6 @@ export default function AdminPolicy() {
                   {label}
                   <input
                     disabled={
-                      key === "maxPersonas" ||
                       (key === "maxMinutes" &&
                         serverPolicy?.maxSeconds != null &&
                         serverPolicy.maxSeconds % 60 !== 0) ||
