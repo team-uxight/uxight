@@ -62,5 +62,57 @@ class ImprovementRepository:
                 rows,
             )
 
+    def get_approved_patches(self, run_id: int) -> list[dict[str, Any]]:
+        """현재 회차에 적용할 승인 패치를 오래된 순서부터 조회한다."""
+        with engine.connect() as conn:
+            rows = (
+                conn.execute(
+                    text(
+                        """
+                    WITH RECURSIVE run_chain AS (
+                        SELECT run_id, parent_run_id, improvement_id, 0 AS depth
+                        FROM runs
+                        WHERE run_id = :run_id
+
+                        UNION ALL
+
+                        SELECT parent.run_id, parent.parent_run_id,
+                               parent.improvement_id, child.depth + 1
+                        FROM runs AS parent
+                        JOIN run_chain AS child
+                            ON parent.run_id = child.parent_run_id
+                    )
+                    SELECT
+                        i.improvement_id,
+                        i.patch_kind,
+                        i.patch,
+                        i.run_id AS source_run_id
+                    FROM run_chain AS rc
+                    JOIN improvements AS i
+                        ON i.improvement_id = rc.improvement_id
+                    JOIN approvals AS a
+                        ON a.improvement_id = i.improvement_id
+                    WHERE a.decision = 'approve'
+                    ORDER BY rc.depth DESC
+                    """
+                    ),
+                    {"run_id": run_id},
+                )
+                .mappings()
+                .all()
+            )
+
+        return [
+            {
+                "improvement_id": row["improvement_id"],
+                "source_run_id": row["source_run_id"],
+                "patch_kind": row["patch_kind"],
+                "patch": (
+                    json.loads(row["patch"]) if isinstance(row["patch"], str) else row["patch"]
+                ),
+            }
+            for row in rows
+        ]
+
 
 improvement_repository = ImprovementRepository()

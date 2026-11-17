@@ -82,6 +82,16 @@ _APPLY_JS = """
       break;
     }
     case 'help_text': {
+      const next = target.nextElementSibling;
+      if (
+        next &&
+        next.getAttribute('data-uxight-help') === 'true' &&
+        next.textContent === patch.text
+      ) {
+        description = `'${oldText}' 아래 도움말 이미 적용됨: '${patch.text}'`;
+        break;
+      }
+
       const help = document.createElement('span');
       help.textContent = patch.text;
       help.setAttribute('data-uxight-help', 'true');
