@@ -146,7 +146,8 @@ def test_repeated_observe_preserves_patch_results():
                 await driver.observe()
 
                 assert await page.locator("#scholarship").inner_text() == "장학금 안내"
-                assert len(driver.patch_results) == 2
+                # 같은 문서에는 한 번만 넣으므로 결과도 하나다.
+                assert len(driver.patch_results) == 1
                 assert all(result["applied"] for result in driver.patch_results)
             finally:
                 await browser.close()
