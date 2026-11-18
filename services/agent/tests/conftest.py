@@ -15,6 +15,13 @@ from uxight_agent.llm import LLMClient
 NO_CHOICES = "<no choices>"
 
 
+@pytest.fixture(autouse=True)
+def _no_polish_model(monkeypatch):
+    """시험은 실제 교정 LLM 을 부르지 않는다. 교정을 시험할 때는 가짜 LLM 을 넘긴다."""
+    for name in ("POLISH_MODEL", "POLISH_BASE_URL", "POLISH_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+
+
 def _sse(content: str | None, finish: str) -> bytes:
     """스트리밍 답. 글은 두 조각으로 나눠 보내고, 사용량은 choices 가 빈 마지막 조각에 온다.
 

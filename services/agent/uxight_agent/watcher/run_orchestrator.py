@@ -22,6 +22,7 @@ from ..llm import LLMClient
 from ..patch.result_aggregator import aggregate_patch_results
 from ..persona.llm_decider import STEP_MAX_RETRIES, LLMDecider
 from ..persona.persona_agent import Decider, PersonaAgent
+from ..polish import make_polish_llm, polish_improvements, polish_summaries
 from ..repositories.audit_log_repository import audit_log_repository
 from ..repositories.finding_repository import finding_repository
 from ..repositories.improvement_repository import improvement_repository
@@ -447,19 +448,17 @@ class RunOrchestrator:
             names = {p["persona_id"]: p.get("name") for p in snapshot.personas}
             goal = snapshot.task.get("goal") or ""
             llm = make_summary_llm()
+            facts = [build_facts(f, steps_by_persona, statuses, goal, names) for f in findings]
             # 유형별 설명은 서로 기다리지 않는다 — 회차당 최대 4번, 최악 약 40초.
             results = await asyncio.gather(
                 *(
-                    summarize(
-                        llm,
-                        f,
-                        build_facts(f, steps_by_persona, statuses, goal, names),
-                        run_id=run_id,
-                    )
-                    for f in findings
+                    summarize(llm, f, fa, run_id=run_id)
+                    for f, fa in zip(findings, facts, strict=True)
                 )
             )
-            for finding, (summary, _source) in zip(findings, results, strict=True):
+            # LLM 이 쓴 설명만 한 번에 교정한다(GACA-148). POLISH_MODEL 이 비면 그대로다.
+            summaries = await polish_summaries(make_polish_llm(), results, facts, run_id=run_id)
+            for finding, summary in zip(findings, summaries, strict=True):
                 finding.summary = summary
         finding_repository.insert_all(run_id, findings)
         logger.info(
@@ -474,6 +473,7 @@ class RunOrchestrator:
         snapshot: RunSnapshot,
     ) -> None:
         """GACA-168: 진단 근거 페이지에서 개선안을 생성·검증하고 저장한다."""
+        started = asyncio.get_running_loop().time()
         findings = finding_repository.get_by_run(run_id)
         if not findings:
             logger.info("run=%s no findings; skipping improvements", run_id)
@@ -578,6 +578,11 @@ class RunOrchestrator:
             )
             return
 
+        # 글 교정(GACA-148)은 120초 상한에서 남은 시간 안에서만 한다.
+        left = IMPROVEMENT_TIMEOUT_SECONDS - (asyncio.get_running_loop().time() - started)
+        improvements = await polish_improvements(
+            make_polish_llm(), improvements, run_id=run_id, budget=left
+        )
         improvement_repository.insert_all(run_id, improvements)
         logger.info(
             "run=%s improvements saved: %s",
