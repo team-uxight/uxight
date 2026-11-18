@@ -47,6 +47,9 @@ services:
       JUDGE_MODEL: ${JUDGE_MODEL:-}       # 성공 판정 보조(GACA-161). 비면 판정하지 않는다
       JUDGE_BASE_URL: ${JUDGE_BASE_URL:-}
       JUDGE_API_KEY: ${JUDGE_API_KEY:-}
+      POLISH_MODEL: ${POLISH_MODEL:-}     # 화면 글 교정(GACA-148). 비면 교정하지 않는다
+      POLISH_BASE_URL: ${POLISH_BASE_URL:-}   # 교정 모델 주소와 키. 둘 다 비면 LLM_* 를 쓴다
+      POLISH_API_KEY: ${POLISH_API_KEY:-}
       DB_URL: mysql+pymysql://${MYSQL_USER:-uxight}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE:-uxight}
       INTERNAL_TOKEN: ${INTERNAL_TOKEN:-}   # 내부 API 공유 토큰 (X-Internal-Token) — api 와 같은 값
       LOG_DIR: /app/data/runs            # step 로그 → 아래 data/ 볼륨. 절대 경로 (DB log_path 는 이 기준 상대 경로)

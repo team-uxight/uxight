@@ -1814,6 +1814,40 @@ def test_findings_get_llm_summary(
     assert "- p1 step 2: URL 경로 /" in facts
 
 
+@pytest.mark.parametrize(
+    ("polish_reply", "saved"),
+    [
+        (
+            json.dumps({"texts": ["p1은 step 2에서 step 상한에 닿아 과제를 마치지 못했다."]}),
+            "p1은 step 2에서 step 상한에 닿아 과제를 마치지 못했다.",
+        ),
+        (None, "p1은 step 2에서 step 상한에 닿아 과제를 끝내지 못했다."),
+    ],
+    ids=["polished", "polish-failed"],
+)
+def test_llm_summary_is_polished_before_save(
+    fakes: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    scripted_llm,
+    polish_reply: str | None,
+    saved: str,
+) -> None:
+    # 저장 전에 LLM 이 쓴 설명을 교정한다(GACA-148). 교정이 실패하면 원문으로 저장하고 회차는 done.
+    llm, _ = scripted_llm("p1은 step 2에서 step 상한에 닿아 과제를 끝내지 못했다.")
+    polish_llm, polish_requests = scripted_llm(polish_reply)
+    monkeypatch.setattr(orchestrator_module, "make_summary_llm", lambda: llm)
+    monkeypatch.setattr(orchestrator_module, "make_polish_llm", lambda: polish_llm)
+    snap = snapshot([persona(1)], max_steps=2)
+    snap.task["success_url"] = "https://example.com/goal"
+
+    asyncio.run(run(fakes, RUN_ID, snap))
+
+    [(_, findings)] = fakes.findings.rows
+    assert findings[0].summary == saved
+    assert fakes.runs.status == "done"
+    assert len(polish_requests) == 1
+
+
 class FirstStepDoneDecider(Decider):
     """첫 step 에서 done 을 낸다."""
 
