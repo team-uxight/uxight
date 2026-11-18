@@ -19,11 +19,13 @@ from ..improve.patch_validator import validate_patch_application
 from ..judge import MAX_RETRIES as JUDGE_MAX_RETRIES
 from ..judge import judge, judge_input
 from ..llm import LLMClient
+from ..patch.result_aggregator import aggregate_patch_results
 from ..persona.llm_decider import STEP_MAX_RETRIES, LLMDecider
 from ..persona.persona_agent import Decider, PersonaAgent
 from ..repositories.audit_log_repository import audit_log_repository
 from ..repositories.finding_repository import finding_repository
 from ..repositories.improvement_repository import improvement_repository
+from ..repositories.patch_version_repository import patch_version_repository
 from ..repositories.run_persona_repository import PersonaOutcome, run_persona_repository
 from ..repositories.run_repository import RunSnapshot, run_repository
 from ..usage_report import PriceTable, price_table
@@ -174,6 +176,7 @@ class RunOrchestrator:
         # (회차, Persona) 별로 Persona 가 끝날 때 본 마지막 화면. 성공 판정 보조(GACA-161)가 쓴다 —
         # step 로그에는 제목 · 본문 글이 없다. Persona 결과를 기록할 때 꺼내 지운다.
         self._last_pages: dict[tuple[int, int], Observation] = {}
+        self._patch_persona_results: dict[int, dict[int, list[dict]]] = {}
 
     def try_accept_and_start(self, run_id: int) -> RunSnapshot | None:
         """queued 인 회차만 수락한다.
@@ -321,6 +324,7 @@ class RunOrchestrator:
         finally:
             watcher.cancel()
             await asyncio.gather(watcher, return_exceptions=True)
+            self._patch_persona_results.pop(run_id, None)
             self._run_tokens.pop(run_id, None)
 
     def _fail_run(self, run_id: int, error: str) -> None:
@@ -359,6 +363,37 @@ class RunOrchestrator:
         # Persona 일부가 fail · timeout 이어도 회차는 실패가 아니다
         # (architecture §3.3, PM 결정 10/13).
         # 우선순위: 취소(cancelled 가 하나라도) > 실패(모두 fail = 실행 오류) > 완료(그 밖 전부).
+        # GACA-170: 모든 Persona가 끝난 후 승인 패치의 실제 적용 결과를 기록한다.
+        approved_patches = improvement_repository.get_approved_patches(run_id)
+
+        if approved_patches:
+            captured = self._patch_persona_results.get(run_id, {})
+            persona_results = {
+                persona["persona_id"]: captured.get(persona["persona_id"], [])
+                for persona in snapshot.personas
+            }
+
+            aggregated = aggregate_patch_results(
+                approved_patches,
+                persona_results,
+            )
+
+            try:
+                patch_version_repository.insert_all(run_id, aggregated)
+            except Exception:
+                logger.exception(
+                    "run=%s patch_versions save failed",
+                    run_id,
+                )
+                if "cancelled" in statuses.values():
+                    run_repository.mark_cancelled(run_id)
+                else:
+                    run_repository.mark_failed(
+                        run_id,
+                        error="패치 적용 결과 저장 실패",
+                    )
+                return
+
         if "cancelled" in statuses.values():
             run_repository.mark_cancelled(run_id)
         elif all(status == "fail" for status in statuses.values()):
@@ -573,17 +608,26 @@ class RunOrchestrator:
                 try:
                     run_persona_repository.mark_started(run_id, persona_id)
                     async with self._open_driver(run_id, persona_id, hosts) as driver:
-                        outcome = await self._drive_persona(
-                            run_id,
-                            target_url,
-                            hosts,
-                            task,
-                            persona,
-                            max_steps,
-                            max_seconds,
-                            cancel_event,
-                            driver,
-                        )
+                        approved_patches = improvement_repository.get_approved_patches(run_id)
+                        if approved_patches:
+                            driver.set_approved_patches(approved_patches)
+                        try:
+                            outcome = await self._drive_persona(
+                                run_id,
+                                target_url,
+                                hosts,
+                                task,
+                                persona,
+                                max_steps,
+                                max_seconds,
+                                cancel_event,
+                                driver,
+                            )
+                        finally:
+                            if approved_patches:
+                                self._patch_persona_results.setdefault(run_id, {})[persona_id] = (
+                                    driver.patch_results
+                                )
                     if outcome == "cancelled":
                         # 위 async with를 빠져나왔으므로 이 시점엔 브라우저가 이미 닫혀 있다.
                         logger.info(
