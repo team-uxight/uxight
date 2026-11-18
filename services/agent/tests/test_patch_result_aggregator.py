@@ -53,7 +53,8 @@ def test_one_persona_fails():
     assert "Target not found" in rows[0]["fail_reason"]
 
 
-def test_persona_never_visits_target_page():
+def test_unvisited_persona_is_not_a_failure():
+    """들르지 않은 Persona 는 실패로 세지 않는다. 한 명에게라도 들어갔으면 적용된 것이다."""
     rows = aggregate_patch_results(
         [approved_patch()],
         {
@@ -62,9 +63,53 @@ def test_persona_never_visits_target_page():
         },
     )
 
+    assert rows[0]["applied"] is True
+    assert rows[0]["fail_reason"] is None
+
+
+def test_applied_to_some_personas_only():
+    """5명 중 3명에게 들어가고 2명은 그 페이지에 들르지 않은 회차는 적용된 것으로 기록한다."""
+    rows = aggregate_patch_results(
+        [approved_patch()],
+        {
+            1: [attempt(), attempt()],
+            2: [],
+            3: [attempt()],
+            4: [],
+            5: [attempt()],
+        },
+    )
+
+    assert rows[0]["applied"] is True
+    assert rows[0]["fail_reason"] is None
+
+
+def test_nobody_visits_target_page():
+    rows = aggregate_patch_results(
+        [approved_patch()],
+        {
+            1: [],
+            2: [],
+        },
+    )
+
     assert rows[0]["applied"] is False
-    assert "persona=2" in rows[0]["fail_reason"]
-    assert "not visited" in rows[0]["fail_reason"]
+    assert rows[0]["fail_reason"] == "target page not visited by any persona"
+
+
+def test_failure_reason_leaves_out_unvisited_personas():
+    """넣다가 실패한 기록이 있으면 실패다. 사유에는 실패한 Persona 만 적는다."""
+    rows = aggregate_patch_results(
+        [approved_patch()],
+        {
+            1: [attempt(False, "Target not found")],
+            2: [],
+            3: [attempt()],
+        },
+    )
+
+    assert rows[0]["applied"] is False
+    assert rows[0]["fail_reason"] == "persona=1: Target not found"
 
 
 def test_repeated_observation_preserves_failure():
