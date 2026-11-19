@@ -279,6 +279,27 @@ export async function fetchComparison(firstRunId: number): Promise<Comparison> {
 	return body;
 }
 
+export async function fetchComparisonScreenshot(
+	firstRunId: number,
+	runId: number,
+	screenshot: ComparisonScreenshot,
+	signal: AbortSignal,
+): Promise<Blob> {
+	const query = new URLSearchParams({
+		runId: String(runId),
+		personaId: String(screenshot.personaId),
+		step: String(screenshot.step),
+	});
+	const response = await authenticatedFetch(
+		`${API_BASE_URL}/api/runs/${firstRunId}/comparison/screenshots?${query}`,
+		{ signal },
+	);
+	if (!response.ok) {
+		throw new Error(await apiErrorMessage(response, '스크린샷을 불러오지 못했습니다.'));
+	}
+	return response.blob();
+}
+
 export async function cancelExperiment(firstRunId: number): Promise<void> {
 	const response = await authenticatedFetch(`${API_BASE_URL}/api/runs/${firstRunId}/cancel`, {
 		method: 'POST',

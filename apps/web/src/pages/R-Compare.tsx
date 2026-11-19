@@ -2,14 +2,79 @@ import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Plus, UserRoundPlus } from 'lucide-react';
 import { patchKindLabels } from '../auth';
-import { fetchComparison, fetchExperiments, type Comparison, type Experiment } from './experiments';
+import { fetchComparison, fetchComparisonScreenshot, fetchExperiments, type Comparison, type ComparisonScreenshot, type Experiment } from './experiments';
 import './R-Compare.css';
 
 type ParticipantResult = 'success' | 'failure' | '';
 type LoadState = 'loading-experiments' | 'loading-comparison' | 'ready' | 'empty' | 'error';
+type ScreenshotPair = {
+	personaId: number;
+	before: ComparisonScreenshot | null;
+	after: ComparisonScreenshot | null;
+};
 
 function errorMessage(error: unknown, fallback: string): string {
 	return error instanceof Error ? error.message : fallback;
+}
+
+function getScreenshotPairs(comparison: Comparison): ScreenshotPair[] {
+	const pairs = new Map<number, ScreenshotPair>();
+	for (const screenshot of comparison.before.screenshots) {
+		const pair = pairs.get(screenshot.personaId) ?? { personaId: screenshot.personaId, before: null, after: null };
+		pair.before = screenshot;
+		pairs.set(screenshot.personaId, pair);
+	}
+	for (const screenshot of comparison.after?.screenshots ?? []) {
+		const pair = pairs.get(screenshot.personaId) ?? { personaId: screenshot.personaId, before: null, after: null };
+		pair.after = screenshot;
+		pairs.set(screenshot.personaId, pair);
+	}
+	return [...pairs.values()];
+}
+
+type ComparisonScreenshotCardProps = {
+	firstRunId: number;
+	runId: number;
+	personaId: number;
+	label: string;
+	screenshot: ComparisonScreenshot | null;
+};
+
+function ComparisonScreenshotCard({ firstRunId, runId, personaId, label, screenshot }: ComparisonScreenshotCardProps) {
+	const [imageUrl, setImageUrl] = useState<string | null>(null);
+	const [loadError, setLoadError] = useState('');
+
+	useEffect(() => {
+		if (!screenshot) return;
+		const controller = new AbortController();
+		let objectUrl: string | null = null;
+		fetchComparisonScreenshot(firstRunId, runId, screenshot, controller.signal)
+			.then((image) => {
+				if (controller.signal.aborted) return;
+				objectUrl = URL.createObjectURL(image);
+				setImageUrl(objectUrl);
+			})
+			.catch((error: unknown) => {
+				if (!controller.signal.aborted) setLoadError(errorMessage(error, '스크린샷을 불러오지 못했습니다.'));
+			});
+		return () => {
+			controller.abort();
+			if (objectUrl) URL.revokeObjectURL(objectUrl);
+		};
+	}, [firstRunId, runId, screenshot]);
+
+	return (
+		<figure className="rd-compare-screenshot-card">
+			<figcaption>{label}{screenshot && ` · step ${screenshot.step}`}</figcaption>
+			{!screenshot
+				? <p className="rd-compare-screenshot-feedback">이 회차에는 비교할 스크린샷이 없습니다.</p>
+				: loadError
+					? <p className="rd-compare-screenshot-feedback is-error" role="alert">{loadError}</p>
+					: imageUrl
+						? <img src={imageUrl} alt={`Persona #${personaId} ${label} 화면`} />
+						: <p className="rd-compare-screenshot-feedback" role="status">스크린샷을 불러오는 중입니다.</p>}
+		</figure>
+	);
 }
 
 function formatNumber(value: number, maximumFractionDigits = 1): string {
@@ -54,6 +119,7 @@ export default function RCompare() {
 	const [loadError, setLoadError] = useState('');
 	const [participantResults, setParticipantResults] = useState<ParticipantResult[]>([]);
 	const [notice, setNotice] = useState('');
+	const [selectedPersonaId, setSelectedPersonaId] = useState<number | null>(null);
 
 	useEffect(() => {
 		let active = true;
@@ -138,6 +204,8 @@ export default function RCompare() {
 	const afterRate = comparison.after?.metrics.successRate ?? null;
 	const rateChange = beforeRate !== null && afterRate !== null ? afterRate - beforeRate : null;
 	const humanGap = afterRate !== null && realSuccessRate !== null ? afterRate - realSuccessRate : null;
+	const screenshotPairs = getScreenshotPairs(comparison);
+	const selectedScreenshotPair = screenshotPairs.find((pair) => pair.personaId === selectedPersonaId) ?? screenshotPairs[0] ?? null;
 
 	return (
 		<section className="rd-compare" aria-labelledby="compare-title">
@@ -162,6 +230,7 @@ export default function RCompare() {
 						setLoadState('loading-comparison');
 						setParticipantResults([]);
 						setNotice('');
+						setSelectedPersonaId(null);
 					}}
 				>
 					{experiments.map((item) => (
@@ -231,6 +300,53 @@ export default function RCompare() {
 					<p className="rd-compare-hint">AI 변화: {formatChange(rateChange)} · AI After와 입력 결과 차이: {formatChange(humanGap)}</p>
 				</section>
 			</div>
+
+			<section className="rd-compare-card rd-compare-screenshots" aria-labelledby="compare-screenshots-title">
+				<div className="rd-compare-screenshot-heading">
+					<div className="rd-compare-section-title">
+						<div><h2 id="compare-screenshots-title">개선안 적용 화면 비교</h2><p>같은 Persona가 개선안 관련 페이지를 방문한 화면입니다.</p></div>
+					</div>
+					{selectedScreenshotPair && (
+						<label className="rd-compare-persona-select">
+							Persona
+							<select
+								value={selectedScreenshotPair.personaId}
+								onChange={(event) => setSelectedPersonaId(Number(event.target.value))}
+							>
+								{screenshotPairs.map((pair) => (
+									<option key={pair.personaId} value={pair.personaId}>Persona #{pair.personaId}</option>
+								))}
+							</select>
+						</label>
+					)}
+				</div>
+				{!selectedScreenshotPair
+					? <p className="rd-compare-hint">{comparison.after ? '개선안 관련 페이지의 스크린샷이 없습니다.' : '완료된 재실험이 없어 비교할 스크린샷이 없습니다.'}</p>
+					: (
+						<div className="rd-compare-screenshot-pair">
+							<ComparisonScreenshotCard
+								key={`before-${comparison.before.runId}-${selectedScreenshotPair.personaId}-${selectedScreenshotPair.before?.step ?? 'none'}`}
+								firstRunId={firstRunId}
+								runId={comparison.before.runId}
+								personaId={selectedScreenshotPair.personaId}
+								label={`Before · run #${comparison.before.runId}`}
+								screenshot={selectedScreenshotPair.before}
+							/>
+							{comparison.after
+								? (
+									<ComparisonScreenshotCard
+										key={`after-${comparison.after.runId}-${selectedScreenshotPair.personaId}-${selectedScreenshotPair.after?.step ?? 'none'}`}
+										firstRunId={firstRunId}
+										runId={comparison.after.runId}
+										personaId={selectedScreenshotPair.personaId}
+										label={`After ${comparison.after.round}회차 · run #${comparison.after.runId}`}
+										screenshot={selectedScreenshotPair.after}
+									/>
+								)
+								: <figure className="rd-compare-screenshot-card"><figcaption>After</figcaption><p className="rd-compare-screenshot-feedback">완료된 재실험이 없습니다.</p></figure>}
+						</div>
+					)}
+			</section>
 
 			<section className="rd-compare-card rd-compare-detail">
 				<div className="rd-compare-section-title">
