@@ -154,7 +154,7 @@ export default function RFixes() {
 	const handleDecision = async (decision: ImprovementDecision) => {
 		if (!selectedRunId || !detail || !canDecide || busy) return;
 		if (decision === 'approve' && !window.confirm(
-			'지금은 패치가 적용되지 않은 같은 사이트로 다음 회차를 실행하며 비용이 발생할 수 있습니다. 승인하시겠습니까?',
+			'승인하면 개선안을 적용한 다음 회차를 실행합니다. 대상 페이지나 화면 요소가 달라 패치 적용에 실패할 수 있으며, 실행 비용이 발생할 수 있습니다. 승인하시겠습니까?',
 		)) return;
 		setBusy(true);
 		setDetailError('');
@@ -267,7 +267,7 @@ export default function RFixes() {
 						{canDecide && (
 							<div className="rd-fixes-decision-form">
 								<label>결정 사유 (선택)<textarea value={note} onChange={(event) => setNote(event.target.value)} rows={3} maxLength={1000} /></label>
-								<p>지금은 승인해도 다음 회차에 패치가 적용되지 않고 같은 사이트로 다시 실행됩니다.</p>
+								<p>승인하면 개선안을 다음 회차에 적용해 실행합니다. 대상 페이지나 화면 요소가 달라지면 패치 적용에 실패할 수 있으며, 실행 비용이 발생할 수 있습니다.</p>
 								<div className="rd-fixes-actions">
 									<button className="rd-dark-pill" type="button" disabled={busy} onClick={() => void handleDecision('approve')}>
 										{busy ? '처리 중…' : '승인 및 다음 회차 실행'}
