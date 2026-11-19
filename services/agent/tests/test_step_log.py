@@ -75,6 +75,17 @@ def ran(
     monkeypatch.setattr(orchestrator_module, "run_repository", FakeRunRepository())
     monkeypatch.setattr(orchestrator_module, "run_persona_repository", personas)
     monkeypatch.setattr(orchestrator_module, "audit_log_repository", audits)
+
+    # GACA-170: 기존 Step Log 테스트에는 승인된 개선안이 없다.
+    class FakeImprovementRepository:
+        def get_approved_patches(self, run_id):
+            return []
+
+    monkeypatch.setattr(
+        orchestrator_module,
+        "improvement_repository",
+        FakeImprovementRepository(),
+    )
     monkeypatch.setattr(orchestrator_module, "step_log_writer", CheckingWriter(str(tmp_path)))
     monkeypatch.setattr(
         orchestrator_module,

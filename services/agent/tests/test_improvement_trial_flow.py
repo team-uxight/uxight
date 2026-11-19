@@ -1,6 +1,7 @@
 """GACA-169: 시험 적용 실패 필터링 및 재생성 통합 테스트."""
 
 import asyncio
+import json
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
@@ -370,3 +371,58 @@ def test_error_on_one_page_moves_to_next_evidence_page(monkeypatch, caplog):
     assert generated_on == [broken, good]
     assert [row["patch"]["page_url"] for row in saved[0][1]] == [good]
     assert any(r.levelname == "ERROR" and broken in r.getMessage() for r in caplog.records)
+
+
+class PolishLLM:
+    """교정 LLM 대신. 받은 글의 '개선'을 '고친'으로 바꿔 돌려준다. hang 이면 답하지 않는다."""
+
+    model = "polish-model"
+
+    def __init__(self, hang=False):
+        self.hang = hang
+        self.calls = 0
+
+    async def chat(self, messages, **kwargs):
+        self.calls += 1
+        if self.hang:
+            await asyncio.sleep(60)
+        content = messages[1]["content"]
+        texts = json.loads(content[content.index("{") :])["texts"]
+        fixed = [item["text"].replace("개선", "고친") for item in texts]
+        message = SimpleNamespace(content=json.dumps({"texts": fixed}, ensure_ascii=False))
+        return SimpleNamespace(choices=[SimpleNamespace(finish_reason="stop", message=message)])
+
+
+def test_improvements_are_polished_before_save(monkeypatch):
+    """GACA-148: 저장 전에 개선 이유와 패치 글을 한 번에 교정한다. 패치의 다른 칸은 그대로다."""
+    llm = PolishLLM()
+    monkeypatch.setattr(module, "make_polish_llm", lambda: llm)
+
+    saved, _ = asyncio.run(run_trial(monkeypatch, set(), 1))
+
+    rows = saved[0][1]
+    assert llm.calls == 1
+    assert [row["rationale"] for row in rows] == ["탐색 고친"] * 3
+    assert [row["patch"]["new_text"] for row in rows] == [f"고친 문구 {n}" for n in (1, 2, 3)]
+    assert [row["patch"]["target"] for row in rows] == ["#item1", "#item2", "#item3"]
+    assert all(row["patch"]["page_url"] == URL for row in rows)
+
+
+def test_polish_stays_inside_improvement_time_limit(monkeypatch):
+    """GACA-148: 교정이 답하지 않아도 개선안 단계 상한 안에서 원문으로 저장한다."""
+    from uxight_agent import polish
+
+    monkeypatch.setattr(module, "IMPROVEMENT_TIMEOUT_SECONDS", 0.6)
+    monkeypatch.setattr(polish, "SAVE_MARGIN_SECONDS", 0.2)
+    monkeypatch.setattr(polish, "MIN_SECONDS", 0.05)
+    llm = PolishLLM(hang=True)
+    monkeypatch.setattr(module, "make_polish_llm", lambda: llm)
+
+    async def limited():
+        async with asyncio.timeout(module.IMPROVEMENT_TIMEOUT_SECONDS):
+            return await run_trial(monkeypatch, set(), 1)
+
+    saved, _ = asyncio.run(limited())
+
+    assert llm.calls == 1
+    assert [row["rationale"] for row in saved[0][1]] == ["탐색 개선"] * 3

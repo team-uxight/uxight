@@ -739,6 +739,8 @@ class DomDriver(Driver):
         self._main_navigated = False
         self._new_window_url: str | None = None
         self._headless = headless
+        self._approved_patches: list[dict] = []
+        self._patch_results: list[dict] = []
         self._playwright: Playwright | None = None
         self._browser: Browser | None = None
         self._page: Page | None = None
@@ -960,6 +962,15 @@ class DomDriver(Driver):
             await asyncio.sleep(min(REQUEST_POLL_MS / 1000, max(deadline - loop.time(), 0)))
         self._pending_requests.clear()
 
+    def set_approved_patches(self, patches: list[dict]) -> None:
+        """현재 Persona 실행에서 적용할 승인 패치 목록을 설정한다."""
+        self._approved_patches = list(patches)
+
+    @property
+    def patch_results(self) -> list[dict]:
+        """이번 Persona 실행에서 실제로 시도한 패치 결과 사본."""
+        return list(self._patch_results)
+
     async def observe(self) -> Observation:
         self._left_url = None
         observation = await self._observe_page()
@@ -998,6 +1009,11 @@ class DomDriver(Driver):
                 # 모으기 전에 화면이 멎기를 기다린다 (GACA-157). 허용 판정 뒤라 허용 밖 페이지에서는
                 # 기다리지 않고, 되돌린 페이지에서는 다시 기다린다.
                 await self._wait_still()
+                if self._approved_patches and is_allowed(page.url, self._allowed_hosts):
+                    from uxight_agent.patch.approved_patches import apply_approved_patches
+
+                    results = await apply_approved_patches(page, self._approved_patches)
+                    self._patch_results.extend(results)
                 collected = await self._collect_elements(page)
                 url = collected["url"]
                 if is_allowed(url, self._allowed_hosts):

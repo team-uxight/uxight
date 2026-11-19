@@ -177,6 +177,10 @@ class FakeImprovementRepository:
             raise RuntimeError("improvement db down")
         self.rows.append((run_id, improvements))
 
+    def get_approved_patches(self, run_id: int) -> list[dict]:
+        """기존 Orchestrator 테스트에서는 승인된 패치가 없다."""
+        return []
+
 
 class FakeAuditLogRepository:
     def __init__(self) -> None:
@@ -237,6 +241,10 @@ def fake_driver_class(browsers: Browsers) -> type[Driver]:
                 browsers.open -= 1
             if browsers.close_error:
                 raise browsers.close_error
+
+        def set_approved_patches(self, patches: list[dict]) -> None:
+            """테스트용 Driver에 승인 패치 목록을 저장한다."""
+            self.approved_patches = list(patches)
 
     return FakeDriver
 
@@ -1806,6 +1814,40 @@ def test_findings_get_llm_summary(
     assert "- p1 step 2: URL 경로 /" in facts
 
 
+@pytest.mark.parametrize(
+    ("polish_reply", "saved"),
+    [
+        (
+            json.dumps({"texts": ["p1은 step 2에서 step 상한에 닿아 과제를 마치지 못했다."]}),
+            "p1은 step 2에서 step 상한에 닿아 과제를 마치지 못했다.",
+        ),
+        (None, "p1은 step 2에서 step 상한에 닿아 과제를 끝내지 못했다."),
+    ],
+    ids=["polished", "polish-failed"],
+)
+def test_llm_summary_is_polished_before_save(
+    fakes: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    scripted_llm,
+    polish_reply: str | None,
+    saved: str,
+) -> None:
+    # 저장 전에 LLM 이 쓴 설명을 교정한다(GACA-148). 교정이 실패하면 원문으로 저장하고 회차는 done.
+    llm, _ = scripted_llm("p1은 step 2에서 step 상한에 닿아 과제를 끝내지 못했다.")
+    polish_llm, polish_requests = scripted_llm(polish_reply)
+    monkeypatch.setattr(orchestrator_module, "make_summary_llm", lambda: llm)
+    monkeypatch.setattr(orchestrator_module, "make_polish_llm", lambda: polish_llm)
+    snap = snapshot([persona(1)], max_steps=2)
+    snap.task["success_url"] = "https://example.com/goal"
+
+    asyncio.run(run(fakes, RUN_ID, snap))
+
+    [(_, findings)] = fakes.findings.rows
+    assert findings[0].summary == saved
+    assert fakes.runs.status == "done"
+    assert len(polish_requests) == 1
+
+
 class FirstStepDoneDecider(Decider):
     """첫 step 에서 done 을 낸다."""
 
@@ -2402,3 +2444,125 @@ def test_heartbeat_continues_during_run_finalization(
 
     assert fakes.runs.status == "done"
     assert RUN_ID not in orchestrator._run_tokens
+
+
+def test_gaca170_patch_results_saved_before_run_done(
+    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """승인된 패치의 Persona별 결과를 집계해 회차 완료 전에 저장한다."""
+    from dataclasses import replace
+
+    approved = {
+        "improvement_id": 10,
+        "patch_kind": "relabel",
+        "patch": {
+            "target": "#menu",
+            "new_text": "장학금 안내",
+            "page_url": "https://example.com/",
+        },
+    }
+
+    monkeypatch.setattr(
+        fakes.improvements,
+        "get_approved_patches",
+        lambda run_id: [approved],
+    )
+
+    events = []
+
+    class FakePatchVersionRepository:
+        def insert_all(self, run_id, rows):
+            events.append(("save", run_id, rows))
+
+    monkeypatch.setattr(
+        orchestrator_module,
+        "patch_version_repository",
+        FakePatchVersionRepository(),
+    )
+
+    async def skip_findings(run_id, statuses, snap):
+        return None
+
+    monkeypatch.setattr(
+        RunOrchestrator,
+        "_save_findings",
+        staticmethod(skip_findings),
+    )
+
+    original_mark_done = fakes.runs.mark_done
+
+    def record_done(run_id, success_rate):
+        events.append(("done", run_id))
+        return original_mark_done(run_id, success_rate)
+
+    monkeypatch.setattr(fakes.runs, "mark_done", record_done)
+
+    fakes.personas.statuses = {1: "done", 2: "done"}
+
+    runner = RunOrchestrator()
+    runner._patch_persona_results[RUN_ID] = {
+        1: [{"improvement_id": 10, "applied": True, "fail_reason": None}],
+        2: [
+            {
+                "improvement_id": 10,
+                "applied": False,
+                "fail_reason": "Target not found",
+            }
+        ],
+    }
+
+    snap = replace(snapshot([persona(1), persona(2)]), mode="diagnose")
+    asyncio.run(runner._finish_run(RUN_ID, snap))
+
+    assert [event[0] for event in events] == ["save", "done"]
+    assert events[0][1] == RUN_ID
+    assert len(events[0][2]) == 1
+    assert events[0][2][0]["improvement_id"] == 10
+    assert events[0][2][0]["applied"] is False
+    assert "persona=2" in events[0][2][0]["fail_reason"]
+    assert fakes.runs.status == "done"
+
+
+def test_gaca170_patch_save_failure_prevents_run_done(
+    fakes: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """패치 기록 저장에 실패하면 회차를 done으로 표시하지 않는다."""
+    from dataclasses import replace
+
+    approved = {
+        "improvement_id": 10,
+        "patch_kind": "highlight",
+        "patch": {
+            "target": "#menu",
+            "style": "outline",
+            "page_url": "https://example.com/",
+        },
+    }
+
+    monkeypatch.setattr(
+        fakes.improvements,
+        "get_approved_patches",
+        lambda run_id: [approved],
+    )
+
+    class FailingPatchVersionRepository:
+        def insert_all(self, run_id, rows):
+            raise RuntimeError("patch_versions db unavailable")
+
+    monkeypatch.setattr(
+        orchestrator_module,
+        "patch_version_repository",
+        FailingPatchVersionRepository(),
+    )
+
+    fakes.personas.statuses = {1: "done"}
+
+    runner = RunOrchestrator()
+    runner._patch_persona_results[RUN_ID] = {
+        1: [{"improvement_id": 10, "applied": True, "fail_reason": None}]
+    }
+
+    snap = replace(snapshot([persona(1)]), mode="diagnose")
+    asyncio.run(runner._finish_run(RUN_ID, snap))
+
+    assert fakes.runs.status == "failed"
