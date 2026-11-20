@@ -1,4 +1,4 @@
-import { API_BASE_URL, apiErrorMessage, authenticatedFetch } from '../auth';
+import { API_BASE_URL, apiErrorMessage, authenticatedFetch, type ImprovementPatchKind } from '../auth';
 
 export type Experiment = {
 	firstRunId: number;
@@ -36,6 +36,36 @@ export type ExperimentRound = {
 	createdAt: string;
 	finishedAt: string | null;
 	metrics: RoundMetrics | null;
+};
+
+export type ComparisonScreenshot = {
+	personaId: number;
+	step: number;
+};
+
+export type Comparison = {
+	experiment: {
+		projectTitle: string;
+		taskGoal: string;
+		mode: string;
+		state: string;
+	};
+	before: {
+		runId: number;
+		metrics: RoundMetrics;
+		screenshots: ComparisonScreenshot[];
+	};
+	after: {
+		runId: number;
+		round: number;
+		metrics: RoundMetrics;
+		screenshots: ComparisonScreenshot[];
+	} | null;
+	patches: {
+		round: number;
+		patchKind: ImprovementPatchKind;
+		applied: boolean;
+	}[];
 };
 
 export type ExperimentRounds = {
@@ -141,6 +171,45 @@ function isExperimentRound(value: unknown): value is ExperimentRound {
 		'metrics' in value && (value.metrics === null || isRoundMetrics(value.metrics));
 }
 
+function isComparisonScreenshot(value: unknown): value is ComparisonScreenshot {
+	return typeof value === 'object' &&
+		value !== null &&
+		'personaId' in value && typeof value.personaId === 'number' &&
+		'step' in value && typeof value.step === 'number';
+}
+
+function isComparisonSide(value: unknown): value is Comparison['before'] {
+	return typeof value === 'object' &&
+		value !== null &&
+		'runId' in value && typeof value.runId === 'number' &&
+		'metrics' in value && isRoundMetrics(value.metrics) &&
+		'screenshots' in value && Array.isArray(value.screenshots) && value.screenshots.every(isComparisonScreenshot);
+}
+
+function isComparisonAfter(value: unknown): value is NonNullable<Comparison['after']> {
+	return isComparisonSide(value) && 'round' in value && typeof value.round === 'number';
+}
+
+function isComparison(value: unknown): value is Comparison {
+	return typeof value === 'object' &&
+		value !== null &&
+		'experiment' in value &&
+		typeof value.experiment === 'object' &&
+		value.experiment !== null &&
+		'projectTitle' in value.experiment && typeof value.experiment.projectTitle === 'string' &&
+		'taskGoal' in value.experiment && typeof value.experiment.taskGoal === 'string' &&
+		'mode' in value.experiment && typeof value.experiment.mode === 'string' &&
+		'state' in value.experiment && typeof value.experiment.state === 'string' &&
+		'before' in value && isComparisonSide(value.before) &&
+		'after' in value && (value.after === null || isComparisonAfter(value.after)) &&
+		'patches' in value && Array.isArray(value.patches) && value.patches.every((patch: unknown) =>
+			typeof patch === 'object' &&
+			patch !== null &&
+			'round' in patch && typeof patch.round === 'number' &&
+			'patchKind' in patch && ['relabel', 'move', 'highlight', 'help_text'].includes(String(patch.patchKind)) &&
+			'applied' in patch && typeof patch.applied === 'boolean');
+}
+
 function isExperimentStats(value: unknown): value is ExperimentStats {
 	return typeof value === 'object' &&
 		value !== null &&
@@ -196,6 +265,39 @@ export async function fetchExperimentRounds(firstRunId: number): Promise<Experim
 		throw new Error('서버에서 올바르지 않은 실험 회차 정보를 받지 못했습니다.');
 	}
 	return { rounds: body.rounds, awaitingApproval: body.awaitingApproval };
+}
+
+export async function fetchComparison(firstRunId: number): Promise<Comparison> {
+	const response = await authenticatedFetch(`${API_BASE_URL}/api/runs/${firstRunId}/comparison`);
+	if (!response.ok) {
+		throw new Error(await apiErrorMessage(response, '비교 결과를 불러오지 못했습니다.'));
+	}
+	const body: unknown = await response.json();
+	if (!isComparison(body)) {
+		throw new Error('서버에서 올바르지 않은 비교 결과를 받지 못했습니다.');
+	}
+	return body;
+}
+
+export async function fetchComparisonScreenshot(
+	firstRunId: number,
+	runId: number,
+	screenshot: ComparisonScreenshot,
+	signal: AbortSignal,
+): Promise<Blob> {
+	const query = new URLSearchParams({
+		runId: String(runId),
+		personaId: String(screenshot.personaId),
+		step: String(screenshot.step),
+	});
+	const response = await authenticatedFetch(
+		`${API_BASE_URL}/api/runs/${firstRunId}/comparison/screenshots?${query}`,
+		{ signal },
+	);
+	if (!response.ok) {
+		throw new Error(await apiErrorMessage(response, '스크린샷을 불러오지 못했습니다.'));
+	}
+	return response.blob();
 }
 
 export async function cancelExperiment(firstRunId: number): Promise<void> {
