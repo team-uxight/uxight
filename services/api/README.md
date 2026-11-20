@@ -13,6 +13,7 @@
 
 - `src/main/resources/db/migration/` — Flyway. `V1` 은 최종 스키마(`schema_blueprint.sql`) 중 walking skeleton 이 쓰는 7개 테이블. 새 테이블 · 컬럼은 `V2__…` 부터.
 - `src/main/resources/db/seed/R__seed_local.sql` — `local` 프로필(기본값)에서만 적용되는 테스트 데이터: 계정 `test@uxight.com`, 공용 Persona 1번.
+- `sample-data/` — 완료보고서 제출용 샘플 데이터 · DB 백업(GACA-196). PM 이 dev 서버에서 한 번 돌린다. Flyway 경로 밖이라 기동 때 적용되지 않는다.
 
 ## API 직접 호출해 보기
 
