@@ -29,7 +29,8 @@ function getScreenshotPairs(comparison: Comparison): ScreenshotPair[] {
 		pair.after = screenshot;
 		pairs.set(screenshot.personaId, pair);
 	}
-	return [...pairs.values()];
+	return [...pairs.values()].sort((a, b) =>
+		Number(Boolean(b.before && b.after)) - Number(Boolean(a.before && a.after)));
 }
 
 type ComparisonScreenshotCardProps = {
@@ -89,8 +90,7 @@ function formatMetric(value: number | null, unit = '', maximumFractionDigits = 1
 	return value === null ? '집계 안 됨' : `${formatNumber(value, maximumFractionDigits)}${unit}`;
 }
 
-function formatChange(value: number | null): string {
-	if (value === null) return '비교할 완료 회차가 없습니다.';
+function formatChange(value: number): string {
 	return `${value > 0 ? '+' : ''}${formatNumber(value)}%p`;
 }
 
@@ -178,6 +178,32 @@ export default function RCompare() {
 		setParticipantResults((current) => current.map((item, itemIndex) => itemIndex === index ? result : item));
 	};
 
+	const experimentSelector = firstRunId !== null && (
+		<section className="rd-compare-selector" aria-label="비교 대상 실험">
+			<label htmlFor="compare-experiment">비교 대상 실험</label>
+			<select
+				id="compare-experiment"
+				value={firstRunId}
+				onChange={(event) => {
+					setFirstRunId(Number(event.target.value));
+					setComparison(null);
+					setLoadError('');
+					setLoadState('loading-comparison');
+					setParticipantResults([]);
+					setNotice('');
+					setSelectedPersonaId(null);
+				}}
+			>
+				{experiments.map((item) => (
+					<option key={item.firstRunId} value={item.firstRunId}>
+						실험 #{item.firstRunId} · {item.projectTitle} · {item.taskGoal}
+					</option>
+				))}
+			</select>
+			{comparison && <span>Before #{comparison.before.runId}{comparison.after ? ` · After ${comparison.after.round}회차` : ' · 재실험 없음'}</span>}
+		</section>
+	);
+
 	if (loadState === 'loading-experiments' || loadState === 'loading-comparison') {
 		return <section className="rd-compare"><p className="rd-compare-feedback" role="status">비교 데이터를 불러오는 중입니다.</p></section>;
 	}
@@ -195,6 +221,7 @@ export default function RCompare() {
 		return (
 			<section className="rd-compare" aria-labelledby="compare-title">
 				<header className="rd-compare-heading"><h1 id="compare-title">Compare</h1></header>
+				{experimentSelector}
 				<p className="rd-compare-feedback is-error" role="alert">{loadError || '비교 결과를 불러오지 못했습니다.'}</p>
 			</section>
 		);
@@ -218,29 +245,7 @@ export default function RCompare() {
 				</div>
 			</header>
 
-			<section className="rd-compare-selector" aria-label="비교 대상 실험">
-				<label htmlFor="compare-experiment">비교 대상 실험</label>
-				<select
-					id="compare-experiment"
-					value={firstRunId}
-					onChange={(event) => {
-						setFirstRunId(Number(event.target.value));
-						setComparison(null);
-						setLoadError('');
-						setLoadState('loading-comparison');
-						setParticipantResults([]);
-						setNotice('');
-						setSelectedPersonaId(null);
-					}}
-				>
-					{experiments.map((item) => (
-						<option key={item.firstRunId} value={item.firstRunId}>
-							실험 #{item.firstRunId} · {item.projectTitle} · {item.taskGoal}
-						</option>
-					))}
-				</select>
-				<span>Before #{comparison.before.runId}{comparison.after ? ` · After ${comparison.after.round}회차` : ' · 재실험 없음'}</span>
-			</section>
+			{experimentSelector}
 
 			<div className="rd-compare-metrics">
 				<article className="rd-compare-card">
@@ -297,7 +302,11 @@ export default function RCompare() {
 						<strong>실사용자</strong>
 						<div className="rd-compare-bar-track"><span className="is-human" style={{ width: `${realSuccessRate ?? 0}%` }}>{realSuccessRate !== null && <b>{realSuccessRate}%</b>}</span></div>
 					</div>
-					<p className="rd-compare-hint">AI 변화: {formatChange(rateChange)} · AI After와 입력 결과 차이: {formatChange(humanGap)}</p>
+					<p className="rd-compare-hint">
+						AI 변화: {rateChange !== null ? formatChange(rateChange) : comparison.after ? '집계 안 됨' : '비교할 완료 회차가 없습니다.'}
+						{' · '}AI After와 입력 결과 차이: {realSuccessRate === null ? '실사용자 결과 입력 없음' : humanGap !== null ? formatChange(humanGap) : comparison.after ? '집계 안 됨' : '비교할 완료 회차가 없습니다.'}
+					</p>
+					<p className="rd-compare-hint">한 번 돌린 값이라 이 차이를 개선안의 효과로 볼 수 없습니다.</p>
 				</section>
 			</div>
 
